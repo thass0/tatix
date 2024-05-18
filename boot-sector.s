@@ -6,11 +6,18 @@
         mov bx, before_switch_msg
         call print_string_16
 
+        mov bx, 0x9000          ; Some 4096-byte aligned address after the boot sector
+        call page32_setup_dir
+
+        mov cr3, ebx            ; MMU will find the page directory in cr3
+
         cli                     ; Can't have interrupts during the switch
         lgdt [gdt_pseudo_descriptor]
-        ;; Setting the LSB it cr0 causes the switch
+
+        ;; Setting cr0.PG (bit 31) enables paging
+        ;; Setting cr0.PE (bit 0) enables protected mode
         mov eax, cr0
-        or eax, 1
+        or eax, 1 << 31 | 1
         mov cr0, eax
 
         ;; The far jump into the code segment from the new GDT flushes
@@ -18,13 +25,14 @@
         ;; and updates the cs register with the new code segment.
         jmp CODE_SEG:start_prot_mode
 
-%include "print-string.s"
 %include "gdt.s"
-
+%include "page32.s"
+%include "print-string.s"
 
         [bits 32]
 start_prot_mode:
-
+        mov bx, after_switch_msg
+        call print_string_32
         ;; Old segments are now meaningless
         mov ax, DATA_SEG
         mov ds, ax

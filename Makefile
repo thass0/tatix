@@ -3,7 +3,7 @@
 BOOT_IMAGE := boot-sector.bin
 QEMU := qemu-system-x86_64 -no-reboot
 
-$(BOOT_IMAGE): boot-sector.s print-string.s gdt.s
+$(BOOT_IMAGE): boot-sector.s print-string.s gdt.s page32.s
 	nasm $< -f bin -o $@
 
 boot: $(BOOT_IMAGE)
