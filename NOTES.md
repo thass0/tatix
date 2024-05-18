@@ -1,6 +1,7 @@
 The most useful unfinished document in existence:
 
 [Writing a Simple Operating System -- from Scratch](https://www.cs.bham.ac.uk/~exr/lectures/opsys/10_11/lectures/os-dev.pdf)
+[Guide OS (1): A Guide to Developing an 64-Bit Operating System on x86](https://codetector.org/post/guideos/1_intro_and_setuup/)
 
 In 16-bit real mode, everything is nice and simple. The world is good and we are happy.
 But at once evil programs appear and we realize that a means to protect our memory is

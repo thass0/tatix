@@ -24,7 +24,7 @@ print_string_16_return:
         ;; Writes a string null-terminated whose address is found in bx straight to the VGA buffer.
 print_string_32:
         pusha
-
+        
         VGA_BUF equ 0xb8000
         WB_COLOR equ 0xf
 
