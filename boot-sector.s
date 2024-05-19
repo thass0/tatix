@@ -1,5 +1,13 @@
+TOTAL_SECTORS_NUM equ 10        ; This is how many sectors are loaded into RAM in total
+SECTOR_SIZE equ 512
+BOOT_SEC_LOAD_ADDR equ 0x7c00
+
+        ;;;;;;;;;;;;;;;;;
+        ;; First stage ;;
+        ;;;;;;;;;;;;;;;;;
+
         ;; BIOS loads this boot sector to address 0x7c00
-        [org 0x7c00]
+        [org BOOT_SEC_LOAD_ADDR]
         [bits 16]
 
         call a20_check
@@ -8,6 +16,16 @@
 
         mov bx, msg_entered_real_mode
         call print_string_16
+
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ;; Load the second stage of the bootloader using BIOS ;;
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+        mov si, disk_address_packet
+        mov ah, 0x42
+        mov dl, 0x80
+        int 0x13
+        jc error_reading_disk
 
         ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
         ;; Load GDT and switch to protected mode ;;
@@ -26,6 +44,19 @@
         ;; and updates the cs register with the new code segment.
         jmp CODE_SEG32:start_prot_mode
 
+error_reading_disk:
+        ;; After the interrupt, [dap_sectors_num] is the number of sectors actually read.
+        ;; The error (reason why carry bit is set) might be that the number of sectors
+        ;; read doesn't match the number of sectors requested.
+        cmp word [dap_sectors_num], (TOTAL_SECTORS_NUM - 1)
+        jne error_num_sectors_read
+        mov bx, msg_error_reading_disk
+        call print_string_16
+        jmp end16
+error_num_sectors_read:
+        mov bx, msg_error_num_sectors_read
+        call print_string_16
+        jmp end16
 error_a20_line_not_set:
         mov bx, msg_a20_line_not_set
         call print_string_16
@@ -33,6 +64,32 @@ end16:
         hlt
         jmp end16
 
+%include "a20.s"
+%include "print-string.s"
+%include "gdt32.s"
+
+        align 4
+disk_address_packet:
+        db 0x10                 ; Size of packet
+        db 0                    ; Reserved, always 0
+dap_sectors_num:
+        dw (TOTAL_SECTORS_NUM - 1) ; Number of sectors to read, the first one was loaded as the boot sector already
+        dd (BOOT_SEC_LOAD_ADDR + SECTOR_SIZE) ; Read destination address
+        dq 1                    ; Disk block to start at (skip boot sector in block 0)
+
+msg_entered_real_mode:  db "Entered 16-bit real mode", 13, 10, 0
+msg_a20_line_not_set:   db "Error: a20 line is clear", 13, 10, 0
+msg_error_reading_disk: db "Error: failed to read disk with int 0x13/ah=0x40", 13, 10, 0
+msg_error_num_sectors_read:     db "Error: number of sectors requested doesn't match number of sectors read", 13, 10, 0
+
+        ;; End of the boot sector:
+times (SECTOR_SIZE - 2) - ($ - $$) db 0
+dw 0xaa55
+
+
+        ;;;;;;;;;;;;;;;;;;
+        ;; Second stage ;;
+        ;;;;;;;;;;;;;;;;;;
 
         [bits 32]
 start_prot_mode:
@@ -108,15 +165,10 @@ end64:
         jmp end64
 
 
-%include "print-string.s"
-%include "gdt32.s"
 %include "gdt64.s"
-%include "a20.s"
 %include "paging.s"
 
-msg_entered_real_mode:          db "Entered real mode", 13, 10, 0
 msg_switched_to_comp_mode:      db "Entered 64-bit compatibility mode", 0
-msg_a20_line_not_set:           db "Error: a20 line not set", 13, 10, 0
 
-times 510 - ($ - $$) db 0
-dw 0xaa55        
+        ;; Padding so that disk reads don't fail
+times (SECTOR_SIZE * TOTAL_SECTORS_NUM) - ($ - $$) db 0

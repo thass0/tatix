@@ -20,6 +20,10 @@ TODO: Do I need to load extra stuff from the disk?
 
 TODO: Use CPUID to check long mode compatibility
 
+TODO: Jump at the very beginning to make sure the address is right.
+See https://en.wikipedia.org/wiki/BIOS#Boot_environment and
+https://github.com/Codetector1374/GuideOS/blob/255c91632da6c5c05ec11649fbc250e4d338eff2/stage1_bootloader/src/asm/init.s#L14
+
 # Links
 
 [Writing a Simple Operating System -- from Scratch](https://www.cs.bham.ac.uk/~exr/lectures/opsys/10_11/lectures/os-dev.pdf)
