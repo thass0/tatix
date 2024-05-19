@@ -16,8 +16,6 @@ TODO: Before the switch to protected mode, we disable interrupts. We need to
 re-enable them manually. Before doing so, we also need to provide an interrupt
 descriptor table.
 
-TODO: Do I need to load extra stuff from the disk?
-
 TODO: Use CPUID to check long mode compatibility
 
 TODO: Jump at the very beginning to make sure the address is right.
