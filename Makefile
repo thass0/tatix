@@ -1,5 +1,8 @@
 .PHONY = clean boot
 
+# Configure how many sectors the bootloader should read from the boot disk
+READ_SECTORS_NUM ?= 64
+
 QEMU := qemu-system-x86_64 -no-reboot
 NASM := nasm -dSECTOR_SIZE=512 -dBOOT_LOAD_ADDR=0x7c00
 
@@ -11,7 +14,7 @@ $(BOOT_IMAGE): $(BUILD_DIR)/stage1.bin $(BUILD_DIR)/stage2.bin $(BUILD_DIR)/kern
 	cat $^ > $@
 
 $(BUILD_DIR)/stage1.bin: stage1.s | $(BUILD_DIR)
-	$(NASM) $< -f bin -o $@
+	$(NASM) -dREAD_SECTORS_NUM=$(READ_SECTORS_NUM) $< -f bin -o $@
 
 $(BUILD_DIR)/stage2.bin: stage2.s | $(BUILD_DIR)
 	$(NASM) $< -f bin -o $@

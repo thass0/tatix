@@ -1,5 +1,3 @@
-        READ_SECTORS_NUM equ 127
-        
         ;; BIOS loads this boot sector to address 0x7c00
         [bits 16]
         [org BOOT_LOAD_ADDR]
