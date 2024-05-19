@@ -18,7 +18,7 @@ NASM := nasm -dSECTOR_SIZE=512 -dBOOT_LOAD_ADDR=0x7c00 -I$(BOOTLOADER_DIR)
 CPPFLAGS := -MMD -Iinclude/
 CFLAGS := -std=c99 -ffreestanding -m64 -fno-builtin -nostdinc
 
-BOOT_IMAGE := image.bin
+BOOT_IMAGE := $(BUILD_DIR)/image.bin
 
 $(BOOT_IMAGE): $(BUILD_DIR)/stage1.bin $(BUILD_DIR)/stage2.bin $(BUILD_DIR)/kernel.bin
 	cat $^ > $@

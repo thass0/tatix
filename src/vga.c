@@ -1,4 +1,5 @@
 #include <vga.h>
+#include <mem.h>
 
 struct vga_char {
     char ch;
@@ -18,7 +19,7 @@ static inline int vga_print_internal(struct str str, vga_color_attr color_attr, 
         return -1;
 
     i64 offset = (row * VGA_SCREEN_WIDTH) + col;
-    for (int i = 0; i < str.len; i++) {
+    for (i32 i = 0; i < str.len; i++) {
         vga_buffer[i + offset].ch = str.dat[i];
         vga_buffer[i + offset].attr = color_attr;
     }
@@ -32,6 +33,13 @@ static inline int vga_print_internal(struct str str, vga_color_attr color_attr, 
     if (add_linefeed) {
         col = 0;
         row += 1;
+    }
+
+    // This is scrolling
+    if (row > VGA_SCREEN_HEIGHT) {
+        row -= 1;
+        // Move all memory in the buffer one line back
+        mem_move_volatile(vga_buffer - VGA_SCREEN_WIDTH, vga_buffer, VGA_SCREEN_HEIGHT * VGA_SCREEN_WIDTH * 2);
     }
 
     return 0;
