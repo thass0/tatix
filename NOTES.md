@@ -1,8 +1,3 @@
-The most useful unfinished document in existence:
-
-[Writing a Simple Operating System -- from Scratch](https://www.cs.bham.ac.uk/~exr/lectures/opsys/10_11/lectures/os-dev.pdf)
-[Guide OS (1): A Guide to Developing an 64-Bit Operating System on x86](https://codetector.org/post/guideos/1_intro_and_setuup/)
-
 In 16-bit real mode, everything is nice and simple. The world is good and we are happy.
 But at once evil programs appear and we realize that a means to protect our memory is
 desperately needed.
@@ -26,18 +21,8 @@ descriptor table.
 
 TODO: Do I need to load extra stuff from the disk?
 
-# Switch to 64-bit mode
+# Links
 
-Section 10.8.5 in Volume 3A of the IA-32 Manual:
-
-> The operating system must be in protected mode with paging enabled before attempting to initialize IA-32e mode
-
-NOTE: When initializing paging, the instructions that do so must be identity mapped. That is,
-their addresses can't change when paging is enabled.
-
-Steps:
-
-1. Set up the most basic page table and use it to enable paging and protected
-   mode at the same time (see 10.8.3, Volume 3A)
-2. Set up a 4-level page table following section 10.8.5
-3. Switch to 64-bit mode
+[Writing a Simple Operating System -- from Scratch](https://www.cs.bham.ac.uk/~exr/lectures/opsys/10_11/lectures/os-dev.pdf)
+[Guide OS (1): A Guide to Developing an 64-Bit Operating System on x86](https://codetector.org/post/guideos/1_intro_and_setuup/)
+[Setting Up Long Mode](https://wiki.osdev.org/Setting_Up_Long_Mode)
