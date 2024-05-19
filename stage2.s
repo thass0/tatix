@@ -1,9 +1,7 @@
         [org BOOT_LOAD_ADDR + SECTOR_SIZE]
         [bits 16]
         
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ;; Load GDT and switch to protected mode ;;
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ;; Load GDT and switch to protected mode
 
         cli                     ; Can't have interrupts during the switch
         lgdt [gdt32_pseudo_descriptor]
@@ -33,9 +31,7 @@ start_prot_mode:
         mov ebp, 0x90000
         mov esp, ebp
 
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ;; Build 4 level page table and switch to long mode ;;
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ;; Build 4 level page table and switch to long mode
 
         mov ebx, 0x1000
         call page64_build_4_level_page_table
@@ -60,7 +56,7 @@ start_prot_mode:
         mov cr0, eax
 
         mov ebx, msg_switched_to_comp_mode
-        call print_string_32
+        call print_string32
 
         ;; New GDT has the 64-bit segment flag set
         lgdt [gdt64_pseudo_descriptor]
@@ -90,10 +86,10 @@ end64:
         hlt
         jmp end64
 
+%include "print-string32.s"
 %include "gdt32.s"
 %include "gdt64.s"
 %include "paging.s"
-%include "print-string.s"       ; TODO: Split the printing functions
         
 msg_switched_to_comp_mode:      db "Entered 64-bit compatibility mode", 0
 
