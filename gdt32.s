@@ -20,13 +20,13 @@
         ;; Base address of GDT should be aligned on an eight-byte boundary
         align 8
         
-gdt_start:
+gdt32_start:
         ;; 8-byte null descriptor (index 0).
         ;; Used to catch translations with a null selector.
         dd 0x0
         dd 0x0
 
-gdt_code_segment:
+gdt32_code_segment:
         ;; 8-byte code segment descriptor (index 1).
         ;; First 16 bits of segment limit
         dw 0xffff
@@ -47,7 +47,7 @@ gdt_code_segment:
         ;; Last 8 bits of segment base address
         db 0x00
 
-gdt_data_segment:
+gdt32_data_segment:
         ;; Only differences are explained ...
         dw 0xffff
         dw 0x0000
@@ -57,16 +57,16 @@ gdt_data_segment:
         db 11001111b
         dw 0x00
 
-gdt_end:
+gdt32_end:
 
         ;; Value for GDTR register that describes the above GDT
-gdt_pseudo_descriptor:
+gdt32_pseudo_descriptor:
         ;; A limit value of 0 results in one valid byte. So, the limit value of our
         ;; GDT is its length in bytes minus 1.
-        dw gdt_end - gdt_start - 1
+        dw gdt32_end - gdt32_start - 1
         ;; Start address of the GDT
-        dd gdt_start
+        dd gdt32_start
 
 
-CODE_SEG equ gdt_code_segment - gdt_start
-DATA_SEG equ gdt_data_segment - gdt_start
+CODE_SEG32 equ gdt32_code_segment - gdt32_start
+DATA_SEG32 equ gdt32_data_segment - gdt32_start
