@@ -1,7 +1,7 @@
 .PHONY = clean boot fmt
 
 # Configure how many sectors the bootloader should read from the boot disk
-READ_SECTORS_NUM ?= 64
+READ_SECTORS_NUM ?= 127
 
 BUILD_DIR := build
 BOOTLOADER_DIR := bootloader

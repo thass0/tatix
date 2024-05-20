@@ -19,12 +19,17 @@ typedef __UINT32_TYPE__ u32;
 typedef __UINT64_TYPE__ u64;
 // We only do signed pointer and size types
 typedef __INTPTR_TYPE__ ptr;
-typedef __PTRDIFF_TYPE__ size;
+typedef __UINTPTR_TYPE__ uptr;
+typedef __PTRDIFF_TYPE__ sz;
 typedef float f32;
 typedef double f64;
-typedef u8 bool;
+typedef u8 bool;                // Don't care what the C++ compiler thinks of this
 
 #define true 1
 #define false 0
+
+#define sizeof(x) ((sz)sizeof(x))
+#define countof(arr) (sizeof(arr) / sizeof(*(arr))) // Number of elements in array
+#define lengthof(str) (countof(str) - 1)            // Number of characters in string (excluding NULL byte)
 
 #endif // _BASE_H_
