@@ -1,11 +1,11 @@
 #include <string.h>
 #include <vga.h>
 #include <arena.h>
+#include <fmt.h>
 
 #include <assert.h>
 
 // TODO:
-// 1. String formatter (depends on (1))
 // 2. Printing to serial console (create a unified kprint that prints to console and vga)
 
 #define global_kernel_arena_buffer_size 10000
@@ -20,19 +20,33 @@ void kernel_start(void)
 
     vga_clear_screen();
 
-    vga_println(STR("Hello, world!"));
-    vga_println_with_color(STR("What will you do here?"), VGA_COLOR(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+    struct arena scratch = {
+        .beg = NEW(&arn, u8, 100),
+        .end = scratch.beg + 100,
+    };
 
-    for (i32 i = 0; i < 17; i++)
-        vga_println(STR("Don't know what to print"));
+    struct fmt_buf buf = NEW_FMT_BUF(&arn, 4000);
 
-    vga_println(STR("This is a really long line. In fact, it's so long that it's difficult "
-                    "to think of a name for it! Nonetheless, we need to go ahead and make this "
-                    "line even longer so that we can find out if wrapping works!"));
-    
-    vga_println_with_color(STR("Another cyan message 1"), VGA_COLOR(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
-    vga_println_with_color(STR("Another cyan message 2."), VGA_COLOR(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
-    vga_println_with_color(STR("Another cyan message 3."), VGA_COLOR(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
-    assert(NULL != NULL);
-    vga_println(STR("Hello world"));
+    fmt_str(STR("Wow, this is the smallest number in the world: "), &buf);
+    fmt_i64(-9223372036854775807, &buf, scratch);
+    fmt_str(STR(" And this is a pointer: "), &buf);
+    fmt_ptr(&buf, &buf);
+    vga_println(FMT_2_STR(buf));
+    FMT_CLEAR(&buf);
+
+    fmt_str(STR("And here are all the types:"), &buf);
+    vga_println(FMT_2_STR(buf));
+    FMT_CLEAR(&buf);
+
+    fmt_i8(-1, &buf, scratch); fmt_str(STR(", "), &buf);
+    fmt_i16(-2, &buf, scratch); fmt_str(STR(", "), &buf);
+    fmt_i32(-3, &buf, scratch); fmt_str(STR(", "), &buf);
+    fmt_i64(-4, &buf, scratch); fmt_str(STR(", "), &buf);
+    fmt_sz(-646464, &buf, scratch); fmt_str(STR(", "), &buf);
+    fmt_u8(1, &buf, scratch); fmt_str(STR(", "), &buf);
+    fmt_u16(2, &buf, scratch); fmt_str(STR(", "), &buf);
+    fmt_u32(3, &buf, scratch); fmt_str(STR(", "), &buf);
+    fmt_u64(4, &buf, scratch); fmt_str(STR(", "), &buf);
+    fmt_ptr((void*)0xdeadbeef, &buf);
+    vga_println(FMT_2_STR(buf));
 }

@@ -20,11 +20,3 @@ void *alloc(struct arena *arn, sz size, sz align, sz count)
 
     return p;
 }
-
-sz free_space(struct arena *arn)
-{
-    if (arn == NULL)
-        return -1;
-
-    return arn->end - arn->beg;
-}
