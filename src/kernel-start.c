@@ -6,7 +6,7 @@
 #include <assert.h>
 
 // TODO:
-// 2. Printing to serial console (create a unified kprint that prints to console and vga)
+// - Printing to serial console (create a unified kprint that prints to console and vga)
 
 #define global_kernel_arena_buffer_size 10000
 u8 global_kernel_arena_buffer[global_kernel_arena_buffer_size];

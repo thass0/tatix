@@ -11,15 +11,15 @@
 // that means it intends to make a temporary, internal allocation.
 
 struct arena {
-    u8* beg;
-    u8* end;
+    u8 *beg;
+    u8 *end;
 };
 
 // Allocate `count` items out of the arena that are `size` bytes each. The
 // pointer that's returned on success is aligned to a boundary of `align`
 // bytes. On error, `NULL` is returned.
-void* alloc(struct arena *arn, sz size, sz align, sz count);
+void *alloc(struct arena *arn, sz size, sz align, sz count);
 
-#define NEW(a, t, n) (t*)alloc(a, sizeof(t), __alignof__(t), n)
+#define NEW(a, t, n) (t *)alloc(a, sizeof(t), __alignof__(t), n)
 
 #endif // _ARENA_H_

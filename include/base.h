@@ -5,7 +5,7 @@
 #error "We use GCC here, go away with your strange, non-GCC compiler"
 #endif
 
-#define NULL ((void*)0)
+#define NULL ((void *)0)
 
 // Use predefined GCC macros to get the types for the correct sizes
 // (see https://gcc.gnu.org/onlinedocs/cpp/Common-Predefined-Macros.html).

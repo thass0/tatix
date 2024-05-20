@@ -36,7 +36,7 @@ boot: $(BOOT_IMAGE)
 	qemu-system-x86_64 -no-reboot -drive file=$<,format=raw,index=0,media=disk
 
 fmt:
-	clang-format -i --style=WebKit $(SRCS) $(wildcard include/*.h)
+	clang-format -i --style=file $(SRCS) $(wildcard include/*.h)
 
 clean:
 	$(RM) -r $(BUILD_DIR)

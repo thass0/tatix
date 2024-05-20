@@ -11,6 +11,7 @@ struct str {
 #define STR(s) \
     (struct str) { .dat = (s), .len = lengthof(s) }
 #define STR_IS_NULL(s) ((s).dat == NULL)
-#define RANGE_2_STR(beg, end) (struct str){ .dat = (beg), .len = (end) - (beg) }
+#define RANGE_2_STR(beg, end) \
+    (struct str) { .dat = (beg), .len = (end) - (beg) }
 
 #endif // _STRING_H_
