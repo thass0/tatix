@@ -1,9 +1,9 @@
 #ifndef _VGA_H_
 #define _VGA_H_
 
+#include <arena.h>
 #include <base.h>
 #include <string.h>
-#include <arena.h>
 
 enum vga_color {
     VGA_COLOR_BLACK = 0,
@@ -29,10 +29,10 @@ typedef u8 vga_color_attr;
 #define VGA_COLOR(FG_COLOR, BG_COLOR) \
     ((u8)(BG_COLOR) << 4 | (u8)(FG_COLOR))
 
-int vga_print(struct str, struct arena *);
-int vga_print_with_color(struct str, vga_color_attr, struct arena *);
-int vga_println(struct str, struct arena *);
-int vga_println_with_color(struct str, vga_color_attr, struct arena *);
+i32 vga_print(struct str, struct arena);
+i32 vga_print_with_color(struct str, vga_color_attr, struct arena);
+i32 vga_println(struct str, struct arena);
+i32 vga_println_with_color(struct str, vga_color_attr, struct arena);
 
 void vga_clear_screen(void);
 

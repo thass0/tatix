@@ -23,13 +23,13 @@ typedef __UINTPTR_TYPE__ uptr;
 typedef __PTRDIFF_TYPE__ sz;
 typedef float f32;
 typedef double f64;
-typedef u8 bool;                // Don't care what the C++ compiler thinks of this
+typedef u8 bool; // Don't care what the C++ compiler thinks of this
 
 #define true 1
 #define false 0
 
 #define sizeof(x) ((sz)sizeof(x))
 #define countof(arr) (sizeof(arr) / sizeof(*(arr))) // Number of elements in array
-#define lengthof(str) (countof(str) - 1)            // Number of characters in string (excluding NULL byte)
+#define lengthof(str) (countof(str) - 1) // Number of characters in string (excluding NULL byte)
 
 #endif // _BASE_H_

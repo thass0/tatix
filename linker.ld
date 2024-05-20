@@ -2,7 +2,7 @@ MEMORY
 {
         stage1 (rwx) : ORIGIN = 0x7c00, LENGTH = 512
         stage2 (rwx) : ORIGIN = 0x7e00, LENGTH = 512
-        kernel (rwx) : ORIGIN = 0x8000, LENGTH = 32768
+        kernel (rwx) : ORIGIN = 0x8000, LENGTH = 65024
 }
 
 ENTRY(boot_stage1)
