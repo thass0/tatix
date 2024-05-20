@@ -1,7 +1,6 @@
 #ifndef _VGA_H_
 #define _VGA_H_
 
-#include <arena.h>
 #include <base.h>
 #include <string.h>
 
@@ -29,10 +28,10 @@ typedef u8 vga_color_attr;
 #define VGA_COLOR(FG_COLOR, BG_COLOR) \
     ((u8)(BG_COLOR) << 4 | (u8)(FG_COLOR))
 
-i32 vga_print(struct str, struct arena);
-i32 vga_print_with_color(struct str, vga_color_attr, struct arena);
-i32 vga_println(struct str, struct arena);
-i32 vga_println_with_color(struct str, vga_color_attr, struct arena);
+void vga_print(struct str);
+void vga_print_with_color(struct str, vga_color_attr);
+void vga_println(struct str);
+void vga_println_with_color(struct str, vga_color_attr);
 
 void vga_clear_screen(void);
 

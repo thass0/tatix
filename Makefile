@@ -27,7 +27,7 @@ $(BUILD_DIR)/%.o: $(BOOTLOADER_DIR)/%.s | $(BUILD_DIR)
 # To re-compile if headers change:
 -include $(C_DEPS)
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
-	gcc -MMD -Iinclude/ -std=c99 -ffreestanding -m64 -fno-builtin -nostdinc -c $< -o $@
+	gcc -MMD -Iinclude/ -std=c99 -ffreestanding -m64 -fno-builtin -nostdinc -Wall -Wextra -pedantic -c $< -o $@
 
 $(BUILD_DIR):
 	mkdir $@

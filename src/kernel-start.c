@@ -18,16 +18,18 @@ void kernel_start(void)
     };
 
     vga_clear_screen();
-    vga_println(STR("Hello, world!"), arn);
-    vga_println_with_color(STR("What will you do here?"), VGA_COLOR(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK), arn);
+    vga_println(STR("Hello, world!"));
+    vga_println_with_color(STR("What will you do here?"), VGA_COLOR(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
 
-    for (i32 i = 0; i < 18 - 3; i++)
-        vga_println(STR("Don't know what to print"), arn);
+    for (i32 i = 0; i < 17; i++)
+        vga_println(STR("Don't know what to print"));
 
     vga_println(STR("This is a really long line. In fact, it's so long that it's difficult "
                     "to think of a name for it! Nonetheless, we need to go ahead and make this "
-                    "line even longer so that we can find out if wrapping works!"), arn);
+                    "line even longer so that we can find out if wrapping works!"));
 
-    vga_println_with_color(STR("Another cyan message 1"), VGA_COLOR(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK), arn);
-    vga_println_with_color(STR("Another cyan message 2."), VGA_COLOR(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK), arn);
+    vga_println_with_color(STR("Another cyan message 1"), VGA_COLOR(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+    vga_println_with_color(STR("Another cyan message 2."), VGA_COLOR(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+    vga_println_with_color(STR("Another cyan message 3."), VGA_COLOR(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK));
+    vga_println(STR("Hello world"));
 }
