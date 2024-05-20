@@ -1,6 +1,9 @@
-        ;; BIOS loads this boot sector to address 0x7c00
+        section .stage1
+        global boot_stage1
+
         [bits 16]
-        [org BOOT_LOAD_ADDR]
+        
+boot_stage1:
 
         call a20_check
         cmp ax, 0
@@ -61,6 +64,6 @@ msg_a20_line_not_set:   db "Error: a20 line is clear", 13, 10, 0
 msg_error_reading_disk: db "Error: failed to read disk with int 0x13/ah=0x40", 13, 10, 0
 msg_error_num_sectors_read:     db "Error: number of sectors requested doesn't match number of sectors read", 13, 10, 0
 
-        ;; End of the boot sector:
-times (SECTOR_SIZE - 2) - ($ - $$) db 0
-dw 0xaa55
+SECTOR_SIZE equ 512
+BOOT_LOAD_ADDR equ 0x7c00
+READ_SECTORS_NUM equ 127

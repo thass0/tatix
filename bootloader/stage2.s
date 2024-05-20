@@ -1,4 +1,5 @@
-        [org BOOT_LOAD_ADDR + SECTOR_SIZE]
+        section .stage2
+        
         [bits 16]
         
         ;; Load GDT and switch to protected mode
@@ -78,9 +79,8 @@ start_long_mode:
         mov fs, ax
         mov gs, ax
 
-        ;; Kernel is in the third sector
-        KERNEL_ADDR equ BOOT_LOAD_ADDR + 2 * SECTOR_SIZE
-        call KERNEL_ADDR
+        extern kernel_start
+        call kernel_start
 
 end64:
         hlt
@@ -92,5 +92,3 @@ end64:
 %include "paging.s"
         
 msg_switched_to_comp_mode:      db "Entered 64-bit compatibility mode", 0
-
-times SECTOR_SIZE - ($ - $$) db 0

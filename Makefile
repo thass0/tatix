@@ -1,52 +1,42 @@
 .PHONY = clean boot fmt
 
-# Configure how many sectors the bootloader should read from the boot disk
-READ_SECTORS_NUM ?= 127
-
 BUILD_DIR := build
 BOOTLOADER_DIR := bootloader
 SRC_DIR := src
 
-SRCS := $(wildcard $(SRC_DIR)/*.c)
-OBJS := $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SRCS))
-DEPS := $(OBJS:%.o=%.d)
+C_SRCS := $(wildcard $(SRC_DIR)/*.c)
+C_OBJS := $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(C_SRCS))
+C_DEPS := $(C_OBJS:%.o=%.d)
 
-CC := gcc
-QEMU := qemu-system-x86_64 -no-reboot
-NASM := nasm -dSECTOR_SIZE=512 -dBOOT_LOAD_ADDR=0x7c00 -I$(BOOTLOADER_DIR)
+ASM_SRCS := $(BOOTLOADER_DIR)/stage1.s $(BOOTLOADER_DIR)/stage2.s
+ASM_OBJS := $(patsubst $(BOOTLOADER_DIR)/%.s, $(BUILD_DIR)/%.o, $(ASM_SRCS))
 
-CPPFLAGS := -MMD -Iinclude/
-CFLAGS := -std=c99 -ffreestanding -m64 -fno-builtin -nostdinc
+OBJS := $(C_OBJS) $(ASM_OBJS)
 
 BOOT_IMAGE := $(BUILD_DIR)/image.bin
 
-$(BOOT_IMAGE): $(BUILD_DIR)/stage1.bin $(BUILD_DIR)/stage2.bin $(BUILD_DIR)/kernel.bin
-	cat $^ > $@
+$(BOOT_IMAGE): $(BUILD_DIR)/kernel.o
+	objcopy -O binary $< $@
 
-$(BUILD_DIR)/stage1.bin: $(BOOTLOADER_DIR)/stage1.s | $(BUILD_DIR)
-	$(NASM) -dREAD_SECTORS_NUM=$(READ_SECTORS_NUM) $< -f bin -o $@
+$(BUILD_DIR)/kernel.o: $(OBJS) | $(BUILD_DIR)
+	ld -T linker.ld -o $@ $^
 
-$(BUILD_DIR)/stage2.bin: $(BOOTLOADER_DIR)/stage2.s | $(BUILD_DIR)
-	$(NASM) $< -f bin -o $@
-
-$(BUILD_DIR)/kernel.bin: $(OBJS) | $(BUILD_DIR)
-	ld -Ttext 0x8000 -o $(BUILD_DIR)/kernel.elf $(OBJS)
-	objcopy -O binary $(BUILD_DIR)/kernel.elf $@
+$(BUILD_DIR)/%.o: $(BOOTLOADER_DIR)/%.s | $(BUILD_DIR)
+	nasm -I$(BOOTLOADER_DIR) -f elf64 $< -o $@
 
 # To re-compile if headers change:
--include $(DEPS)
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c
-	$(CC) $(CFLAGS) $(CPPFLAGS) -c $< -o $@
+-include $(C_DEPS)
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
+	gcc -MMD -Iinclude/ -std=c99 -ffreestanding -m64 -fno-builtin -nostdinc -c $< -o $@
 
 $(BUILD_DIR):
 	mkdir $@
 
 boot: $(BOOT_IMAGE)
-	$(QEMU) -drive file=$<,format=raw,index=0,media=disk
+	qemu-system-x86_64 -no-reboot -drive file=$<,format=raw,index=0,media=disk
 
 fmt:
 	clang-format -i --style=WebKit $(SRCS) $(wildcard include/*.h)
 
 clean:
-	$(RM) -r $(BUILD_DIR) $(BOOT_IMAGE)
+	$(RM) -r $(BUILD_DIR)
