@@ -24,9 +24,6 @@ struct idtr {
 #define GATE_PRESENT_FLAG_BIT 7
 #define ATTR_INTERRUPT_GATE (GATE_TYPE_INTERRUPT | (1 << GATE_PRESENT_FLAG_BIT))
 #define NUM_IDT_ENTRIES 256
-#define NUM_RESERVED_VECTORS 32
-
-#define IRQ_VECTORS_BASE NUM_RESERVED_VECTORS
 
 extern u16 GDT64_CODE_SEG_SELECTOR;
 
@@ -53,29 +50,22 @@ void init_idt(void)
     idtr.limit = sizeof(struct idt_entry) * NUM_IDT_ENTRIES - 1;
     idtr.base = (u64)idt;
 
-    for (i32 i = 0; i < NUM_IDT_ENTRIES; i++) {
-        idt[i].offset1 = 0;
-        idt[i].seg_selector = 0;
-        idt[i].ist = 0;
-        idt[i].attributes = 0;
-        idt[i].offset2 = 0;
-        idt[i].offset3 = 0;
-        idt[i].reserved = 0;
-    }
+    for (i32 i = 0; i < NUM_IDT_ENTRIES; i++)
+        init_idt_entry(&idt[i], 0, 0);
 
-    for (i32 i = 0; i < 22; i++)
+    for (i32 i = 0; i < NUM_USED_RESERVED_VECTORS; i++)
         init_idt_entry(&idt[i], isr_stub_reserved_table[i], ATTR_INTERRUPT_GATE);
 
-    for (i32 i = 0; i < 15; i++)
-        init_idt_entry(&idt[32 + i], isr_stub_irq_table[i], ATTR_INTERRUPT_GATE);
+    for (i32 i = 0; i < NUM_IRQ_VECTORS; i++)
+        init_idt_entry(&idt[NUM_RESERVED_VECTORS + i], isr_stub_irq_table[i], ATTR_INTERRUPT_GATE);
  
     __asm__ volatile ("lidt %0" : : "m"(idtr));
-    __asm__ volatile ("sti");
 }
 
 void init_interrupts(void)
 {
     __asm__ volatile ("cli");
-    pic_remap(IRQ_VECTORS_BASE, IRQ_VECTORS_BASE + 8);
+    pic_remap(IRQ_VECTORS_BEG, IRQ_VECTORS_BEG + 8);
     init_idt();
+    __asm__ volatile ("sti");
 }

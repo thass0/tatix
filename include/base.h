@@ -36,4 +36,10 @@ typedef u8 bool; // Don't care what the C++ compiler thinks of this
 #define countof(arr) (sizeof(arr) / sizeof(*(arr))) // Number of elements in array
 #define lengthof(str) (countof(str) - 1) // Number of characters in string (excluding NULL byte)
 
+#define HLT()                                   \
+    do {                                        \
+        while (true)                            \
+            __asm__ volatile ("hlt");           \
+    } while (0);
+
 #endif // _BASE_H_

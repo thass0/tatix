@@ -21,7 +21,6 @@ isr_stub_common:
         push rdx
         push rcx
         push rbx
-        mov rax, 0xc0ffeecafe
         push rax
 
         mov rdi, rsp            ; Pass `handle_interrupt` the CPU state as a struct by pointer

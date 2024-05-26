@@ -71,21 +71,24 @@ i32 fmt_u64(u64 x, struct fmt_buf *buf, struct arena scratch)
     return fmt_str(RANGE_2_STR(beg, end), buf);
 }
 
-i32 fmt_ptr(void *p, struct fmt_buf *buf)
+i32 fmt_hex(u64 x, struct fmt_buf *buf)
 {
     assert(buf != NULL);
 
     if (fmt_str(STR("0x"), buf) < 0)
         return -1;
 
-    ptr _p = (ptr)p;
-
-    for (sz i = 2 * sizeof(_p) - 1; i >= 0; i--) {
-        if (fmt_char("0123456789abcdef"[(_p >> (4 * i)) & 15], buf) < 0)
+    for (sz i = 2 * sizeof(x) - 1; i >= 0; i--) {
+        if (fmt_char("0123456789abcdef"[(x >> (4 * i)) & 15], buf) < 0)
             return -1;
     }
 
     return 0;
+}
+
+i32 fmt_ptr(void *p, struct fmt_buf *buf)
+{
+    fmt_hex((u64)p, buf);
 }
 
 i32 fmt_str(struct str s, struct fmt_buf *buf)

@@ -51,7 +51,8 @@ void kernel_start(void)
     fmt_ptr((void*)0xdeadbeef, &buf);
     vga_println(FMT_2_STR(buf));
 
-    init_idt();
+    init_interrupts();
 
-    __asm__ volatile ("int $33");
+    __asm__ volatile ("int $0x22");
+    __asm__ volatile ("int3");
 }

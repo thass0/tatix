@@ -15,6 +15,9 @@ struct arena {
     u8 *end;
 };
 
+#define NEW_ARENA(b, size) \
+    (struct arena) { .beg = (b), .end = (b) + (size) }
+
 // Allocate `count` items out of the arena that are `size` bytes each. The
 // pointer that's returned on success is aligned to a boundary of `align`
 // bytes. On error, `NULL` is returned.

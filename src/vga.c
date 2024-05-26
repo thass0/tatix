@@ -37,6 +37,12 @@ static void vga_print_internal(struct str str, vga_color_attr color_attr, bool a
 
     i64 offset = 0;
     for (i32 i = 0; i < str.len; i++) {
+        if (str.dat[i] == '\n') {
+            col = 0;
+            vga_next_row();
+            continue;
+        }
+
         offset = (row * VGA_SCREEN_WIDTH) + col;
         vga_buffer[offset].ch = str.dat[i];
         vga_buffer[offset].attr = color_attr;

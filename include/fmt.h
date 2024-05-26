@@ -31,6 +31,7 @@ i32 fmt_u8(u8, struct fmt_buf *, struct arena);
 i32 fmt_u16(u16, struct fmt_buf *, struct arena);
 i32 fmt_u32(u32, struct fmt_buf *, struct arena);
 i32 fmt_u64(u64, struct fmt_buf *, struct arena);
+i32 fmt_hex(u64, struct fmt_buf *);
 i32 fmt_ptr(void *, struct fmt_buf *);
 i32 fmt_str(struct str, struct fmt_buf *);
 i32 fmt_char(char, struct fmt_buf *);

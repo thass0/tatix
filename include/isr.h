@@ -32,4 +32,13 @@ struct cpu_state {
 
 void handle_interrupt(struct cpu_state *);
 
+// Ranges for different types of interrupt vectors. Given as intervals: [beg; end)
+#define RESERVED_VECTORS_BEG 0
+#define RESERVED_VECTORS_END 32
+#define NUM_RESERVED_VECTORS (RESERVED_VECTORS_END - RESERVED_VECTORS_BEG)
+#define NUM_USED_RESERVED_VECTORS 22 // Based on the manual, only the first 22 reserved vectors are used
+#define IRQ_VECTORS_BEG RESERVED_VECTORS_END
+#define IRQ_VECTORS_END 48
+#define NUM_IRQ_VECTORS (IRQ_VECTORS_END - IRQ_VECTORS_BEG)
+
 #endif // _ISR_H_
