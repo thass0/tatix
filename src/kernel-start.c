@@ -53,5 +53,5 @@ void kernel_start(void)
 
     init_idt();
 
-    __asm__ volatile ("int $32");
+    __asm__ volatile ("int $33");
 }

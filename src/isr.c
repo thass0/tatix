@@ -1,9 +1,11 @@
+// Interrupt service routines
+
 #include <isr.h>
 #include <base.h>
 #include <vga.h>
-#include <assert.h>
-
-// Interrupt service routines
+#define ISR
+#include <pic.h>
+#undef ISR
 
 void handle_invalid_interrupt(struct interrupt_frame *frame)
 {

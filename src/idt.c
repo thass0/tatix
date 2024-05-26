@@ -1,5 +1,6 @@
 #include <base.h>
 #include <isr.h>
+#include <pic.h>
 
 // 64-bit Interrupt Descriptor Table
 
@@ -24,6 +25,8 @@ struct idtr {
 #define ATTR_INTERRUPT_GATE (GATE_TYPE_INTERRUPT | (1 << GATE_PRESENT_FLAG_BIT))
 #define NUM_IDT_ENTRIES 256
 #define NUM_RESERVED_VECTORS 32
+
+#define IRQ_VECTORS_BASE NUM_RESERVED_VECTORS
 
 extern u16 GDT64_CODE_SEG_SELECTOR;
 
@@ -60,9 +63,16 @@ void init_idt(void)
     for (i32 i = 0; i < NUM_RESERVED_VECTORS; i++)
         init_idt_entry(&idt[i], (ptr)handle_invalid_interrupt, ATTR_INTERRUPT_GATE);
 
-    init_idt_entry(&idt[1], (ptr)handle_keyboard_interrupt, ATTR_INTERRUPT_GATE);
-    init_idt_entry(&idt[32], (ptr)handle_example_interrupt, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[32], (ptr)handle_keyboard_interrupt, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[33], (ptr)handle_example_interrupt, ATTR_INTERRUPT_GATE);
 
     __asm__ volatile ("lidt %0" : : "m"(idtr));
     __asm__ volatile ("sti");
+}
+
+void init_interrupts(void)
+{
+    __asm__ volatile ("cli");
+    pic_remap(IRQ_VECTORS_BASE, IRQ_VECTORS_BASE + 8);
+    init_idt();
 }
