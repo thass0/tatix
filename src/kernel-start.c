@@ -2,6 +2,7 @@
 #include <vga.h>
 #include <arena.h>
 #include <fmt.h>
+#include <idt.h>
 
 #include <assert.h>
 
@@ -49,4 +50,8 @@ void kernel_start(void)
     fmt_u64(4, &buf, scratch); fmt_str(STR(", "), &buf);
     fmt_ptr((void*)0xdeadbeef, &buf);
     vga_println(FMT_2_STR(buf));
+
+    init_idt();
+
+    __asm__ volatile ("int $32");
 }

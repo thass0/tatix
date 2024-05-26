@@ -4,6 +4,10 @@ BUILD_DIR := build
 BOOTLOADER_DIR := bootloader
 SRC_DIR := src
 
+CC := gcc
+CPPFLAGS := -MMD -Iinclude/
+CFLAGS := -std=c99 -ffreestanding -m64 -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -pedantic
+
 C_SRCS := $(wildcard $(SRC_DIR)/*.c)
 C_OBJS := $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(C_SRCS))
 C_DEPS := $(C_OBJS:%.o=%.d)
@@ -26,8 +30,15 @@ $(BUILD_DIR)/%.o: $(BOOTLOADER_DIR)/%.s | $(BUILD_DIR)
 
 # To re-compile if headers change:
 -include $(C_DEPS)
+
+$(BUILD_DIR)/isr.o: $(SRC_DIR)/isr.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -mgeneral-regs-only -c $< -o $@
+
+$(BUILD_DIR)/vga.o: $(SRC_DIR)/vga.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -mgeneral-regs-only -c $< -o $@
+
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
-	gcc -MMD -Iinclude/ -std=c99 -ffreestanding -m64 -fno-builtin -nostdinc -Wall -Wextra -pedantic -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR):
 	mkdir $@

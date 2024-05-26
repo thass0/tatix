@@ -13,6 +13,7 @@ static volatile struct vga_char* vga_buffer = (volatile struct vga_char*)0xb8000
 static i64 col = 0;
 static i64 row = 0;
 
+__attribute__ ((no_caller_saved_registers))
 static inline void vga_next_row(void)
 {
     if (row < VGA_SCREEN_HEIGHT) {
@@ -28,6 +29,7 @@ static inline void vga_next_row(void)
     }
 }
 
+__attribute__ ((no_caller_saved_registers))
 static void vga_print_internal(struct str str, vga_color_attr color_attr, bool add_linefeed)
 {
     if (STR_IS_NULL(str))

@@ -48,3 +48,7 @@ gdt64_pseudo_descriptor:
 
 CODE_SEG64 equ gdt64_code_segment - gdt64_start
 DATA_SEG64 equ gdt64_data_segment - gdt64_start
+
+        ;; The IDT needs this info
+        global GDT64_CODE_SEG_SELECTOR
+GDT64_CODE_SEG_SELECTOR:        dw CODE_SEG64

@@ -5,6 +5,10 @@
 #error "We use GCC here, go away with your strange, non-GCC compiler"
 #endif
 
+#ifndef __x86_64__
+#error "This kernel is written for the x86_64 architecture"
+#endif
+
 #define NULL ((void *)0)
 
 // Use predefined GCC macros to get the types for the correct sizes
