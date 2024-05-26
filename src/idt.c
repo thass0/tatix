@@ -33,6 +33,9 @@ extern u16 GDT64_CODE_SEG_SELECTOR;
 __attribute__((aligned(16)))
 static struct idt_entry idt[NUM_IDT_ENTRIES];
 
+extern ptr isr_stub_reserved_table[22];
+extern ptr isr_stub_irq_table[15];
+
 void init_idt_entry(struct idt_entry *ent, ptr handler, u8 attributes)
 {
     ent->offset1 = (u16)(handler & 0xffff);
@@ -60,12 +63,12 @@ void init_idt(void)
         idt[i].reserved = 0;
     }
 
-    for (i32 i = 0; i < NUM_RESERVED_VECTORS; i++)
-        init_idt_entry(&idt[i], (ptr)handle_invalid_interrupt, ATTR_INTERRUPT_GATE);
+    for (i32 i = 0; i < 22; i++)
+        init_idt_entry(&idt[i], isr_stub_reserved_table[i], ATTR_INTERRUPT_GATE);
 
-    init_idt_entry(&idt[32], (ptr)handle_keyboard_interrupt, ATTR_INTERRUPT_GATE);
-    init_idt_entry(&idt[33], (ptr)handle_example_interrupt, ATTR_INTERRUPT_GATE);
-
+    for (i32 i = 0; i < 15; i++)
+        init_idt_entry(&idt[32 + i], isr_stub_irq_table[i], ATTR_INTERRUPT_GATE);
+ 
     __asm__ volatile ("lidt %0" : : "m"(idtr));
     __asm__ volatile ("sti");
 }

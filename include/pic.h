@@ -11,22 +11,16 @@
 #define PIC2_IRQ 2
 
 // PIC command codes
-#define PIC_EOI_CMD 0x20        // End of Interrupt
-#define PIC_INIT_CMD 0x11       // Initialize
+#define PIC_EOI_CMD 0x20        // "End of Interrupt"
+#define PIC_INIT_CMD 0x11       // "Initialize"
 
 #define PIC_ICW4_8086_MODE 0x01
 
-#ifdef ISR
-__attribute__ ((no_caller_saved_registers))
-#endif
 static inline void outb(u16 port, u8 val)
 {
     __asm__ volatile ("outb %b0, %w1" : : "a"(val), "Nd"(port) : "memory");
 }
 
-#ifdef ISR
-__attribute__ ((no_caller_saved_registers))
-#endif
 static inline u8 inb(u16 port)
 {
     u8 ret;
@@ -37,9 +31,6 @@ static inline u8 inb(u16 port)
     return ret;
 }
 
-#ifdef ISR
-__attribute__ ((no_caller_saved_registers))
-#endif
 static inline void pic_sent_eoi(u8 irq)
 {
     if (irq >= 8)

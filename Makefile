@@ -46,7 +46,7 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.s | $(BUILD_DIR)
-	$(NASM) $< $@
+	$(NASM) $< -o $@
 
 $(BUILD_DIR):
 	mkdir $@

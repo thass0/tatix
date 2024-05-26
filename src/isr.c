@@ -3,23 +3,21 @@
 #include <isr.h>
 #include <base.h>
 #include <vga.h>
-#define ISR
 #include <pic.h>
-#undef ISR
 
-void handle_invalid_interrupt(struct interrupt_frame *frame)
+void handle_interrupt(struct cpu_state *cpu_state)
 {
-    vga_println_with_color(STR("Error: Invalid interrupt occurred"), VGA_COLOR(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
-    while (true)
-        __asm__ ("hlt");
-}
+    if (cpu_state->rax == 0xc0ffeecafe) {
+        vga_println(STR("I set up the CPU state struct correctly"));
+        while (true)
+            __asm__ volatile ("hlt");
+    } else {
+        vga_println(STR("I DID NOT set up the CPU state correctly"));
+    }
 
-void handle_keyboard_interrupt(struct interrupt_frame *frame)
-{
-    vga_println(STR("Wow, I just pressed a key!"));
-}
-
-void handle_example_interrupt(struct interrupt_frame *frame)
-{
-    vga_println(STR("This example works indeed!"));
+    if (cpu_state->vector < 32) {
+        vga_println(STR("Caught a system exception"));
+    } else if (cpu_state->vector < 48) {
+        vga_println(STR("Caught an IRQ"));
+    }
 }
