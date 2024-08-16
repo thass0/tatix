@@ -27,8 +27,7 @@ struct idtr {
 
 extern u16 GDT64_CODE_SEG_SELECTOR;
 
-__attribute__((aligned(16)))
-static struct idt_entry idt[NUM_IDT_ENTRIES];
+__attribute__((aligned(16))) static struct idt_entry idt[NUM_IDT_ENTRIES];
 
 extern ptr isr_stub_reserved_table[22];
 extern ptr isr_stub_irq_table[15];
@@ -37,7 +36,7 @@ void init_idt_entry(struct idt_entry *ent, ptr handler, u8 attributes)
 {
     ent->offset1 = (u16)(handler & 0xffff);
     ent->seg_selector = GDT64_CODE_SEG_SELECTOR;
-    ent->ist = 0;               // Disable the use of the IST, plus set the reserved bits to 0
+    ent->ist = 0; // Disable the use of the IST, plus set the reserved bits to 0
     ent->attributes = attributes;
     ent->offset2 = (u16)((handler >> 16) & 0xffff);
     ent->offset3 = (u32)((handler >> 32) & 0xffffffff);
@@ -59,13 +58,13 @@ void init_idt(void)
     for (i32 i = 0; i < NUM_IRQ_VECTORS; i++)
         init_idt_entry(&idt[NUM_RESERVED_VECTORS + i], isr_stub_irq_table[i], ATTR_INTERRUPT_GATE);
 
-    __asm__ volatile ("lidt %0" : : "m"(idtr));
+    __asm__ volatile("lidt %0" : : "m"(idtr));
 }
 
 void init_interrupts(void)
 {
-    __asm__ volatile ("cli");
+    __asm__ volatile("cli");
     pic_remap(IRQ_VECTORS_BEG, IRQ_VECTORS_BEG + 8);
     init_idt();
-    __asm__ volatile ("sti");
+    __asm__ volatile("sti");
 }

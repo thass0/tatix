@@ -25,19 +25,13 @@ enum vga_color {
 
 typedef u8 vga_color_attr;
 
-#define VGA_COLOR(FG_COLOR, BG_COLOR) \
-    ((u8)(BG_COLOR) << 4 | (u8)(FG_COLOR))
+#define VGA_COLOR(FG_COLOR, BG_COLOR) ((u8)(BG_COLOR) << 4 | (u8)(FG_COLOR))
 
-__attribute__ ((no_caller_saved_registers))
-void vga_print(struct str);
-__attribute__ ((no_caller_saved_registers))
-void vga_print_with_color(struct str, vga_color_attr);
-__attribute__ ((no_caller_saved_registers))
-void vga_println(struct str);
-__attribute__ ((no_caller_saved_registers))
-void vga_println_with_color(struct str, vga_color_attr);
+__attribute__((no_caller_saved_registers)) void vga_print(struct str);
+__attribute__((no_caller_saved_registers)) void vga_print_with_color(struct str, vga_color_attr);
+__attribute__((no_caller_saved_registers)) void vga_println(struct str);
+__attribute__((no_caller_saved_registers)) void vga_println_with_color(struct str, vga_color_attr);
 
-__attribute__ ((no_caller_saved_registers))
-void vga_clear_screen(void);
+__attribute__((no_caller_saved_registers)) void vga_clear_screen(void);
 
 #endif // __TX_VGA_H__

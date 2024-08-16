@@ -1,8 +1,8 @@
 #ifndef __TX_PORTS_H__
 #define __TX_PORTS_H__
 
-#include <tx/base.h>
 #include <tx/asm.h>
+#include <tx/base.h>
 
 #define PIC1_CMD_PORT 0x20
 #define PIC1_DAT_PORT 0x21
@@ -12,8 +12,8 @@
 #define PIC2_IRQ 2
 
 // PIC command codes
-#define PIC_EOI_CMD 0x20        // "End of Interrupt"
-#define PIC_INIT_CMD 0x11       // "Initialize"
+#define PIC_EOI_CMD 0x20 // "End of Interrupt"
+#define PIC_INIT_CMD 0x11 // "Initialize"
 
 #define PIC_ICW4_8086_MODE 0x01
 

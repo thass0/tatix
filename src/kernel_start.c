@@ -1,8 +1,8 @@
-#include <tx/string.h>
-#include <tx/vga.h>
 #include <tx/arena.h>
 #include <tx/fmt.h>
 #include <tx/idt.h>
+#include <tx/string.h>
+#include <tx/vga.h>
 
 #include <tx/assert.h>
 
@@ -31,20 +31,29 @@ void kernel_start(void)
     vga_println(FMT_2_STR(buf));
     FMT_CLEAR(&buf);
 
-    fmt_i8(-1, &buf, scratch); fmt_str(STR(", "), &buf);
-    fmt_i16(-2, &buf, scratch); fmt_str(STR(", "), &buf);
-    fmt_i32(-3, &buf, scratch); fmt_str(STR(", "), &buf);
-    fmt_i64(-4, &buf, scratch); fmt_str(STR(", "), &buf);
-    fmt_sz(-646464, &buf, scratch); fmt_str(STR(", "), &buf);
-    fmt_u8(1, &buf, scratch); fmt_str(STR(", "), &buf);
-    fmt_u16(2, &buf, scratch); fmt_str(STR(", "), &buf);
-    fmt_u32(3, &buf, scratch); fmt_str(STR(", "), &buf);
-    fmt_u64(4, &buf, scratch); fmt_str(STR(", "), &buf);
-    fmt_ptr((void*)0xdeadbeef, &buf);
+    fmt_i8(-1, &buf, scratch);
+    fmt_str(STR(", "), &buf);
+    fmt_i16(-2, &buf, scratch);
+    fmt_str(STR(", "), &buf);
+    fmt_i32(-3, &buf, scratch);
+    fmt_str(STR(", "), &buf);
+    fmt_i64(-4, &buf, scratch);
+    fmt_str(STR(", "), &buf);
+    fmt_sz(-646464, &buf, scratch);
+    fmt_str(STR(", "), &buf);
+    fmt_u8(1, &buf, scratch);
+    fmt_str(STR(", "), &buf);
+    fmt_u16(2, &buf, scratch);
+    fmt_str(STR(", "), &buf);
+    fmt_u32(3, &buf, scratch);
+    fmt_str(STR(", "), &buf);
+    fmt_u64(4, &buf, scratch);
+    fmt_str(STR(", "), &buf);
+    fmt_ptr((void *)0xdeadbeef, &buf);
     vga_println(FMT_2_STR(buf));
 
     init_interrupts();
 
-    __asm__ volatile ("int $0x22");
-    __asm__ volatile ("int3");
+    __asm__ volatile("int $0x22");
+    __asm__ volatile("int3");
 }

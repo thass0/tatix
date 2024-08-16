@@ -13,15 +13,18 @@ struct fmt_buf {
 
 static inline struct fmt_buf fmt_buf_new(struct arena *arn, sz cap)
 {
-   struct fmt_buf buf;
-   buf.dat = arena_alloc_array(arn, cap, sizeof(*buf.dat));
-   buf.len = 0;
-   buf.cap = cap;
-   return buf;
+    struct fmt_buf buf;
+    buf.dat = arena_alloc_array(arn, cap, sizeof(*buf.dat));
+    buf.len = 0;
+    buf.cap = cap;
+    return buf;
 }
 
-#define FMT_2_STR(b) \
-    (struct str) { .dat = (b).dat, .len = (b).len }
+#define FMT_2_STR(b)                   \
+    (struct str)                       \
+    {                                  \
+        .dat = (b).dat, .len = (b).len \
+    }
 #define FMT_CLEAR(b)  \
     do {              \
         (b)->len = 0; \

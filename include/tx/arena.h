@@ -1,8 +1,8 @@
 #ifndef __TX_ARENA_H__
 #define __TX_ARENA_H__
 
-#include <tx/base.h>
 #include <tx/assert.h>
+#include <tx/base.h>
 
 // Based on this eye-opening post: https://nullprogram.com/blog/2023/09/27/
 

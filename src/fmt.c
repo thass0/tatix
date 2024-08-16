@@ -1,5 +1,5 @@
-#include <tx/fmt.h>
 #include <tx/assert.h>
+#include <tx/fmt.h>
 #include <tx/string.h>
 
 // Formatting algorithms uses here: https://nullprogram.com/blog/2023/02/13/
@@ -7,7 +7,7 @@
 #define IMPL_FMT_SIGNED(t)                                      \
     i32 fmt_##t(t x, struct fmt_buf *buf, struct arena scratch) \
     {                                                           \
-        return fmt_i64((i64) x, buf, scratch);                  \
+        return fmt_i64((i64)x, buf, scratch);                   \
     }
 
 IMPL_FMT_SIGNED(i8)
@@ -46,7 +46,7 @@ i32 fmt_i64(i64 x, struct fmt_buf *buf, struct arena scratch)
 #define IMPL_FMT_UNSIGNED(t)                                    \
     i32 fmt_##t(t x, struct fmt_buf *buf, struct arena scratch) \
     {                                                           \
-        return fmt_u64((u64) x, buf, scratch);                  \
+        return fmt_u64((u64)x, buf, scratch);                   \
     }
 
 IMPL_FMT_UNSIGNED(u8)

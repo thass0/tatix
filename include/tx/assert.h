@@ -1,8 +1,8 @@
 #ifndef __TX_ASSERT_H__
 #define __TX_ASSERT_H__
 
-#include <tx/base.h>
 #include <tx/asm.h>
+#include <tx/base.h>
 #include <tx/string.h>
 #include <tx/vga.h>
 
