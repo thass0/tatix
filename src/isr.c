@@ -47,7 +47,7 @@ void handle_interrupt(struct cpu_state *cpu_state)
                                VGA_COLOR(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
         vga_println_with_color(FMT_2_STR(buf),
                                VGA_COLOR(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
-        HLT();
+        hlt();
     } else if (cpu_state->vector < IRQ_VECTORS_END) {
         vga_println(STR("Caught an IRQ"));
     }

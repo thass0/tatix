@@ -2,6 +2,7 @@
 #define __TX_PORTS_H__
 
 #include <tx/base.h>
+#include <tx/asm.h>
 
 #define PIC1_CMD_PORT 0x20
 #define PIC1_DAT_PORT 0x21
@@ -15,21 +16,6 @@
 #define PIC_INIT_CMD 0x11       // "Initialize"
 
 #define PIC_ICW4_8086_MODE 0x01
-
-static inline void outb(u16 port, u8 val)
-{
-    __asm__ volatile ("outb %b0, %w1" : : "a"(val), "Nd"(port) : "memory");
-}
-
-static inline u8 inb(u16 port)
-{
-    u8 ret;
-    __asm__ volatile ("inb %w1, %b0"
-                      : "=a"(ret)
-                      : "Nd"(port)
-                      : "memory");
-    return ret;
-}
 
 static inline void pic_sent_eoi(u8 irq)
 {

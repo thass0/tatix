@@ -2,6 +2,7 @@
 #define __TX_ASSERT_H__
 
 #include <tx/base.h>
+#include <tx/asm.h>
 #include <tx/string.h>
 #include <tx/vga.h>
 
@@ -12,7 +13,7 @@
         if (!(x)) {                                                     \
             vga_println_with_color(STR(__STRINGIFY(file) ":" __STRINGIFY(line) ": Assertion '" x_str "' failed"), \
                                    VGA_COLOR(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK)); \
-            HLT();                                                      \
+            hlt();                                                      \
         }                                                               \
     } while (0);
 
