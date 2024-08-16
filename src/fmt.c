@@ -24,7 +24,7 @@ i32 fmt_i64(i64 x, struct fmt_buf *buf, struct arena scratch)
 {
     assert(buf != NULL);
 
-    char *tmp = NEW(&scratch, char, 32);
+    char *tmp = arena_alloc_array(&scratch, 32, sizeof(*tmp));
     char *end = tmp + 32;
     char *beg = end;
 
@@ -57,7 +57,7 @@ i32 fmt_u64(u64 x, struct fmt_buf *buf, struct arena scratch)
 {
     assert(buf != NULL);
 
-    char *tmp = NEW(&scratch, char, 32);
+    char *tmp = arena_alloc_array(&scratch, 32, sizeof(*tmp));
     char *end = tmp + 32;
     char *beg = end;
 

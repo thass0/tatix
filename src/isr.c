@@ -35,12 +35,11 @@ void fmt_cpu_state(struct cpu_state *cpu_state, struct fmt_buf *buf)
 
 void handle_interrupt(struct cpu_state *cpu_state)
 {
-    enum { arn_size = 1024 };
-    u8 arn_buf[arn_size];
-    struct arena arn = NEW_ARENA(arn_buf, arn_size);
+    u8 arn_buf[1024];
+    struct arena arn = arena_new(arn_buf, countof(arn_buf));
 
     if (cpu_state->vector < RESERVED_VECTORS_END) {
-        struct fmt_buf buf = NEW_FMT_BUF(&arn, 800);
+        struct fmt_buf buf = fmt_buf_new(&arn, 800);
 
         fmt_cpu_state(cpu_state, &buf);
         vga_println_with_color(STR("Error: caught unimplemented system interrupt\nSystem state:"),

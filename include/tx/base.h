@@ -62,6 +62,20 @@ typedef double f64;
 #define SZ_MAX      __PTRDIFF_MAX__
 #define USZ_MAX     __SIZE_MAX__
 
+#define BYTE_WIDTH    __UINT8_WIDTH__
+#define U8_WIDTH      __UINT8_WIDTH__
+#define U16_WIDTH     __UINT16_WIDTH__
+#define U32_WIDTH     __UINT32_WIDTH__
+#define U64_WIDTH     __UINT64_WIDTH__
+#define I8_WIDTH      __INT8_WIDTH__
+#define I16_WIDTH     __INT16_WIDTH__
+#define I32_WIDTH     __INT32_WIDTH__
+#define I64_WIDTH     __INT64_WIDTH__
+#define PTR_WIDTH     __INTPTR_WIDTH__
+#define UPTR_WIDTH    __UINTPTR_WIDTH__
+#define SZ_WIDTH      __PTRDIFF_WIDTH__
+#define USZ_WIDTH     __SIZE_WIDTH__
+
 ////////////////////////////////////////////////////////////////////////////////
 // Fundamental macros                                                         //
 ////////////////////////////////////////////////////////////////////////////////
@@ -70,6 +84,7 @@ typedef double f64;
 #define sizeof(x)       ((sz)sizeof(x))
 #define countof(arr)    (sizeof(arr) / sizeof((arr)[0]))
 #define lengthof(str)   (countof(str) - 1)
+#define alignof(x)      ((sz)__alignof__(x))
 #define NULL            ((void *)0)
 #define true            1
 #define false           0

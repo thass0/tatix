@@ -14,19 +14,11 @@ u8 global_kernel_arena_buffer[global_kernel_arena_buffer_size];
 
 void kernel_start(void)
 {
-    struct arena arn = {
-        .beg = global_kernel_arena_buffer,
-        .end = global_kernel_arena_buffer + global_kernel_arena_buffer_size,
-    };
+    struct arena arn = arena_new(global_kernel_arena_buffer, global_kernel_arena_buffer_size);
+    struct arena scratch = arena_new(arena_alloc_array(&arn, 100, sizeof(byte)), 100);
+    struct fmt_buf buf = fmt_buf_new(&arn, 4000);
 
     vga_clear_screen();
-
-    struct arena scratch = {
-        .beg = NEW(&arn, u8, 100),
-        .end = scratch.beg + 100,
-    };
-
-    struct fmt_buf buf = NEW_FMT_BUF(&arn, 4000);
 
     fmt_str(STR("Wow, this is the smallest number in the world: "), &buf);
     fmt_i64(-9223372036854775807, &buf, scratch);
