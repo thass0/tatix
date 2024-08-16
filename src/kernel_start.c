@@ -16,7 +16,7 @@ void kernel_start(void)
 {
     struct arena arn = arena_new(global_kernel_arena_buffer, global_kernel_arena_buffer_size);
     struct arena scratch = arena_new(arena_alloc_array(&arn, 100, sizeof(byte)), 100);
-    struct fmt_buf buf = fmt_buf_new(&arn, 4000);
+    struct str_buf buf = fmt_buf_new(&arn, 4000);
 
     vga_clear_screen();
 
@@ -24,12 +24,12 @@ void kernel_start(void)
     fmt_i64(-9223372036854775807, &buf, scratch);
     fmt_str(STR(" And this is a pointer: "), &buf);
     fmt_ptr(&buf, &buf);
-    vga_println(FMT_2_STR(buf));
-    FMT_CLEAR(&buf);
+    vga_println(str_from_buf(buf));
+    str_buf_clear(&buf);
 
     fmt_str(STR("And here are all the types:"), &buf);
-    vga_println(FMT_2_STR(buf));
-    FMT_CLEAR(&buf);
+    vga_println(str_from_buf(buf));
+    str_buf_clear(&buf);
 
     fmt_i8(-1, &buf, scratch);
     fmt_str(STR(", "), &buf);
@@ -50,7 +50,7 @@ void kernel_start(void)
     fmt_u64(4, &buf, scratch);
     fmt_str(STR(", "), &buf);
     fmt_ptr((void *)0xdeadbeef, &buf);
-    vga_println(FMT_2_STR(buf));
+    vga_println(str_from_buf(buf));
 
     init_interrupts();
 

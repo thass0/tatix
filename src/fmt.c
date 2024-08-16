@@ -5,7 +5,7 @@
 // Formatting algorithms uses here: https://nullprogram.com/blog/2023/02/13/
 
 #define IMPL_FMT_SIGNED(t)                                      \
-    i32 fmt_##t(t x, struct fmt_buf *buf, struct arena scratch) \
+    i32 fmt_##t(t x, struct str_buf *buf, struct arena scratch) \
     {                                                           \
         return fmt_i64((i64)x, buf, scratch);                   \
     }
@@ -20,7 +20,7 @@ IMPL_FMT_SIGNED(sz)
 #error "Implementation to format size types depends on them being 64 bits wide"
 #endif
 
-i32 fmt_i64(i64 x, struct fmt_buf *buf, struct arena scratch)
+i32 fmt_i64(i64 x, struct str_buf *buf, struct arena scratch)
 {
     assert(buf != NULL);
 
@@ -40,11 +40,11 @@ i32 fmt_i64(i64 x, struct fmt_buf *buf, struct arena scratch)
         *(--beg) = '-';
     }
 
-    return fmt_str(RANGE_2_STR(beg, end), buf);
+    return fmt_str(str_from_range(beg, end), buf);
 }
 
 #define IMPL_FMT_UNSIGNED(t)                                    \
-    i32 fmt_##t(t x, struct fmt_buf *buf, struct arena scratch) \
+    i32 fmt_##t(t x, struct str_buf *buf, struct arena scratch) \
     {                                                           \
         return fmt_u64((u64)x, buf, scratch);                   \
     }
@@ -53,7 +53,7 @@ IMPL_FMT_UNSIGNED(u8)
 IMPL_FMT_UNSIGNED(u16)
 IMPL_FMT_UNSIGNED(u32)
 
-i32 fmt_u64(u64 x, struct fmt_buf *buf, struct arena scratch)
+i32 fmt_u64(u64 x, struct str_buf *buf, struct arena scratch)
 {
     assert(buf != NULL);
 
@@ -68,10 +68,10 @@ i32 fmt_u64(u64 x, struct fmt_buf *buf, struct arena scratch)
         *(--beg) = '0' + (x % 10);
     } while (x /= 10);
 
-    return fmt_str(RANGE_2_STR(beg, end), buf);
+    return fmt_str(str_from_range(beg, end), buf);
 }
 
-i32 fmt_hex(u64 x, struct fmt_buf *buf)
+i32 fmt_hex(u64 x, struct str_buf *buf)
 {
     assert(buf != NULL);
 
@@ -86,12 +86,12 @@ i32 fmt_hex(u64 x, struct fmt_buf *buf)
     return 0;
 }
 
-i32 fmt_ptr(void *p, struct fmt_buf *buf)
+i32 fmt_ptr(void *p, struct str_buf *buf)
 {
     return fmt_hex((u64)p, buf);
 }
 
-i32 fmt_str(struct str s, struct fmt_buf *buf)
+i32 fmt_str(struct str s, struct str_buf *buf)
 {
     assert(buf != NULL);
 
@@ -105,7 +105,7 @@ i32 fmt_str(struct str s, struct fmt_buf *buf)
     return 0;
 }
 
-i32 fmt_char(char ch, struct fmt_buf *buf)
+i32 fmt_char(char ch, struct str_buf *buf)
 {
     assert(buf != NULL);
 

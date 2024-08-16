@@ -7,7 +7,7 @@
 #include <tx/pic.h>
 #include <tx/vga.h>
 
-void fmt_cpu_state(struct cpu_state *cpu_state, struct fmt_buf *buf)
+void fmt_cpu_state(struct cpu_state *cpu_state, struct str_buf *buf)
 {
     fmt_str(STR("rax:        "), buf);
     fmt_hex(cpu_state->rax, buf);
@@ -82,12 +82,12 @@ void handle_interrupt(struct cpu_state *cpu_state)
     struct arena arn = arena_new(arn_buf, countof(arn_buf));
 
     if (cpu_state->vector < RESERVED_VECTORS_END) {
-        struct fmt_buf buf = fmt_buf_new(&arn, 800);
+        struct str_buf buf = fmt_buf_new(&arn, 800);
 
         fmt_cpu_state(cpu_state, &buf);
         vga_println_with_color(STR("Error: caught unimplemented system interrupt\nSystem state:"),
                                VGA_COLOR(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
-        vga_println_with_color(FMT_2_STR(buf), VGA_COLOR(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
+        vga_println_with_color(str_from_buf(buf), VGA_COLOR(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
         hlt();
     } else if (cpu_state->vector < IRQ_VECTORS_END) {
         vga_println(STR("Caught an IRQ"));
