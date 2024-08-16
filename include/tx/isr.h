@@ -1,7 +1,7 @@
-#ifndef _ISR_H_
-#define _ISR_H_
+#ifndef __TX_ISR_H__
+#define __TX_ISR_H__
 
-#include <base.h>
+#include <tx/base.h>
 
 struct cpu_state {
     u64 rax;
@@ -41,4 +41,4 @@ void handle_interrupt(struct cpu_state *);
 #define IRQ_VECTORS_END 48
 #define NUM_IRQ_VECTORS (IRQ_VECTORS_END - IRQ_VECTORS_BEG)
 
-#endif // _ISR_H_
+#endif // __TX_ISR_H__

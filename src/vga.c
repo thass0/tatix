@@ -1,4 +1,4 @@
-#include <vga.h>
+#include <tx/vga.h>
 
 struct vga_char {
     char ch;

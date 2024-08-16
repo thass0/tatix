@@ -1,10 +1,10 @@
-#include <string.h>
-#include <vga.h>
-#include <arena.h>
-#include <fmt.h>
-#include <idt.h>
+#include <tx/string.h>
+#include <tx/vga.h>
+#include <tx/arena.h>
+#include <tx/fmt.h>
+#include <tx/idt.h>
 
-#include <assert.h>
+#include <tx/assert.h>
 
 // TODO:
 // - Printing to serial console (create a unified kprint that prints to console and vga)

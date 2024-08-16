@@ -1,6 +1,6 @@
-#include <fmt.h>
-#include <assert.h>
-#include <string.h>
+#include <tx/fmt.h>
+#include <tx/assert.h>
+#include <tx/string.h>
 
 // Formatting algorithms uses here: https://nullprogram.com/blog/2023/02/13/
 
@@ -88,7 +88,7 @@ i32 fmt_hex(u64 x, struct fmt_buf *buf)
 
 i32 fmt_ptr(void *p, struct fmt_buf *buf)
 {
-    fmt_hex((u64)p, buf);
+    return fmt_hex((u64)p, buf);
 }
 
 i32 fmt_str(struct str s, struct fmt_buf *buf)
@@ -115,5 +115,5 @@ i32 fmt_char(char ch, struct fmt_buf *buf)
 
     buf->dat[buf->len++] = ch;
 
-    return 0;    
+    return 0;
 }

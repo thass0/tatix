@@ -1,7 +1,7 @@
-#ifndef _STRING_H_
-#define _STRING_H_
+#ifndef __TX_STRING_H__
+#define __TX_STRING_H__
 
-#include <base.h>
+#include <tx/base.h>
 
 struct str {
     char *dat;
@@ -14,4 +14,4 @@ struct str {
 #define RANGE_2_STR(beg, end) \
     (struct str) { .dat = (beg), .len = (end) - (beg) }
 
-#endif // _STRING_H_
+#endif // __TX_STRING_H__

@@ -1,7 +1,7 @@
-#ifndef _ARENA_H_
-#define _ARENA_H_
+#ifndef __TX_ARENA_H__
+#define __TX_ARENA_H__
 
-#include <base.h>
+#include <tx/base.h>
 
 // Based on this eye-opening post: https://nullprogram.com/blog/2023/09/27/
 
@@ -25,4 +25,4 @@ void *alloc(struct arena *arn, sz size, sz align, sz count);
 
 #define NEW(a, t, n) (t *)alloc(a, sizeof(t), __alignof__(t), n)
 
-#endif // _ARENA_H_
+#endif // __TX_ARENA_H__

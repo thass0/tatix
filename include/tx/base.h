@@ -1,5 +1,5 @@
-#ifndef _BASE_H_
-#define _BASE_H_
+#ifndef __TX_BASE_H__
+#define __TX_BASE_H__
 
 #ifndef __GNUC__
 #error "We use GCC here, go away with your strange, non-GCC compiler"
@@ -42,4 +42,4 @@ typedef u8 bool; // Don't care what the C++ compiler thinks of this
             __asm__ volatile ("hlt");           \
     } while (0);
 
-#endif // _BASE_H_
+#endif // __TX_BASE_H__

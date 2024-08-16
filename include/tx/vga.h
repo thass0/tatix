@@ -1,8 +1,8 @@
-#ifndef _VGA_H_
-#define _VGA_H_
+#ifndef __TX_VGA_H__
+#define __TX_VGA_H__
 
-#include <base.h>
-#include <string.h>
+#include <tx/base.h>
+#include <tx/string.h>
 
 enum vga_color {
     VGA_COLOR_BLACK = 0,
@@ -40,4 +40,4 @@ void vga_println_with_color(struct str, vga_color_attr);
 __attribute__ ((no_caller_saved_registers))
 void vga_clear_screen(void);
 
-#endif // _VGA_H_
+#endif // __TX_VGA_H__

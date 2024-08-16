@@ -1,9 +1,9 @@
-#ifndef _FMT_H_
-#define _FMT_H_
+#ifndef __TX_FMT_H__
+#define __TX_FMT_H__
 
-#include <arena.h>
-#include <base.h>
-#include <string.h>
+#include <tx/arena.h>
+#include <tx/base.h>
+#include <tx/string.h>
 
 struct fmt_buf {
     char *dat;
@@ -36,4 +36,4 @@ i32 fmt_ptr(void *, struct fmt_buf *);
 i32 fmt_str(struct str, struct fmt_buf *);
 i32 fmt_char(char, struct fmt_buf *);
 
-#endif // _FMT_H_
+#endif // __TX_FMT_H__

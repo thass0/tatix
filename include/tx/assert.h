@@ -1,9 +1,9 @@
-#ifndef _ASSERT_H_
-#define _ASSERT_H_
+#ifndef __TX_ASSERT_H__
+#define __TX_ASSERT_H__
 
-#include <base.h>
-#include <string.h>
-#include <vga.h>
+#include <tx/base.h>
+#include <tx/string.h>
+#include <tx/vga.h>
 
 #define __STRINGIFY(x) #x
 #define assert(x) __assert((x), #x, __FILE__, __LINE__)
@@ -16,4 +16,4 @@
         }                                                               \
     } while (0);
 
-#endif // _ASSERT_H_
+#endif // __TX_ASSERT_H__

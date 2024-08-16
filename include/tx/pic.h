@@ -1,7 +1,7 @@
-#ifndef _PORTS_H_
-#define _PORTS_H_
+#ifndef __TX_PORTS_H__
+#define __TX_PORTS_H__
 
-#include <base.h>
+#include <tx/base.h>
 
 #define PIC1_CMD_PORT 0x20
 #define PIC1_DAT_PORT 0x21
@@ -57,4 +57,4 @@ static inline void pic_remap(u8 pic1_vec_base, u8 pic2_vec_base)
     outb(PIC1_DAT_PORT, mask2);
 }
 
-#endif // _PORTS_H_
+#endif // __TX_PORTS_H__

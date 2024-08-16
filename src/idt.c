@@ -1,6 +1,6 @@
-#include <base.h>
-#include <isr.h>
-#include <pic.h>
+#include <tx/base.h>
+#include <tx/isr.h>
+#include <tx/pic.h>
 
 // 64-bit Interrupt Descriptor Table
 
@@ -58,7 +58,7 @@ void init_idt(void)
 
     for (i32 i = 0; i < NUM_IRQ_VECTORS; i++)
         init_idt_entry(&idt[NUM_RESERVED_VECTORS + i], isr_stub_irq_table[i], ATTR_INTERRUPT_GATE);
- 
+
     __asm__ volatile ("lidt %0" : : "m"(idtr));
 }
 

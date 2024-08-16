@@ -1,11 +1,11 @@
 // Interrupt service routines
 
-#include <isr.h>
-#include <base.h>
-#include <vga.h>
-#include <pic.h>
-#include <arena.h>
-#include <fmt.h>
+#include <tx/isr.h>
+#include <tx/base.h>
+#include <tx/vga.h>
+#include <tx/pic.h>
+#include <tx/arena.h>
+#include <tx/fmt.h>
 
 void fmt_cpu_state(struct cpu_state *cpu_state, struct fmt_buf *buf)
 {
