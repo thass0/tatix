@@ -2,7 +2,7 @@
         global boot_stage1
 
         [bits 16]
-        
+
 boot_stage1:
 
         call a20_check
@@ -48,7 +48,7 @@ end16:
         jmp end16
 
 %include "a20.s"
-%include "print-string16.s"
+%include "print_string16.s"
 
         align 4
 disk_address_packet:
@@ -61,9 +61,9 @@ dap_sectors_num:
 
 msg_entered_real_mode:  db "Entered 16-bit real mode", 13, 10, 0
 msg_a20_line_not_set:   db "Error: a20 line is clear", 13, 10, 0
-msg_error_reading_disk: db "Error: failed to read disk with int 0x13/ah=0x40", 13, 10, 0
+msg_error_reading_disk: db "Error: failed to read disk with int 0x13/ah=0x42", 13, 10, 0
 msg_error_num_sectors_read:     db "Error: number of sectors requested doesn't match number of sectors read", 13, 10, 0
 
 SECTOR_SIZE equ 512
 BOOT_LOAD_ADDR equ 0x7c00
-READ_SECTORS_NUM equ 127
+READ_SECTORS_NUM equ 64

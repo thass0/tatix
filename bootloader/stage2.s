@@ -1,7 +1,7 @@
         section .stage2
-        
+
         [bits 16]
-        
+
         ;; Load GDT and switch to protected mode
 
         cli                     ; Can't have interrupts during the switch
@@ -86,9 +86,9 @@ end64:
         hlt
         jmp end64
 
-%include "print-string32.s"
+%include "print_string32.s"
 %include "gdt32.s"
 %include "gdt64.s"
 %include "paging.s"
-        
+
 msg_switched_to_comp_mode:      db "Entered 64-bit compatibility mode", 0
