@@ -1,4 +1,3 @@
-#include <tx/assert.h>
 #include <tx/fmt.h>
 #include <tx/string.h>
 
@@ -6,7 +5,8 @@
 
 int append_str(struct str s, struct str_buf *buf)
 {
-    assert(buf);
+    if (!buf)
+        return -1;
 
     if (buf->cap < buf->len + s.len)
         return -1;
@@ -20,7 +20,8 @@ int append_str(struct str s, struct str_buf *buf)
 
 int append_char(char ch, struct str_buf *buf)
 {
-    assert(buf);
+    if (!buf)
+        return -1;
 
     // Capacity will be exceeded if we add one byte.
     if (buf->cap == buf->len)
@@ -33,7 +34,8 @@ int append_char(char ch, struct str_buf *buf)
 
 int append_i64(i64 x, struct str_buf *buf)
 {
-    assert(buf);
+    if (!buf)
+        return -1;
 
     char tmp[64];
     char *end = tmp + countof(tmp);
@@ -53,7 +55,8 @@ int append_i64(i64 x, struct str_buf *buf)
 
 int append_u64(u64 x, struct str_buf *buf)
 {
-    assert(buf);
+    if (!buf)
+        return -1;
 
     char tmp[64];
     char *end = tmp + countof(tmp);
@@ -70,7 +73,8 @@ enum hex_alpha { HEX_ALPHA_UPPER, HEX_ALPHA_LOWER };
 
 int append_hex(u64 x, enum hex_alpha alpha, struct str_buf *buf)
 {
-    assert(buf);
+    if (!buf)
+        return -1;
 
     char tmp[64];
     char *end = tmp + countof(tmp);
@@ -105,9 +109,8 @@ __printf(2, 3) int fmt(struct str_buf *buf, const char *fmt, ...)
     enum { NOTHING, MODIFIER, CONVERSION } expect = NOTHING;
     int rc = 0;
 
-    assert(buf);
-    assert(buf->dat);
-    assert(fmt);
+    if (!buf || !buf->dat || !fmt)
+        return -1;
 
     va_start(argp, fmt);
     while (*fmt) {
@@ -210,7 +213,7 @@ __printf(2, 3) int fmt(struct str_buf *buf, const char *fmt, ...)
             }
 
             if (rc < 0)
-                return rc;
+                goto exit;
 
             expect = NOTHING;
             fmt++;
@@ -218,8 +221,7 @@ __printf(2, 3) int fmt(struct str_buf *buf, const char *fmt, ...)
         }
     }
 
-    buf->dat[buf->len] = '\0';
-
+exit:
     va_end(argp);
-    return 0;
+    return rc;
 }

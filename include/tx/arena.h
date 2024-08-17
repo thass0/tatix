@@ -73,4 +73,13 @@ static inline void *arena_alloc_array(struct arena *arn, sz n, sz size)
     return arena_alloc_aligned(arn, n * size, alignof(void *));
 }
 
+static inline struct str_buf fmt_buf_new(struct arena *arn, sz cap)
+{
+    struct str_buf buf;
+    buf.dat = arena_alloc_array(arn, cap, sizeof(*buf.dat));
+    buf.len = 0;
+    buf.cap = cap;
+    return buf;
+}
+
 #endif // __TX_ARENA_H__
