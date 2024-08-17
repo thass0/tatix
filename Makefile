@@ -39,9 +39,6 @@ $(BUILD_DIR)/%.o: $(BOOTLOADER_DIR)/%.s | $(BUILD_DIR)
 $(BUILD_DIR)/isr.o: $(SRC_DIR)/isr.c | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -mgeneral-regs-only -c $< -o $@
 
-$(BUILD_DIR)/vga.o: $(SRC_DIR)/vga.c | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -mgeneral-regs-only -c $< -o $@
-
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
@@ -52,7 +49,7 @@ $(BUILD_DIR):
 	mkdir $@
 
 boot: $(BOOT_IMAGE)
-	qemu-system-x86_64 -no-reboot -drive file=$<,format=raw,index=0,media=disk
+	qemu-system-x86_64 -display none -serial stdio -no-reboot -drive file=$<,format=raw,index=0,media=disk
 
 fmt:
 	clang-format -i --style=file $(SRCS) $(wildcard include/*.h)

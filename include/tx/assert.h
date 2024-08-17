@@ -3,16 +3,15 @@
 
 #include <tx/asm.h>
 #include <tx/base.h>
+#include <tx/print.h>
 #include <tx/string.h>
-#include <tx/vga.h>
 
 #define crash(msg) __crash(msg, __FILE__, __LINE__)
 
-#define __crash(msg, file, line)                                                 \
-    do {                                                                         \
-        vga_println_with_color(STR(file ":" STRINGIFY(line) ": " msg),           \
-                               VGA_COLOR(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK)); \
-        hlt();                                                                   \
+#define __crash(msg, file, line)                                \
+    do {                                                        \
+        print_str(STR(file ":" STRINGIFY(line) ": " msg "\n")); \
+        hlt();                                                  \
     } while (0)
 
 #define assert(x) __assert((x), #x, __FILE__, __LINE__)

@@ -5,7 +5,6 @@
 #include <tx/fmt.h>
 #include <tx/isr.h>
 #include <tx/pic.h>
-#include <tx/vga.h>
 
 void fmt_cpu_state(struct cpu_state *cpu_state, struct str_buf *buf)
 {
@@ -26,11 +25,10 @@ void handle_interrupt(struct cpu_state *cpu_state)
 
     if (cpu_state->vector < RESERVED_VECTORS_END) {
         fmt_cpu_state(cpu_state, &buf);
-        vga_println_with_color(STR("Error: caught unimplemented system interrupt\nSystem state:"),
-                               VGA_COLOR(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
-        vga_println_with_color(str_from_buf(buf), VGA_COLOR(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));
+        print_str(STR("Error: caught unimplemented system interrupt\nSystem state:\n"));
+        print_str(str_from_buf(buf));
         hlt();
     } else if (cpu_state->vector < IRQ_VECTORS_END) {
-        vga_println(STR("Caught an IRQ"));
+        print_str(STR("Caught an IRQ"));
     }
 }
