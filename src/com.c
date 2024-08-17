@@ -1,7 +1,6 @@
 // Driver for x86 COM ports. The underlying device is 16550 or 8250 compatible.
 
 #include <tx/asm.h>
-#include <tx/assert.h>
 #include <tx/com.h>
 
 #define OFFSET_RX 0
@@ -63,9 +62,7 @@ int com_init(u16 port)
 
 int com_write(u16 port, struct str str)
 {
-    assert(str.dat);
-
-    if (str.len <= 0)
+    if (!str.dat || str.len <= 0)
         return -1;
 
     while (str.len--) {
@@ -81,10 +78,7 @@ int com_read(u16 port, struct str_buf *buf)
 {
     sz len = 0;
 
-    assert(buf);
-    assert(buf->dat);
-
-    if (buf->cap <= 0)
+    if (!buf || !buf->dat || buf->cap <= 0)
         return -1;
 
     while (len < buf->cap) {
