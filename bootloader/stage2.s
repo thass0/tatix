@@ -79,8 +79,8 @@ start_long_mode:
         mov fs, ax
         mov gs, ax
 
-        extern kernel_start
-        call kernel_start
+        extern kernel_init
+        call kernel_init
 
 end64:
         hlt

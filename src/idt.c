@@ -61,7 +61,7 @@ void init_idt(void)
     __asm__ volatile("lidt %0" : : "m"(idtr));
 }
 
-void init_interrupts(void)
+void interrupt_init(void)
 {
     __asm__ volatile("cli");
     pic_remap(IRQ_VECTORS_BEG, IRQ_VECTORS_BEG + 8);
