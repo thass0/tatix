@@ -1,3 +1,4 @@
+#include <tx/asm.h>
 #include <tx/base.h>
 #include <tx/isr.h>
 #include <tx/pic.h>
@@ -12,12 +13,12 @@ struct idt_entry {
     u16 offset2;
     u32 offset3;
     u32 reserved;
-} __attribute__((packed));
+} __packed;
 
 struct idtr {
     u16 limit;
     u64 base;
-} __attribute__((packed));
+} __packed;
 
 #define GATE_TYPE_INTERRUPT 0xe
 #define GATE_TYPE_TRAP 0xf
@@ -27,7 +28,7 @@ struct idtr {
 
 extern u16 GDT64_CODE_SEG_SELECTOR;
 
-__attribute__((aligned(16))) static struct idt_entry idt[NUM_IDT_ENTRIES];
+__aligned(16) static struct idt_entry idt[NUM_IDT_ENTRIES];
 
 extern ptr isr_stub_reserved_table[22];
 extern ptr isr_stub_irq_table[15];
@@ -63,8 +64,8 @@ void init_idt(void)
 
 void interrupt_init(void)
 {
-    __asm__ volatile("cli");
+    disable_interrupts();
     pic_remap(IRQ_VECTORS_BEG, IRQ_VECTORS_BEG + 8);
     init_idt();
-    __asm__ volatile("sti");
+    enable_interrupts();
 }

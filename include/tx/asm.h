@@ -21,4 +21,14 @@ static inline u8 inb(u16 port)
     return ret;
 }
 
+static inline void disable_interrupts(void)
+{
+    __asm__ volatile("cli");
+}
+
+static inline void enable_interrupts(void)
+{
+    __asm__ volatile("sti");
+}
+
 #endif // __TXT_ASM_H__
