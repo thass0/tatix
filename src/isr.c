@@ -9,81 +9,22 @@
 
 void fmt_cpu_state(struct cpu_state *cpu_state, struct str_buf *buf)
 {
-    fmt_str(STR("rax:        "), buf);
-    fmt_hex(cpu_state->rax, buf);
-    fmt_str(STR("  "), buf);
-    fmt_str(STR("rbx:    "), buf);
-    fmt_hex(cpu_state->rbx, buf);
-    fmt_char('\n', buf);
-    fmt_str(STR("rcx:        "), buf);
-    fmt_hex(cpu_state->rcx, buf);
-    fmt_str(STR("  "), buf);
-    fmt_str(STR("rdx:    "), buf);
-    fmt_hex(cpu_state->rdx, buf);
-    fmt_char('\n', buf);
-    fmt_str(STR("rsi:        "), buf);
-    fmt_hex(cpu_state->rsi, buf);
-    fmt_str(STR("  "), buf);
-    fmt_str(STR("rdi:    "), buf);
-    fmt_hex(cpu_state->rdi, buf);
-    fmt_char('\n', buf);
-    fmt_str(STR("rbp:        "), buf);
-    fmt_hex(cpu_state->rbp, buf);
-    fmt_str(STR("  "), buf);
-    fmt_str(STR("r8:     "), buf);
-    fmt_hex(cpu_state->r8, buf);
-    fmt_char('\n', buf);
-    fmt_str(STR("r9:         "), buf);
-    fmt_hex(cpu_state->r9, buf);
-    fmt_str(STR("  "), buf);
-    fmt_str(STR("r10:    "), buf);
-    fmt_hex(cpu_state->r10, buf);
-    fmt_char('\n', buf);
-    fmt_str(STR("r11:        "), buf);
-    fmt_hex(cpu_state->r11, buf);
-    fmt_str(STR("  "), buf);
-    fmt_str(STR("r12:    "), buf);
-    fmt_hex(cpu_state->r12, buf);
-    fmt_char('\n', buf);
-    fmt_str(STR("r13:        "), buf);
-    fmt_hex(cpu_state->r13, buf);
-    fmt_str(STR("  "), buf);
-    fmt_str(STR("r14:    "), buf);
-    fmt_hex(cpu_state->r14, buf);
-    fmt_char('\n', buf);
-    fmt_str(STR("r15:        "), buf);
-    fmt_hex(cpu_state->r15, buf);
-    fmt_str(STR("  "), buf);
-    fmt_str(STR("vector: "), buf);
-    fmt_hex(cpu_state->vector, buf);
-    fmt_char('\n', buf);
-    fmt_str(STR("error code: "), buf);
-    fmt_hex(cpu_state->error_code, buf);
-    fmt_str(STR("  "), buf);
-    fmt_str(STR("rip:    "), buf);
-    fmt_hex(cpu_state->rip, buf);
-    fmt_char('\n', buf);
-    fmt_str(STR("cs:         "), buf);
-    fmt_hex(cpu_state->cs, buf);
-    fmt_str(STR("  "), buf);
-    fmt_str(STR("rflags: "), buf);
-    fmt_hex(cpu_state->rflags, buf);
-    fmt_char('\n', buf);
-    fmt_str(STR("rsp:        "), buf);
-    fmt_hex(cpu_state->rsp, buf);
-    fmt_str(STR("  "), buf);
-    fmt_str(STR("ss:     "), buf);
-    fmt_hex(cpu_state->ss, buf);
+    fmt(buf,
+        "rax: %lx\nrbx: %lx\nrcx: %lx\nrdx: %lx\nrsi: %lx\nrdi: %lx\nrbp: %lx\n"
+        "r8: %lx\nr9: %lx\nr10: %lx\nr11: %lx\nr12: %lx\nr13: %lx\nr14: %lx\nr15: %lx\n"
+        "vector: %lx\nerror code: %lx\nrip: %lx\ncs: %lx\nrflags: %lx\nrsp: %lx\nss: %lx\n",
+        cpu_state->rax, cpu_state->rbx, cpu_state->rcx, cpu_state->rdx, cpu_state->rsi, cpu_state->rdi, cpu_state->rbp,
+        cpu_state->r8, cpu_state->r9, cpu_state->r10, cpu_state->r11, cpu_state->r12, cpu_state->r13, cpu_state->r14,
+        cpu_state->r15, cpu_state->vector, cpu_state->error_code, cpu_state->rip, cpu_state->cs, cpu_state->rflags,
+        cpu_state->rsp, cpu_state->ss);
 }
 
 void handle_interrupt(struct cpu_state *cpu_state)
 {
-    u8 arn_buf[1024];
-    struct arena arn = arena_new(arn_buf, countof(arn_buf));
+    char underlying[1024];
+    struct str_buf buf = str_buf_new(underlying, 0, countof(underlying));
 
     if (cpu_state->vector < RESERVED_VECTORS_END) {
-        struct str_buf buf = fmt_buf_new(&arn, 800);
-
         fmt_cpu_state(cpu_state, &buf);
         vga_println_with_color(STR("Error: caught unimplemented system interrupt\nSystem state:"),
                                VGA_COLOR(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK));

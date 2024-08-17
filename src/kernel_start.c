@@ -1,4 +1,5 @@
 #include <tx/arena.h>
+#include <tx/com.h>
 #include <tx/fmt.h>
 #include <tx/idt.h>
 #include <tx/string.h>
@@ -15,42 +16,21 @@ u8 global_kernel_arena_buffer[global_kernel_arena_buffer_size];
 void kernel_start(void)
 {
     struct arena arn = arena_new(global_kernel_arena_buffer, global_kernel_arena_buffer_size);
-    struct arena scratch = arena_new(arena_alloc_array(&arn, 100, sizeof(byte)), 100);
-    struct str_buf buf = fmt_buf_new(&arn, 4000);
+    struct str_buf buf = fmt_buf_new(&arn, 1000);
 
     vga_clear_screen();
+    com_init(COM1_PORT);
+    com_write(COM1_PORT, STR("Hello, world\n"));
 
-    fmt_str(STR("Wow, this is the smallest number in the world: "), &buf);
-    fmt_i64(-9223372036854775807, &buf, scratch);
-    fmt_str(STR(" And this is a pointer: "), &buf);
-    fmt_ptr(&buf, &buf);
+    fmt(&buf, "Wow, this is the smallest number in the world: %lld And this is a pointer: %llx", -9223372036854775807LL,
+        (unsigned long long)&buf);
     vga_println(str_from_buf(buf));
     str_buf_clear(&buf);
 
-    fmt_str(STR("And here are all the types:"), &buf);
+    fmt(&buf, "And here are all the types: %hhd, %hd, %d, %ld, %lld, %hhu, %hu, %u, %lu, %llx", -1, -2, -3, -4L,
+        -29583LL, 1, 2, 3, 4LU, 0xdeadbeefLLU);
     vga_println(str_from_buf(buf));
     str_buf_clear(&buf);
-
-    fmt_i8(-1, &buf, scratch);
-    fmt_str(STR(", "), &buf);
-    fmt_i16(-2, &buf, scratch);
-    fmt_str(STR(", "), &buf);
-    fmt_i32(-3, &buf, scratch);
-    fmt_str(STR(", "), &buf);
-    fmt_i64(-4, &buf, scratch);
-    fmt_str(STR(", "), &buf);
-    fmt_sz(-646464, &buf, scratch);
-    fmt_str(STR(", "), &buf);
-    fmt_u8(1, &buf, scratch);
-    fmt_str(STR(", "), &buf);
-    fmt_u16(2, &buf, scratch);
-    fmt_str(STR(", "), &buf);
-    fmt_u32(3, &buf, scratch);
-    fmt_str(STR(", "), &buf);
-    fmt_u64(4, &buf, scratch);
-    fmt_str(STR(", "), &buf);
-    fmt_ptr((void *)0xdeadbeef, &buf);
-    vga_println(str_from_buf(buf));
 
     init_interrupts();
 
