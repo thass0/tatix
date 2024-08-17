@@ -103,4 +103,14 @@ typedef double f64;
 #define va_copy(d, s) __builtin_va_copy(d, s)
 typedef __builtin_va_list va_list;
 
+////////////////////////////////////////////////////////////////////////////////
+// Attributes                                                                 //
+////////////////////////////////////////////////////////////////////////////////
+
+#define __packed __attribute__((packed))
+#define __aligned(n) __attribute__((aligned(n)))
+#define __no_caller_saved_regs __attribute__((no_caller_saved_registers))
+#define __printf(fmt_str_idx, first_arg_idx) __attribute__((format(printf, fmt_str_idx, first_arg_idx)))
+#define __unused __attribute__((unused))
+
 #endif // __TX_BASE_H__
