@@ -105,6 +105,15 @@ int append_ptr(void *p, struct str_buf *buf)
 __printf(2, 3) int fmt(struct str_buf *buf, const char *fmt, ...)
 {
     va_list argp;
+    int rc = 0;
+    va_start(argp, fmt);
+    rc = vfmt(buf, fmt, argp);
+    va_end(argp);
+    return rc;
+}
+
+int vfmt(struct str_buf *buf, const char *fmt, va_list argp)
+{
     enum { NONE, L, HH, H } modifier = NONE;
     enum { NOTHING, MODIFIER, CONVERSION } expect = NOTHING;
     int rc = 0;
@@ -112,7 +121,6 @@ __printf(2, 3) int fmt(struct str_buf *buf, const char *fmt, ...)
     if (!buf || !buf->dat || !fmt)
         return -1;
 
-    va_start(argp, fmt);
     while (*fmt) {
         if (expect == NOTHING && *fmt == '%') {
             expect = MODIFIER;
@@ -213,7 +221,7 @@ __printf(2, 3) int fmt(struct str_buf *buf, const char *fmt, ...)
             }
 
             if (rc < 0)
-                goto exit;
+                return rc;
 
             expect = NOTHING;
             fmt++;
@@ -221,7 +229,5 @@ __printf(2, 3) int fmt(struct str_buf *buf, const char *fmt, ...)
         }
     }
 
-exit:
-    va_end(argp);
     return rc;
 }
