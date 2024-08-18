@@ -14,12 +14,14 @@
         ;;
         ;; The basic "flat model" comprises a code segment and a data segment. Both
         ;; of these segments are mapped to the entire linear address space (their
-        ;; base addresses and limits are identical). Using this simplest of all
-        ;; models is fine since we just want to get to 64-bit mode.
+        ;; base addresses and limits are identical). The base is 0 and the limit is
+        ;; 4GB (the limit fields in 20 bits and the granularity is set to 4KB,
+        ;; 2^20 * 4KB  = 4GB). Using this simplest of all models is fine since we
+        ;; just want to get to 64-bit mode.
 
         ;; Base address of GDT should be aligned on an eight-byte boundary
         align 8
-        
+
 gdt32_start:
         ;; 8-byte null descriptor (index 0).
         ;; Used to catch translations with a null selector.
@@ -54,8 +56,9 @@ gdt32_data_segment:
         db 0x00
         ;; 0-3: segment type that specifies a read/write data segment
         db 10010010b
+        ;; 6: must be set for 32-bit operand size for stack
         db 11001111b
-        dw 0x00
+        db 0x00
 
 gdt32_end:
 

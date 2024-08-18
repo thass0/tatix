@@ -1,5 +1,9 @@
         ;; See gdt32.s for comments. This GDT is identical to the one for 32-bit
         ;; protected/long mode except that 64-bit-specific features are turned on.
+        ;;
+        ;; The segment limit of code and data segments is not checked in 64-bit mode
+        ;; (see IA-32 manual, volume 3, section 5.3.1). This means that we are not
+        ;; constrained by the 4G limit that we had in protected mode.
 
         align 16
 gdt64_start:
@@ -36,8 +40,9 @@ gdt64_data_segment:
         db 0x00
         ;; 0-3: segment type that specifies a read/write data segment
         db 10010010b
-        db 10101111b
-        dw 0x00
+        ;; 6: must be set for 32-bit operand size for stack
+        db 11101111b
+        db 0x00
 
 gdt64_end:
 

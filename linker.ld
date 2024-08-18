@@ -1,20 +1,18 @@
 MEMORY
 {
-        stage1 (rwx) : ORIGIN = 0x7c00, LENGTH = 512
-        stage2 (rwx) : ORIGIN = 0x7e00, LENGTH = 512
-        kernel (rwx) : ORIGIN = 0x8000, LENGTH = 65024
+        bootloader (rwx) : ORIGIN = 0x7c00, LENGTH = 512
+        kernel (rwx) : ORIGIN = 0x7e00, LENGTH = 65024
 }
 
-ENTRY(boot_stage1)
+ENTRY(start_real_mode)
 SECTIONS
 {
-        .stage1 : { *(.stage1*); } > stage1
+        .bootloader : { *(.bootloader*); } > bootloader
         .bootsign (0x7c00 + 510) :
         {
                 BYTE(0x55)
                 BYTE(0xaa)
-        } > stage1
-        .stage2 : { *(.stage2*); } > stage2
+        } > bootloader
         .text : { *(.text*); } > kernel
         .rodata : { *(.rodata*); } > kernel
         .data : { *(.data*); } > kernel

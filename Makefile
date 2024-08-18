@@ -14,8 +14,8 @@ C_SRCS := $(wildcard $(SRC_DIR)/*.c)
 C_OBJS := $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(C_SRCS))
 C_DEPS := $(C_OBJS:%.o=%.d)
 
-BOOTLOADER_SRCS := $(BOOTLOADER_DIR)/stage1.s $(BOOTLOADER_DIR)/stage2.s
-BOOTLOADER_OBJS := $(patsubst $(BOOTLOADER_DIR)/%.s, $(BUILD_DIR)/%.o, $(BOOTLOADER_SRCS))
+BOOTLOADER_SRCS := $(BOOTLOADER_DIR)/bootloader.S
+BOOTLOADER_OBJS := $(patsubst $(BOOTLOADER_DIR)/%.S, $(BUILD_DIR)/%.o, $(BOOTLOADER_SRCS))
 
 ASM_SRCS := $(wildcard $(SRC_DIR)/*.s)
 ASM_OBJS := $(patsubst $(SRC_DIR)/%.s, $(BUILD_DIR)/%.o, $(ASM_SRCS))
@@ -30,7 +30,7 @@ $(BOOT_IMAGE): $(BUILD_DIR)/kernel.o
 $(BUILD_DIR)/kernel.o: $(OBJS) | $(BUILD_DIR)
 	ld -T linker.ld -o $@ $^
 
-$(BUILD_DIR)/%.o: $(BOOTLOADER_DIR)/%.s | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: $(BOOTLOADER_DIR)/%.S | $(BUILD_DIR)
 	$(NASM) -I$(BOOTLOADER_DIR) $< -o $@
 
 # To re-compile if headers change:
