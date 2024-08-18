@@ -28,7 +28,7 @@ struct cpu_state {
     u64 rflags;
     u64 rsp;
     u64 ss;
-};
+} __packed;
 
 void handle_interrupt(struct cpu_state *);
 

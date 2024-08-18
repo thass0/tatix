@@ -9,7 +9,7 @@ int print_str(struct str str)
     return com_write(COM1_PORT, str);
 }
 
-__printf(2, 3) int print_fmt(struct str_buf buf, const char *fmt, ...)
+int print_fmt(struct str_buf buf, struct str fmt, ...)
 {
     va_list argp;
     int rc;

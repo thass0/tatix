@@ -102,7 +102,7 @@ int append_ptr(void *p, struct str_buf *buf)
     return append_hex((u64)p, HEX_ALPHA_LOWER, buf);
 }
 
-__printf(2, 3) int fmt(struct str_buf *buf, const char *fmt, ...)
+int fmt(struct str_buf *buf, struct str fmt, ...)
 {
     va_list argp;
     int rc = 0;
@@ -112,44 +112,45 @@ __printf(2, 3) int fmt(struct str_buf *buf, const char *fmt, ...)
     return rc;
 }
 
-int vfmt(struct str_buf *buf, const char *fmt, va_list argp)
+int vfmt(struct str_buf *buf, struct str fmt, va_list argp)
 {
     enum { NONE, L, HH, H } modifier = NONE;
     enum { NOTHING, MODIFIER, CONVERSION } expect = NOTHING;
     int rc = 0;
+    sz i = 0;
 
-    if (!buf || !buf->dat || !fmt)
+    if (!buf || !buf->dat || !fmt.dat || fmt.len < 0)
         return -1;
 
-    while (*fmt) {
-        if (expect == NOTHING && *fmt == '%') {
+    while (i < fmt.len) {
+        if (expect == NOTHING && fmt.dat[i] == '%') {
             expect = MODIFIER;
-            fmt++;
+            i++;
             continue;
         }
 
         if (expect == NOTHING) {
-            append_char(*fmt, buf);
-            fmt++;
+            append_char(fmt.dat[i], buf);
+            i++;
             continue;
         }
 
         if (expect == MODIFIER) {
-            switch (*fmt) {
+            switch (fmt.dat[i]) {
             case 'l':
                 modifier = L;
-                if (*(fmt + 1) == 'l')
-                    fmt += 2;
+                if (fmt.dat[i + 1] == 'l')
+                    i += 2;
                 else
-                    fmt++;
+                    i++;
                 break;
             case 'h':
-                if (*(fmt + 1) == 'h') {
+                if (fmt.dat[i + 1] == 'h') {
                     modifier = HH;
-                    fmt += 2;
+                    i += 2;
                 } else {
                     modifier = H;
-                    fmt++;
+                    i++;
                 }
                 break;
             default:
@@ -161,7 +162,7 @@ int vfmt(struct str_buf *buf, const char *fmt, va_list argp)
         }
 
         if (expect == CONVERSION) {
-            switch (*fmt) {
+            switch (fmt.dat[i]) {
             case 'i':
             case 'd':
                 if (modifier == L)
@@ -224,7 +225,7 @@ int vfmt(struct str_buf *buf, const char *fmt, va_list argp)
                 return rc;
 
             expect = NOTHING;
-            fmt++;
+            i++;
             continue;
         }
     }

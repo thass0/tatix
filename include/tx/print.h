@@ -5,6 +5,6 @@
 #include <tx/string.h>
 
 int print_str(struct str str);
-__printf(2, 3) int print_fmt(struct str_buf buf, const char *fmt, ...);
+int print_fmt(struct str_buf buf, struct str fmt, ...);
 
 #endif // __TX_PRINT_H__
