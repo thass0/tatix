@@ -153,10 +153,24 @@ start_prot_mode:
         mov fs, ax
         mov gs, ax
 
-        ;; Build 4 level page table and switch to long mode
-        mov ebx, 0x1000
-        call build_page_table
-        mov cr3, ebx            ; MMU finds the PML4 table in cr3
+        ;; Build 2-level page table using 1GB pages and map the first four GB of memory
+
+        ;; We need two pages in total. Zero-initializing them is safe
+        mov ecx, BOOT_PAGE_TAB_SIZE * 2
+        mov edi, BOOT_PAGE_TAB_ADDR
+        xor eax, eax
+        rep stosb
+
+        ;; Bits 0 and 1 enable the present flag and read/write flag, respectively.
+        mov dword [BOOT_PAGE_TAB_ADDR], 11b | (BOOT_PAGE_TAB_ADDR + BOOT_PAGE_SIZE)
+        ;; Bit 7 in the PDPT entries enables 1GB pages.
+        mov dword [BOOT_PAGE_TAB_ADDR + BOOT_PAGE_SIZE + 0x00], 11b | (1 << 7) | (0 << 30)
+        mov dword [BOOT_PAGE_TAB_ADDR + BOOT_PAGE_SIZE + 0x08], 11b | (1 << 7) | (1 << 30)
+        mov dword [BOOT_PAGE_TAB_ADDR + BOOT_PAGE_SIZE + 0x10], 11b | (1 << 7) | (2 << 30)
+        mov dword [BOOT_PAGE_TAB_ADDR + BOOT_PAGE_SIZE + 0x18], 11b | (1 << 7) | (3 << 30)
+
+        mov edi, BOOT_PAGE_TAB_ADDR
+        mov cr3, edi ; MMU finds the PML4 table in cr3
 
         ;; Enable Physical Address Extension (PAE)
         mov eax, cr4
@@ -180,54 +194,6 @@ start_prot_mode:
         lgdt [gdt64_pseudo_descriptor]
 
         jmp BOOT_GDT_CODE_DESC:start_long_mode
-
-        ;; Builds a 4 level page table starting at the address that's passed in ebx.
-build_page_table:
-        pusha
-
-        ;; Initialize 512 64-bit page directory entries. All flags in the page directory
-        ;; entries are set to 0 except for the enable read/write flag (bit 1).
-
-PAGE64_PAGE_SIZE equ 0x1000
-PAGE64_TAB_SIZE equ 0x1000
-PAGE64_TAB_ENT_NUM equ 512
-
-        ;; Initialize all four tables to 0. If the present flag is cleared, all other bits in any
-        ;; entry are ignored. So by filling all entries with zeros, they are all "not present".
-        ;; Each repetition zeros four bytes at once. That's why a number of repetitions equal to
-        ;; the size of a single page table is enough to zero all four tables.
-        mov ecx, PAGE64_TAB_SIZE ; ecx stores the number of repetitions
-        mov edi, ebx             ; edi stores the base address
-        xor eax, eax             ; eax stores the value
-        rep stosd
-
-        ;; Link first entry in PML4 table to the PDP table
-        mov edi, ebx
-        lea eax, [edi + (PAGE64_TAB_SIZE | 11b)] ; Set read/write and present flags
-        mov dword [edi], eax
-
-        ;; Link first entry in PDP table to the PD table
-        add edi, PAGE64_TAB_SIZE
-        add eax, PAGE64_TAB_SIZE
-        mov dword [edi], eax
-
-        ;; Link the first entry in the PD table to the page table
-        add edi, PAGE64_TAB_SIZE
-        add eax, PAGE64_TAB_SIZE
-        mov dword [edi], eax
-
-        ;; Identity map the first 2 MB of memory in the single page table
-        add edi, PAGE64_TAB_SIZE
-        mov ebx, 11b
-        mov ecx, PAGE64_TAB_ENT_NUM
-set_page_table_entry:
-        mov dword [edi], ebx
-        add ebx, PAGE64_PAGE_SIZE
-        add edi, 8
-        loop set_page_table_entry
-
-        popa
-        ret
 
 print32:
 	mov dx, COM1_PORT
