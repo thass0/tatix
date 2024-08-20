@@ -274,127 +274,112 @@ PROT_MODE_MSG_LEN equ $ - prot_mode_msg
 long_mode_msg: db "Booted long mode", 0xa
 LONG_MODE_MSG_LEN equ $ - long_mode_msg
 
-;; Definition of a Global Descriptor Table (GDT) that implements
-;; Intel's basic "flat model" of memory segmentation.
-;; See volume 3, chapter 3 of Intel's IA-32 architecture manual,
-;; Protected-mode Memory Management
-;;
-;; Memory segmentation employs logical addresses. The logical address
-;; consists of two parts: a segment selector and an offset. In this case,
-;; the segment selector is an offset into the GDT. The segment descriptor
-;; in the GDT that's selected contains the base address of the segment in
-;; linear address space. Adding the offset part of the logical address to
-;; the base address of the segment gives the linear address of the byte
-;; that the logical address refers to. Without paging, linear address
-;; space is physical address space (that applies here).
-;;
-;; The basic "flat model" comprises a code segment and a data segment. Both
-;; of these segments are mapped to the entire linear address space (their
-;; base addresses and limits are identical). The base is 0 and the limit is
-;; 4GB (the limit fields in 20 bits and the granularity is set to 4KB,
-;; 2^20 * 4KB  = 4GB). Using this simplest of all models is fine since we
-;; just want to get to 64-bit mode.
+	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	;; Global Descriptor Tables                                                 ;;
+	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Base address of GDT should be aligned on an eight-byte boundary
-align 8
+	;; Definition of a Global Descriptor Table (GDT) that implements
+	;; Intel's basic "flat model" of memory segmentation.
+	;; See volume 3, chapter 3 of Intel's IA-32 architecture manual,
+	;; Protected-mode Memory Management
+	;;
+	;; Memory segmentation employs logical addresses. The logical address
+	;; consists of two parts: a segment selector and an offset. In this case,
+	;; the segment selector is an offset into the GDT. The segment descriptor
+	;; in the GDT that's selected contains the base address of the segment in
+	;; linear address space. Adding the offset part of the logical address to
+	;; the base address of the segment gives the linear address of the byte
+	;; that the logical address refers to. Without paging, linear address
+	;; space is physical address space (that applies here).
+	;;
+	;; The basic "flat model" comprises a code segment and a data segment. Both
+	;; of these segments are mapped to the entire linear address space (their
+	;; base addresses and limits are identical). The base is 0 and the limit is
+	;; 4GB (the limit fields in 20 bits and the granularity is set to 4KB,
+	;; 2^20 * 4KB  = 4GB). Using this simplest of all models is fine since we
+	;; just want to get to 64-bit mode.
+
+	;; Base address of GDT should be aligned on an eight-byte boundary
+	align 8
+
+	;; Bits in the low config byte
+GDT_CODE_TYPE		equ (1010b << 0) ; Execute/read code segment
+GDT_DATA_TYPE		equ (0010b << 0) ; Read/write data segment
+GDT_FLAG_S		equ (1 << 4) ; Code or data segment? (always set)
+GDT_DPL			equ (00b << 5) ; Highest privilege level
+GDT_FLAG_P		equ (1 << 7) ; Segment present? (always set)
+
+	;; Bits in the high config byte
+GDT32_FLAG_L		equ (0 << 5) ; Native 64-bit code? (set for 64-bit mode)
+GDT64_CODE_FLAG_L	equ (1 << 5)
+GDT64_DATA_FLAG_L	equ (0 << 5)
+GDT32_FLAG_D		equ (1 << 6) ; Intel says always set this for 32-bit code
+GDT64_FLAG_D		equ (0 << 6)
+GDT_FLAG_G		equ (1 << 7) ; Count the limit in 4KB units
 
 gdt32_start:
-;; 8-byte null descriptor (index 0).
-;; Used to catch translations with a null selector.
-dd 0x0
-dd 0x0
+	;; 8-byte null descriptor (index 0) used to catch translations with a null selector.
+	dd 0x0
+	dd 0x0
 
 gdt32_code_segment:
-;; 8-byte code segment descriptor (index 1).
-;; First 16 bits of segment limit
-dw 0xffff
-;; First 24 bits of segment base address
-dw 0x0000
-db 0x00
-;; 0-3: segment type that specifies an execute/read code segment
-;;   4: descriptor type flag indicating that this is a code/data segment
-;; 5-6: Descriptor privilege level 0 (most privileged)
-;;   7: Segment present flag set indicating that the segment is present
-db 10011010b
-;; 0-3: last 4 bits of segment limit
-;;   4: unused (available for use by system software)
-;;   5: 64-bit code segment flag indicates that the segment doesn't contain 64-bit code
-;;   6: default operation size of 32 bits
-;;   7: granularity of 4 kilobyte units
-db 11001111b
-;; Last 8 bits of segment base address
-db 0x00
+	dw 0xffff ; Segement limit 0:15
+	dw 0x0000 ; Base address 0:15
+	db 0x00 ; Base address 16:23
+	db GDT_CODE_TYPE | GDT_FLAG_S | GDT_DPL | GDT_FLAG_P
+	; Low four bits are segment limit bits 16 to 19:
+	db 1111b | GDT32_FLAG_L | GDT32_FLAG_D | GDT_FLAG_G
+	db 0x00 ; Base address 24:31
 
 gdt32_data_segment:
-;; Only differences are explained ...
-dw 0xffff
-dw 0x0000
-db 0x00
-;; 0-3: segment type that specifies a read/write data segment
-db 10010010b
-;; 6: must be set for 32-bit operand size for stack
-db 11001111b
-db 0x00
+	dw 0xffff
+	dw 0x0000
+	db 0x00
+	db GDT_DATA_TYPE | GDT_FLAG_S | GDT_DPL | GDT_FLAG_P
+	db 1111b | GDT32_FLAG_L | GDT32_FLAG_D | GDT_FLAG_G
+	db 0x00
 
 gdt32_end:
 
-;; Value for GDTR register that describes the above GDT
+	;; Value for GDTR register that describes the above GDT
 gdt32_pseudo_descriptor:
-;; A limit value of 0 results in one valid byte. So, the limit value of our
-;; GDT is its length in bytes minus 1.
-dw gdt32_end - gdt32_start - 1
-;; Start address of the GDT
-dd gdt32_start
+	;; A limit value of 0 results in one valid byte. So, the limit value of our
+	;; GDT is its length in bytes minus 1.
+	dw gdt32_end - gdt32_start - 1
+	;; Start address of the GDT
+	dd gdt32_start
 
 
-;; See gdt32.s for comments. This GDT is identical to the one for 32-bit
-;; protected/long mode except that 64-bit-specific features are turned on.
-;;
-;; The segment limit of code and data segments is not checked in 64-bit mode
-;; (see IA-32 manual, volume 3, section 5.3.1). This means that we are not
-;; constrained by the 4G limit that we had in protected mode.
+	;; This GDT is identical to the one for 32-bit protected/long mode except that
+	;; 64-bit-specific features are turned on.
+	;;
+	;; The segment limit of code and data segments is not checked in 64-bit mode
+	;; (see IA-32 manual, volume 3, section 5.3.1). This means that we are not
+	;; constrained by the 4G limit that we had in protected mode.
 
-align 16
+	align 16
 gdt64_start:
-;; 8-byte null descriptor (index 0).
-;; Used to catch translations with a null selector.
-dd 0x0
-dd 0x0
+	dd 0x0
+	dd 0x0
 
 gdt64_code_segment:
-;; 8-byte code segment descriptor (index 1).
-;; First 16 bits of segment limit
-dw 0xffff
-;; First 24 bits of segment base address
-dw 0x0000
-db 0x00
-;; 0-3: segment type that specifies an execute/read code segment
-;;   4: descriptor type flag indicating that this is a code/data segment
-;; 5-6: Descriptor privilege level 0 (most privileged)
-;;   7: Segment present flag set indicating that the segment is present
-db 10011010b
-;; 0-3: last 4 bits of segment limit
-;;   4: unused (available for use by system software)
-;;   5: 64-bit code segment flag indicates that this segment contains 64-bit code
-;;   6: must be zero if L bit (bit 5) is set
-;;   7: granularity of 4 kilobyte units
-db 10101111b
-;; Last 8 bits of segment base address
-db 0x00
+	dw 0xffff
+	dw 0x0000
+	db 0x00
+	db GDT_CODE_TYPE | GDT_FLAG_S | GDT_DPL | GDT_FLAG_P
+	db 1111b | GDT64_CODE_FLAG_L | GDT64_FLAG_D | GDT_FLAG_G
+	db 0x00
 
 gdt64_data_segment:
-;; Only differences are explained ...
-dw 0xffff
-dw 0x0000
-db 0x00
-;; 0-3: segment type that specifies a read/write data segment
-db 10010010b
-;; 6: must be set for 32-bit operand size for stack
-db 11101111b
-db 0x00
+	dw 0xffff
+	dw 0x0000
+	db 0x00
+	db GDT_DATA_TYPE | GDT_FLAG_S | GDT_DPL | GDT_FLAG_P
+	db 1111b | GDT64_DATA_FLAG_L | GDT64_FLAG_D | GDT_FLAG_G
+	db 0x00
 
 gdt64_end:
 
 gdt64_pseudo_descriptor:
-dw gdt64_end - gdt64_start - 1
-dd gdt64_start
+	dw gdt64_end - gdt64_start - 1
+	dd gdt64_start
