@@ -26,7 +26,7 @@ struct idtr {
 #define ATTR_INTERRUPT_GATE (GATE_TYPE_INTERRUPT | (1 << GATE_PRESENT_FLAG_BIT))
 #define NUM_IDT_ENTRIES 256
 
-extern u16 GDT64_CODE_SEG_SELECTOR;
+static const u16 GDT64_CODE_SEG_SELECTOR = 8; // TODO: Put this in a shared header file once asm uses GAS
 
 __aligned(16) static struct idt_entry idt[NUM_IDT_ENTRIES];
 
