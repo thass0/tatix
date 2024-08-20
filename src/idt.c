@@ -26,8 +26,6 @@ struct idtr {
 #define ATTR_INTERRUPT_GATE (GATE_TYPE_INTERRUPT | (1 << GATE_PRESENT_FLAG_BIT))
 #define NUM_IDT_ENTRIES 256
 
-static const u16 GDT64_CODE_SEG_SELECTOR = 8; // TODO: Put this in a shared header file once asm uses GAS
-
 __aligned(16) static struct idt_entry idt[NUM_IDT_ENTRIES];
 
 extern ptr isr_stub_reserved_table[22];
@@ -36,7 +34,7 @@ extern ptr isr_stub_irq_table[15];
 void init_idt_entry(struct idt_entry *ent, ptr handler, u8 attributes)
 {
     ent->offset1 = (u16)(handler & 0xffff);
-    ent->seg_selector = GDT64_CODE_SEG_SELECTOR;
+    ent->seg_selector = BOOT_GDT_CODE_DESC;
     ent->ist = 0; // Disable the use of the IST, plus set the reserved bits to 0
     ent->attributes = attributes;
     ent->offset2 = (u16)((handler >> 16) & 0xffff);

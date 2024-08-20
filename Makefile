@@ -1,14 +1,16 @@
 .PHONY = clean boot fmt
 
+include boot_config.mk
+
 BUILD_DIR := build
 BOOTLOADER_DIR := bootloader
 SRC_DIR := src
 
 CC := gcc
-CPPFLAGS := -MMD -Iinclude/
+CPPFLAGS := -MMD -Iinclude/ $(BOOT_MACROS)
 CFLAGS := -std=c99 -ffreestanding -mcmodel=large -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -pedantic
 
-NASM := nasm -f elf64
+NASM := nasm -f elf64 $(BOOT_MACROS)
 
 SRCS := $(wildcard $(SRC_DIR)/*)
 OBJS := $(patsubst $(SRC_DIR)/%, $(BUILD_DIR)/%.o, $(SRCS))
@@ -31,7 +33,7 @@ $(DISK_IMAGE): $(BOOTLOADER_IMAGE) $(KERNEL_ELF) | $(BUILD_DIR)
 $(BOOTLOADER_IMAGE): $(BOOTLOADER_OBJS) | $(BUILD_DIR) bootloader.ld
 	ld -T bootloader.ld -o $(BUILD_DIR)/bootloader.elf $^
 	objcopy -O binary $(BUILD_DIR)/bootloader.elf $@
-	truncate -s 8704 $@
+	truncate -s $(shell expr $(BOOT_SECTOR_SIZE) \* $(BOOT_SECTOR_COUNT)) $@
 
 $(BUILD_DIR)/%.s.o: $(BOOTLOADER_DIR)/%.s | $(BUILD_DIR)
 	$(NASM) -I$(BOOTLOADER_DIR) $< -o $@

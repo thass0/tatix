@@ -101,13 +101,9 @@ disk_address_packet:
         db 0x10                 ; Size of packet
         db 0                    ; Reserved, always 0
 dap_sectors_num:
-        dw READ_SECTORS_NUM               ; Number of sectors to read
-        dd (BOOT_LOAD_ADDR + SECTOR_SIZE) ; Read destination address
-        dq 1                    ; Disk block to start at (skip boot sector in block 0)
-
-SECTOR_SIZE equ 512
-BOOT_LOAD_ADDR equ 0x7c00
-READ_SECTORS_NUM equ 16
+        dw (BOOT_SECTOR_COUNT - 1) ; Read all remaining sectors in the bootloader
+        dd (BOOT_LOAD_ADDR + BOOT_SECTOR_SIZE) ; Put them in memory right after this sector
+        dq 1 ; Disk block to start at (skip boot sector in block 0)
 
 	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	;; Load 32-bit GDT and switch to 32-bit protected mode                      ;;
@@ -124,7 +120,7 @@ load_gdt:
         ;; The far jump into the code segment from the new GDT flushes
         ;; the CPU pipeline removing any 16-bit decoded instructions
         ;; and updates the cs register with the new code segment.
-        jmp CODE_SEG32:start_prot_mode
+        jmp BOOT_GDT_CODE_DESC:start_prot_mode
 
 print16:
 	mov dx, COM1_PORT
@@ -150,7 +146,7 @@ start_prot_mode:
 	call print32
 
         ;; Old segments are now meaningless
-        mov ax, DATA_SEG32
+        mov ax, BOOT_GDT_DATA_DESC
         mov ds, ax
         mov ss, ax
         mov es, ax
@@ -183,7 +179,7 @@ start_prot_mode:
         ;; New GDT has the 64-bit segment flag set
         lgdt [gdt64_pseudo_descriptor]
 
-        jmp CODE_SEG64:start_long_mode
+        jmp BOOT_GDT_CODE_DESC:start_long_mode
 
         ;; Builds a 4 level page table starting at the address that's passed in ebx.
 build_page_table:
@@ -256,7 +252,7 @@ start_long_mode:
 	call print32
 
         ;; Old segments are even more meaningless now (because long mode doesn't care)
-        mov ax, DATA_SEG64
+        mov ax, BOOT_GDT_DATA_DESC
         mov ds, ax
         mov ss, ax
         mov es, ax
@@ -351,9 +347,6 @@ dw gdt32_end - gdt32_start - 1
 dd gdt32_start
 
 
-CODE_SEG32 equ gdt32_code_segment - gdt32_start
-DATA_SEG32 equ gdt32_data_segment - gdt32_start
-
 ;; See gdt32.s for comments. This GDT is identical to the one for 32-bit
 ;; protected/long mode except that 64-bit-specific features are turned on.
 ;;
@@ -405,11 +398,3 @@ gdt64_end:
 gdt64_pseudo_descriptor:
 dw gdt64_end - gdt64_start - 1
 dd gdt64_start
-
-
-CODE_SEG64 equ gdt64_code_segment - gdt64_start
-DATA_SEG64 equ gdt64_data_segment - gdt64_start
-
-;; The IDT needs this info
-global GDT64_CODE_SEG_SELECTOR
-GDT64_CODE_SEG_SELECTOR:        dw CODE_SEG64
