@@ -217,14 +217,6 @@ start_long_mode:
 	mov ecx, LONG_MODE_MSG_LEN
 	call print32
 
-        ;; Old segments are even more meaningless now (because long mode doesn't care)
-        mov ax, BOOT_GDT_DATA_DESC
-        mov ds, ax
-        mov ss, ax
-        mov es, ax
-        mov fs, ax
-        mov gs, ax
-
         extern load_kernel
         call load_kernel
 
