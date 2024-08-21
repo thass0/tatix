@@ -31,4 +31,14 @@ static inline void enable_interrupts(void)
     __asm__ volatile("sti");
 }
 
+static inline void insl(u16 port, void *addr, u32 cnt)
+{
+    __asm__ volatile("cld; rep insl" : "=D"(addr), "=c"(cnt) : "d"(port), "0"(addr), "1"(cnt) : "memory", "cc");
+}
+
+static inline void stosb(void *addr, u32 data, u32 cnt)
+{
+    __asm__ volatile("cld; rep stosb" : "=D"(addr), "=c"(cnt) : "0"(addr), "1"(cnt), "a"(data) : "memory", "cc");
+}
+
 #endif // __TXT_ASM_H__

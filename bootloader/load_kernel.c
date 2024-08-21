@@ -1,3 +1,4 @@
+#include <tx/asm.h>
 #include <tx/base.h>
 #include <tx/string.h>
 
@@ -19,28 +20,6 @@
 #define STATUS_BUSY BIT(7)
 
 #define SECTOR_SIZE 512
-
-static inline void outb(u16 port, u8 val)
-{
-    __asm__ volatile("outb %b0, %w1" : : "a"(val), "Nd"(port) : "memory");
-}
-
-static inline u8 inb(u16 port)
-{
-    u8 ret;
-    __asm__ volatile("inb %w1, %b0" : "=a"(ret) : "Nd"(port) : "memory");
-    return ret;
-}
-
-static inline void insl(u16 port, void *addr, u32 cnt)
-{
-    __asm__ volatile("cld; rep insl" : "=D"(addr), "=c"(cnt) : "d"(port), "0"(addr), "1"(cnt) : "memory", "cc");
-}
-
-static inline void stosb(void *addr, u32 data, u32 cnt)
-{
-    __asm__ volatile("cld; rep stosb" : "=D"(addr), "=c"(cnt) : "0"(addr), "1"(cnt), "a"(data) : "memory", "cc");
-}
 
 static inline void disk_wait(void)
 {
