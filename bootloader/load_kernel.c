@@ -13,6 +13,8 @@
 #define OFFSET_STATUS 7
 #define OFFSET_COMMAND 7
 
+#define COMMAND_READ_PIO BIT(5)
+
 #define STATUS_READY BIT(6)
 #define STATUS_BUSY BIT(7)
 
@@ -42,31 +44,30 @@ static inline void stosb(void *addr, u32 data, u32 cnt)
 
 static inline void disk_wait(void)
 {
-    while ((inb(IO_PORT_BASE) & (STATUS_READY | STATUS_BUSY)) != STATUS_READY)
+    while ((inb(IO_PORT_BASE + OFFSET_STATUS) & (STATUS_READY | STATUS_BUSY)) != STATUS_READY)
         ;
 }
 
 static inline void disk_read_sector(byte *dst, u32 lba)
 {
     disk_wait();
-    outb(IO_PORT_BASE + OFFSET_LBA_EXTRA, (lba >> 24) | 0xe0);
+    outb(IO_PORT_BASE + OFFSET_LBA_EXTRA, ((lba >> 24) & 0x0f) | 0xe0);
     outb(IO_PORT_BASE + OFFSET_SECTOR_COUNT, 1);
     outb(IO_PORT_BASE + OFFSET_LBA_LOW, lba);
     outb(IO_PORT_BASE + OFFSET_LBA_MID, lba >> 8);
     outb(IO_PORT_BASE + OFFSET_LBA_HIGH, lba >> 16);
+    outb(IO_PORT_BASE + OFFSET_COMMAND, COMMAND_READ_PIO);
 
     disk_wait();
     insl(IO_PORT_BASE, dst, SECTOR_SIZE / 4);
 }
 
-static inline int disk_read(byte *dst, sz count, sz offset)
+static inline int disk_read(byte *dst, sz count, sz byte_offset, sz sector_offset)
 {
     byte *end = dst + count;
-    // Add one to start at the second sector. The first sector
-    // (boot sector) is already loaded and currently executing.
-    u32 lba = (offset / SECTOR_SIZE) + 1;
+    u32 lba = (byte_offset / SECTOR_SIZE) + sector_offset;
 
-    dst -= offset % SECTOR_SIZE;
+    dst -= byte_offset % SECTOR_SIZE;
 
     while (dst < end) {
         disk_read_sector(dst, lba);
