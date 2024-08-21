@@ -225,11 +225,11 @@ end64:
         jmp end64
 
 COM1_PORT equ 0x3f8
-real_mode_msg: db "Start real mode", 0xa
+real_mode_msg: db "Entered real mode", 0xd
 REAL_MODE_MSG_LEN equ $ - real_mode_msg
-prot_mode_msg: db "Start prot mode", 0xa
+prot_mode_msg: db  "Entered protected mode", 0xd
 PROT_MODE_MSG_LEN equ $ - prot_mode_msg
-long_mode_msg: db "Booted long mode", 0xa
+long_mode_msg: db "Entered long mode      ", 0xa
 LONG_MODE_MSG_LEN equ $ - long_mode_msg
 
 	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
