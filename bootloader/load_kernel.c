@@ -1,5 +1,6 @@
 #include <tx/asm.h>
 #include <tx/base.h>
+#include <tx/fmt.h>
 #include <tx/string.h>
 
 #define SCRATCH_SPACE 0x200000
@@ -19,6 +20,42 @@
 #define ATA_STATUS_BUSY BIT(7)
 
 #define SECTOR_SIZE 512
+
+#define COM_OFFSET_LINE_STATUS 5
+#define COM_LINE_STATUS_TX_READY BIT(5)
+#define COM_PORT 0x3f8
+
+int com_write(u16 port, struct str str)
+{
+    if (!str.dat || str.len <= 0)
+        return -1;
+
+    while (str.len--) {
+        while (!(inb(port + COM_OFFSET_LINE_STATUS) & COM_LINE_STATUS_TX_READY))
+            ;
+        outb(port, *str.dat++);
+    }
+
+    return 0;
+}
+
+int print_str(struct str str)
+{
+    return com_write(COM_PORT, str);
+}
+
+int print_fmt(struct str_buf buf, struct str fmt, ...)
+{
+    va_list argp;
+    int rc;
+    va_start(argp, fmt);
+    rc = vfmt(&buf, fmt, argp);
+    if (rc < 0)
+        return rc;
+    rc = com_write(COM_PORT, str_from_buf(buf));
+    va_end(argp);
+    return rc;
+}
 
 static inline void disk_wait(void)
 {
@@ -118,13 +155,20 @@ void load_kernel(void)
     struct elf64_phdr *phdr_iter, *phdr_end;
     entry_func_t entry;
     byte *paddr;
+    char underlying[1024];
+    struct str_buf buf = str_buf_new(underlying, 0, countof(underlying));
 
+    print_fmt(buf, STR("Loading ELF to scratch space: 0x%lx\n"), SCRATCH_SPACE);
     elf = (struct elf64_hdr *)SCRATCH_SPACE;
     disk_read((byte *)elf, sizeof(struct elf64_hdr), 0, BOOT_SECTOR_COUNT);
 
-    if (elf_verify(elf) < 0)
+    if (elf_verify(elf) < 0) {
+        print_str(STR("Failed to verify ELF\n"));
         return;
+    }
 
+    print_fmt(buf, STR("Loading program headers: phdr_tab_offset=0x%lx phdr_count=%hu\n"), elf->phdr_tab_offset,
+              elf->phdr_count);
     disk_read((byte *)elf, elf->phdr_tab_offset + elf->phdr_size * elf->phdr_count, 0, BOOT_SECTOR_COUNT);
 
     phdr_iter = (struct elf64_phdr *)((byte *)elf + elf->phdr_tab_offset);
@@ -133,6 +177,8 @@ void load_kernel(void)
     for (; phdr_iter < phdr_end; phdr_iter++) {
         if (phdr_iter->type != PT_LOAD)
             continue;
+        print_fmt(buf, STR("Loading segment: paddr=0x%lx file_size=0x%lx mem_size=0x%lx offset=0x%lx\n"),
+                  phdr_iter->paddr, phdr_iter->file_size, phdr_iter->mem_size, phdr_iter->offset);
         paddr = (byte *)phdr_iter->paddr;
         disk_read(paddr, phdr_iter->file_size, phdr_iter->offset, BOOT_SECTOR_COUNT);
         if (phdr_iter->mem_size > phdr_iter->file_size)
@@ -140,5 +186,6 @@ void load_kernel(void)
     }
 
     entry = (entry_func_t)elf->entry;
+    print_fmt(buf, STR("Calling entry: 0x%lx\n"), entry);
     entry();
 }
