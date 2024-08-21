@@ -4,40 +4,40 @@
 
 #define SCRATCH_SPACE 0x200000
 
-#define IO_PORT_BASE 0x1f0
-#define OFFSET_SECTOR_COUNT 2
-#define OFFSET_LBA_LOW 3
-#define OFFSET_LBA_MID 4
-#define OFFSET_LBA_HIGH 5
-#define OFFSET_LBA_EXTRA 6
-#define OFFSET_STATUS 7
-#define OFFSET_COMMAND 7
+#define ATA_IO_PORT_BASE 0x1f0
+#define ATA_OFFSET_SECTOR_COUNT 2
+#define ATA_OFFSET_LBA_LOW 3
+#define ATA_OFFSET_LBA_MID 4
+#define ATA_OFFSET_LBA_HIGH 5
+#define ATA_OFFSET_LBA_EXTRA 6
+#define ATA_OFFSET_STATUS 7
+#define ATA_OFFSET_COMMAND 7
 
-#define COMMAND_READ_PIO BIT(5)
+#define ATA_COMMAND_READ_PIO BIT(5)
 
-#define STATUS_READY BIT(6)
-#define STATUS_BUSY BIT(7)
+#define ATA_STATUS_READY BIT(6)
+#define ATA_STATUS_BUSY BIT(7)
 
 #define SECTOR_SIZE 512
 
 static inline void disk_wait(void)
 {
-    while ((inb(IO_PORT_BASE + OFFSET_STATUS) & (STATUS_READY | STATUS_BUSY)) != STATUS_READY)
+    while ((inb(ATA_IO_PORT_BASE + ATA_OFFSET_STATUS) & (ATA_STATUS_READY | ATA_STATUS_BUSY)) != ATA_STATUS_READY)
         ;
 }
 
 static inline void disk_read_sector(byte *dst, u32 lba)
 {
     disk_wait();
-    outb(IO_PORT_BASE + OFFSET_LBA_EXTRA, ((lba >> 24) & 0x0f) | 0xe0);
-    outb(IO_PORT_BASE + OFFSET_SECTOR_COUNT, 1);
-    outb(IO_PORT_BASE + OFFSET_LBA_LOW, lba);
-    outb(IO_PORT_BASE + OFFSET_LBA_MID, lba >> 8);
-    outb(IO_PORT_BASE + OFFSET_LBA_HIGH, lba >> 16);
-    outb(IO_PORT_BASE + OFFSET_COMMAND, COMMAND_READ_PIO);
+    outb(ATA_IO_PORT_BASE + ATA_OFFSET_LBA_EXTRA, ((lba >> 24) & 0x0f) | 0xe0);
+    outb(ATA_IO_PORT_BASE + ATA_OFFSET_SECTOR_COUNT, 1);
+    outb(ATA_IO_PORT_BASE + ATA_OFFSET_LBA_LOW, lba);
+    outb(ATA_IO_PORT_BASE + ATA_OFFSET_LBA_MID, lba >> 8);
+    outb(ATA_IO_PORT_BASE + ATA_OFFSET_LBA_HIGH, lba >> 16);
+    outb(ATA_IO_PORT_BASE + ATA_OFFSET_COMMAND, ATA_COMMAND_READ_PIO);
 
     disk_wait();
-    insl(IO_PORT_BASE, dst, SECTOR_SIZE / 4);
+    insl(ATA_IO_PORT_BASE, dst, SECTOR_SIZE / 4);
 }
 
 static inline int disk_read(byte *dst, sz count, sz byte_offset, sz sector_offset)
