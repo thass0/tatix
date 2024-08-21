@@ -2,8 +2,7 @@
 #include <tx/base.h>
 #include <tx/string.h>
 
-#define SCRATCH_SPACE 0x10000
-#define LOAD_COUNT 0x2000
+#define SCRATCH_SPACE 0x200000
 
 #define IO_PORT_BASE 0x1f0
 #define OFFSET_SECTOR_COUNT 2
@@ -60,7 +59,7 @@ static inline int disk_read(byte *dst, sz count, sz byte_offset, sz sector_offse
 #define EI_NIDENT 16
 
 struct elf64_hdr {
-    unsigned char ident[16];
+    unsigned char ident[EI_NIDENT];
     u16 type;
     u16 machine;
     u16 version;
@@ -88,25 +87,30 @@ struct elf64_phdr {
 };
 
 #define PT_LOAD 1
+#define ET_EXEC 2
+#define EM_X86_64 62
 
-typedef void (*entry_func_t)(void);
-
-#define OFFSET_LINE_STATUS 5
-#define LINE_STATUS_TX_READY BIT(5)
-
-int com_write(struct str str)
+int elf_verify(struct elf64_hdr *elf)
 {
-    if (!str.dat || str.len <= 0)
+    if (!(elf->ident[0] == 0x7f && elf->ident[1] == 'E' && elf->ident[2] == 'L' && elf->ident[3] == 'F'))
         return -1;
 
-    while (str.len--) {
-        while (!(inb(0x3f8 + OFFSET_LINE_STATUS) & LINE_STATUS_TX_READY))
-            ;
-        outb(0x3f8, *str.dat++);
-    }
+    if (elf->header_size != sizeof(struct elf64_hdr))
+        return -1;
+
+    if (elf->phdr_size != sizeof(struct elf64_phdr))
+        return -1;
+
+    if (elf->type != ET_EXEC)
+        return -1;
+
+    if (elf->machine != EM_X86_64)
+        return -1;
 
     return 0;
 }
+
+typedef void (*entry_func_t)(void);
 
 void load_kernel(void)
 {
@@ -115,23 +119,24 @@ void load_kernel(void)
     entry_func_t entry;
     byte *paddr;
 
-    com_write(STR("Starting to parse ELF\n"));
-
-    // Any unused space works
     elf = (struct elf64_hdr *)SCRATCH_SPACE;
-    disk_read((byte *)elf, LOAD_COUNT, 0);
+    disk_read((byte *)elf, sizeof(struct elf64_hdr), 0, BOOT_SECTOR_COUNT);
+
+    if (elf_verify(elf) < 0)
+        return;
+
+    disk_read((byte *)elf, elf->phdr_tab_offset + elf->phdr_size * elf->phdr_count, 0, BOOT_SECTOR_COUNT);
 
     phdr_iter = (struct elf64_phdr *)((byte *)elf + elf->phdr_tab_offset);
     phdr_end = phdr_iter + elf->phdr_count;
 
-    while (phdr_iter < phdr_end) {
+    for (; phdr_iter < phdr_end; phdr_iter++) {
         if (phdr_iter->type != PT_LOAD)
             continue;
         paddr = (byte *)phdr_iter->paddr;
-        disk_read(paddr, phdr_iter->file_size, phdr_iter->offset);
+        disk_read(paddr, phdr_iter->file_size, phdr_iter->offset, BOOT_SECTOR_COUNT);
         if (phdr_iter->mem_size > phdr_iter->file_size)
             stosb(paddr + phdr_iter->file_size, 0, phdr_iter->mem_size - phdr_iter->file_size);
-        phdr_iter++;
     }
 
     entry = (entry_func_t)elf->entry;
