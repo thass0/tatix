@@ -2,10 +2,17 @@ ENTRY(_start)
 
 SECTIONS
 {
-    /* This is the virtual address where the kernel starts in virtual memory */
+    /* The first code that runs in the kernel needs its virtual and physical adddresses to line up */
+    . = 0x200000;
+    .entry : AT(0x200000)
+    {
+        *(*.entry*);
+    }
+
+    /* Virtual address of the kernel */
     . = 0x80100000;
 
-    /* The physical load address of the kernel is lower than its virtual address */
+    /* Physical address of the kernel text */
     .text : AT(0x100000)
     {
         *(.text*);
@@ -19,8 +26,12 @@ SECTIONS
     .data : { *(.data*); }
     .bss :
     {
-            *(.bss*);
+            *(.*bss*);
             *(COMMON);
     }
 
+    /DISCARD/ :
+    {
+        *(.*eh_frame);
+    }
 }
