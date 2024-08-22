@@ -111,5 +111,6 @@ typedef __builtin_va_list va_list;
 #define __aligned(n) __attribute__((aligned(n)))
 #define __no_caller_saved_regs __attribute__((no_caller_saved_registers))
 #define __unused __attribute__((unused))
+#define __section(s) __attribute__((section(s)))
 
 #endif // __TX_BASE_H__

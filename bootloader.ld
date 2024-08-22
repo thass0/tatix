@@ -15,6 +15,7 @@ SECTIONS
     } > bootloader
     .text : { *(.text*); } > load_kernel
     .rodata : { *(.rodata*); } > load_kernel
+    .elf_buf : { *(.elf_buf*); } > load_kernel
     /DISCARD/ :
     {
         *(*);
