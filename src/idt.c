@@ -28,9 +28,6 @@ struct idtr {
 
 __aligned(16) static struct idt_entry idt[NUM_IDT_ENTRIES];
 
-extern ptr isr_stub_reserved_table[22];
-extern ptr isr_stub_irq_table[15];
-
 void init_idt_entry(struct idt_entry *ent, ptr handler, u8 attributes)
 {
     ent->offset1 = (u16)(handler & 0xffff);
@@ -51,11 +48,45 @@ void init_idt(void)
     for (i32 i = 0; i < NUM_IDT_ENTRIES; i++)
         init_idt_entry(&idt[i], 0, 0);
 
-    for (i32 i = 0; i < NUM_USED_RESERVED_VECTORS; i++)
-        init_idt_entry(&idt[i], isr_stub_reserved_table[i], ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[0], (ptr)isr_stub_0, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[1], (ptr)isr_stub_1, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[2], (ptr)isr_stub_2, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[3], (ptr)isr_stub_3, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[4], (ptr)isr_stub_4, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[5], (ptr)isr_stub_5, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[6], (ptr)isr_stub_6, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[7], (ptr)isr_stub_7, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[8], (ptr)isr_stub_8, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[9], (ptr)isr_stub_9, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[10], (ptr)isr_stub_10, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[11], (ptr)isr_stub_11, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[12], (ptr)isr_stub_12, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[13], (ptr)isr_stub_13, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[14], (ptr)isr_stub_14, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[15], (ptr)isr_stub_15, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[16], (ptr)isr_stub_16, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[17], (ptr)isr_stub_17, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[18], (ptr)isr_stub_18, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[19], (ptr)isr_stub_19, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[20], (ptr)isr_stub_20, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[21], (ptr)isr_stub_21, ATTR_INTERRUPT_GATE);
 
-    for (i32 i = 0; i < NUM_IRQ_VECTORS; i++)
-        init_idt_entry(&idt[NUM_RESERVED_VECTORS + i], isr_stub_irq_table[i], ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[32], (ptr)isr_stub_32, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[33], (ptr)isr_stub_33, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[34], (ptr)isr_stub_34, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[35], (ptr)isr_stub_35, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[36], (ptr)isr_stub_36, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[37], (ptr)isr_stub_37, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[38], (ptr)isr_stub_38, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[39], (ptr)isr_stub_39, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[40], (ptr)isr_stub_40, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[41], (ptr)isr_stub_41, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[42], (ptr)isr_stub_42, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[43], (ptr)isr_stub_43, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[44], (ptr)isr_stub_44, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[45], (ptr)isr_stub_45, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[46], (ptr)isr_stub_46, ATTR_INTERRUPT_GATE);
+    init_idt_entry(&idt[47], (ptr)isr_stub_47, ATTR_INTERRUPT_GATE);
 
     __asm__ volatile("lidt %0" : : "m"(idtr));
 }

@@ -30,6 +30,46 @@ struct cpu_state {
     u64 ss;
 } __packed;
 
+void isr_stub_0(void);
+void isr_stub_1(void);
+void isr_stub_2(void);
+void isr_stub_3(void);
+void isr_stub_4(void);
+void isr_stub_5(void);
+void isr_stub_6(void);
+void isr_stub_7(void);
+void isr_stub_8(void);
+void isr_stub_9(void);
+void isr_stub_10(void);
+void isr_stub_11(void);
+void isr_stub_12(void);
+void isr_stub_13(void);
+void isr_stub_14(void);
+void isr_stub_15(void);
+void isr_stub_16(void);
+void isr_stub_17(void);
+void isr_stub_18(void);
+void isr_stub_19(void);
+void isr_stub_20(void);
+void isr_stub_21(void);
+
+void isr_stub_32(void);
+void isr_stub_33(void);
+void isr_stub_34(void);
+void isr_stub_35(void);
+void isr_stub_36(void);
+void isr_stub_37(void);
+void isr_stub_38(void);
+void isr_stub_39(void);
+void isr_stub_40(void);
+void isr_stub_41(void);
+void isr_stub_42(void);
+void isr_stub_43(void);
+void isr_stub_44(void);
+void isr_stub_45(void);
+void isr_stub_46(void);
+void isr_stub_47(void);
+
 void handle_interrupt(struct cpu_state *);
 
 // Ranges for different types of interrupt vectors. Given as intervals: [beg; end)

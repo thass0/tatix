@@ -113,5 +113,6 @@ typedef __builtin_va_list va_list;
 #define __unused __attribute__((unused))
 #define __section(s) __attribute__((section(s)))
 #define __noreturn __attribute__((noreturn))
+#define __naked __attribute__((naked))
 
 #endif // __TX_BASE_H__

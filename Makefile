@@ -55,9 +55,6 @@ $(BUILD_DIR)/isr.c.o: $(SRC_DIR)/isr.c | $(BUILD_DIR)
 $(BUILD_DIR)/%.c.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%.s.o: $(SRC_DIR)/%.s | $(BUILD_DIR)
-	$(NASM) $< -o $@
-
 # Misc
 
 $(BUILD_DIR):

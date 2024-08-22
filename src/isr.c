@@ -6,6 +6,106 @@
 #include <tx/isr.h>
 #include <tx/pic.h>
 
+__naked void isr_stub_common(void)
+{
+    __asm__ volatile("push %r15");
+    __asm__ volatile("push %r14");
+    __asm__ volatile("push %r13");
+    __asm__ volatile("push %r12");
+    __asm__ volatile("push %r11");
+    __asm__ volatile("push %r10");
+    __asm__ volatile("push %r9");
+    __asm__ volatile("push %r8");
+    __asm__ volatile("push %rbp");
+    __asm__ volatile("push %rdi");
+    __asm__ volatile("push %rsi");
+    __asm__ volatile("push %rdx");
+    __asm__ volatile("push %rcx");
+    __asm__ volatile("push %rbx");
+    __asm__ volatile("push %rax");
+
+    // Pass `handle_interrupt` the CPU state as a struct by pointer
+    __asm__ volatile("mov %rsp, %rdi");
+    __asm__ volatile("call handle_interrupt");
+
+    __asm__ volatile("pop %rax");
+    __asm__ volatile("pop %rbx");
+    __asm__ volatile("pop %rcx");
+    __asm__ volatile("pop %rdx");
+    __asm__ volatile("pop %rsi");
+    __asm__ volatile("pop %rdi");
+    __asm__ volatile("pop %rbp");
+    __asm__ volatile("pop %r8");
+    __asm__ volatile("pop %r9");
+    __asm__ volatile("pop %r10");
+    __asm__ volatile("pop %r11");
+    __asm__ volatile("pop %r12");
+    __asm__ volatile("pop %r13");
+    __asm__ volatile("pop %r14");
+    __asm__ volatile("pop %r15");
+
+    // Pop the interrupt vector and the error code. Without a privilege level switch,
+    // the IRET instruction only pops the RIP, CS and RFLAGS registers, so we need to
+    // delete the interrupt vector and the error code manually.
+    __asm__ volatile("add $16, %rsp");
+    __asm__ volatile("iretq");
+}
+
+#define ISR_STUB_WITH_ERROR_CODE(vector)              \
+    __naked void isr_stub_##vector(void)              \
+    {                                                 \
+        __asm__ volatile("push $" STRINGIFY(vector)); \
+        __asm__ volatile("jmp isr_stub_common");      \
+    }
+
+#define ISR_STUB(vector)                                       \
+    __naked void isr_stub_##vector(void)                       \
+    {                                                          \
+        __asm__ volatile("push $0; push $" STRINGIFY(vector)); \
+        __asm__ volatile("jmp isr_stub_common");               \
+    }
+
+ISR_STUB(0)
+ISR_STUB(1)
+ISR_STUB(2)
+ISR_STUB(3)
+ISR_STUB(4)
+ISR_STUB(5)
+ISR_STUB(6)
+ISR_STUB(7)
+ISR_STUB_WITH_ERROR_CODE(8)
+ISR_STUB(9)
+ISR_STUB_WITH_ERROR_CODE(10)
+ISR_STUB_WITH_ERROR_CODE(11)
+ISR_STUB_WITH_ERROR_CODE(12)
+ISR_STUB_WITH_ERROR_CODE(13)
+ISR_STUB_WITH_ERROR_CODE(14)
+ISR_STUB(15)
+ISR_STUB(16)
+ISR_STUB_WITH_ERROR_CODE(17)
+ISR_STUB(18)
+ISR_STUB(19)
+ISR_STUB(20)
+ISR_STUB_WITH_ERROR_CODE(21)
+
+// IRQ interrupt vectors
+ISR_STUB(32)
+ISR_STUB(33)
+ISR_STUB(34)
+ISR_STUB(35)
+ISR_STUB(36)
+ISR_STUB(37)
+ISR_STUB(38)
+ISR_STUB(39)
+ISR_STUB(40)
+ISR_STUB(41)
+ISR_STUB(42)
+ISR_STUB(43)
+ISR_STUB(44)
+ISR_STUB(45)
+ISR_STUB(46)
+ISR_STUB(47)
+
 void fmt_cpu_state(struct cpu_state *cpu_state, struct str_buf *buf)
 {
     fmt(buf,
