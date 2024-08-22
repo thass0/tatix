@@ -85,16 +85,6 @@ A20_LINE_UNSET equ 0
 
         jmp load_gdt
 
-; error_reading_disk:
-        ;; After the interrupt, [dap_sectors_num] is the number of sectors actually read.
-        ;; If fewer sectors have been read than specified in the disk address packet, the
-        ;; carry bit is set to indicate an error. For flexibility reasons, we don't care
-        ;; about the exact number of sectors read for now and just read as much as possible.
-        ;; So, we ignore the error "too few sectors read" and just continue.
-        ;; cmp word [dap_sectors_num], READ_SECTORS_NUM
-        ;; jle ignore_disk_read_error
-        ;; jmp end16
-
         ;; Data for disk read
         align 4
 disk_address_packet:
