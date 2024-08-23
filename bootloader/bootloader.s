@@ -1,3 +1,5 @@
+%include "config.s"
+
 	section .bootloader
 	global start_real_mode
 
@@ -92,7 +94,7 @@ disk_address_packet:
         db 0                    ; Reserved, always 0
 dap_sectors_num:
         dw (BOOT_SECTOR_COUNT - 1) ; Read all remaining sectors in the bootloader
-        dd (BOOT_LOAD_ADDR + BOOT_SECTOR_SIZE) ; Put them in memory right after this sector
+        dd (BOOT_LOAD_ADDR + SECTOR_SIZE) ; Put them in memory right after this sector
         dq 1 ; Disk block to start at (skip boot sector in block 0)
 
 	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -146,18 +148,18 @@ start_prot_mode:
         ;; Build 2-level page table using 1GB pages and map the first four GB of memory
 
         ;; We need two pages in total. Zero-initializing them is safe
-        mov ecx, BOOT_PAGE_TAB_SIZE * 2
+        mov ecx, PAGE_SIZE * 2
         mov edi, BOOT_PAGE_TAB_ADDR
         xor eax, eax
         rep stosb
 
         ;; Bits 0 and 1 enable the present flag and read/write flag, respectively.
-        mov dword [BOOT_PAGE_TAB_ADDR], 11b | (BOOT_PAGE_TAB_ADDR + BOOT_PAGE_SIZE)
+        mov dword [BOOT_PAGE_TAB_ADDR], 11b | (BOOT_PAGE_TAB_ADDR + PAGE_SIZE)
         ;; Bit 7 in the PDPT entries enables 1GB pages.
-        mov dword [BOOT_PAGE_TAB_ADDR + BOOT_PAGE_SIZE + 0x00], 11b | (1 << 7) | (0 << 30)
-        mov dword [BOOT_PAGE_TAB_ADDR + BOOT_PAGE_SIZE + 0x08], 11b | (1 << 7) | (1 << 30)
-        mov dword [BOOT_PAGE_TAB_ADDR + BOOT_PAGE_SIZE + 0x10], 11b | (1 << 7) | (2 << 30)
-        mov dword [BOOT_PAGE_TAB_ADDR + BOOT_PAGE_SIZE + 0x18], 11b | (1 << 7) | (3 << 30)
+        mov dword [BOOT_PAGE_TAB_ADDR + PAGE_SIZE + 0x00], 11b | (1 << 7) | (0 << 30)
+        mov dword [BOOT_PAGE_TAB_ADDR + PAGE_SIZE + 0x08], 11b | (1 << 7) | (1 << 30)
+        mov dword [BOOT_PAGE_TAB_ADDR + PAGE_SIZE + 0x10], 11b | (1 << 7) | (2 << 30)
+        mov dword [BOOT_PAGE_TAB_ADDR + PAGE_SIZE + 0x18], 11b | (1 << 7) | (3 << 30)
 
         mov edi, BOOT_PAGE_TAB_ADDR
         mov cr3, edi ; MMU finds the PML4 table in cr3

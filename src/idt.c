@@ -1,3 +1,4 @@
+#include <config.h>
 #include <tx/asm.h>
 #include <tx/base.h>
 #include <tx/isr.h>

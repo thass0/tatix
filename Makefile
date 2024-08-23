@@ -1,6 +1,7 @@
 .PHONY = clean boot fmt
 
-include boot_config.mk
+CONFIG := config.mk
+include $(CONFIG)
 
 BUILD_DIR := build
 BOOTLOADER_DIR := bootloader
@@ -23,6 +24,10 @@ BOOTLOADER_IMAGE := $(BUILD_DIR)/bootloader.bin
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 DISK_IMAGE := $(BUILD_DIR)/image.bin
 
+LINKER_CONFIG := $(BUILD_DIR)/config.ld
+NASM_CONFIG := $(BUILD_DIR)/config.s
+HEADER_CONFIG := $(BUILD_DIR)/config.h
+
 all: $(DISK_IMAGE)
 
 $(DISK_IMAGE): $(BOOTLOADER_IMAGE) $(KERNEL_ELF) | $(BUILD_DIR)
@@ -30,32 +35,41 @@ $(DISK_IMAGE): $(BOOTLOADER_IMAGE) $(KERNEL_ELF) | $(BUILD_DIR)
 
 # Compile bootloader
 
-$(BOOTLOADER_IMAGE): $(BOOTLOADER_OBJS) | $(BUILD_DIR) bootloader.ld
-	ld -T bootloader.ld -o $(BUILD_DIR)/bootloader.elf $^
+$(BOOTLOADER_IMAGE): $(BOOTLOADER_OBJS) | $(BUILD_DIR) $(LINKER_CONFIG) bootloader.ld
+	ld -L$(dir $(LINKER_CONFIG)) -T bootloader.ld -o $(BUILD_DIR)/bootloader.elf $^
 	objcopy -O binary $(BUILD_DIR)/bootloader.elf $@
-	truncate -s $(shell expr $(BOOT_SECTOR_SIZE) \* $(BOOT_SECTOR_COUNT)) $@
+	truncate -s $(shell expr $(SECTOR_SIZE) \* $(BOOT_SECTOR_COUNT)) $@
 
-$(BUILD_DIR)/%.s.o: $(BOOTLOADER_DIR)/%.s | $(BUILD_DIR)
-	$(NASM) -I$(BOOTLOADER_DIR) $< -o $@
+$(BUILD_DIR)/%.s.o: $(BOOTLOADER_DIR)/%.s | $(BUILD_DIR) $(NASM_CONFIG)
+	$(NASM) -I$(dir $(NASM_CONFIG)) -I$(BOOTLOADER_DIR) $< -o $@
 
-$(BUILD_DIR)/%.c.o: $(BOOTLOADER_DIR)/%.c | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+$(BUILD_DIR)/%.c.o: $(BOOTLOADER_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
+	$(CC) $(CPPFLAGS) -I$(dir $(HEADER_CONFIG)) $(CFLAGS) -c $< -o $@
 
 # Compile kernel
 
-$(KERNEL_ELF): $(OBJS) | $(BUILD_DIR)
-	ld -m elf_x86_64 -T kernel.ld -o $@ $^
+$(KERNEL_ELF): $(OBJS) | $(BUILD_DIR) $(LINKER_CONFIG) kernel.ld
+	ld -L$(dir $(LINKER_CONFIG)) -T kernel.ld -o $@ $^
 
 # To recompile if headers change:
 -include $(DEPS)
 
-$(BUILD_DIR)/isr.c.o: $(SRC_DIR)/isr.c | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -mgeneral-regs-only -c $< -o $@
+$(BUILD_DIR)/isr.c.o: $(SRC_DIR)/isr.c | $(BUILD_DIR) $(HEADER_CONFIG)
+	$(CC) $(CPPFLAGS) -I$(dir $(HEADER_CONFIG)) $(CFLAGS) -mgeneral-regs-only -c $< -o $@
 
-$(BUILD_DIR)/%.c.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+$(BUILD_DIR)/%.c.o: $(SRC_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
+	$(CC) $(CPPFLAGS) -I$(dir $(HEADER_CONFIG)) $(CFLAGS) -c $< -o $@
 
 # Misc
+
+$(LINKER_CONFIG): $(CONFIG)
+	./make_config.sh -f linker -o $@ $<
+
+$(NASM_CONFIG): $(CONFIG)
+	./make_config.sh -f nasm -o $@ $<
+
+$(HEADER_CONFIG): $(CONFIG)
+	./make_config.sh -f header -o $@ $<
 
 $(BUILD_DIR):
 	mkdir $@
