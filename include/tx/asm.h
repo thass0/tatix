@@ -7,6 +7,7 @@
     do {                             \
         while (true)                 \
             __asm__ volatile("hlt"); \
+        __builtin_unreachable();     \
     } while (0)
 
 static inline void outb(u16 port, u8 val)

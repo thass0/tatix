@@ -38,7 +38,15 @@ __section(".entry.data") __aligned(0x1000) static struct pt pt_vmem[8]; // PT pa
 #define PTE_REGION_SIZE BIT(PT_BIT_BASE)
 #define PDE_REGION_SIZE BIT(PD_BIT_BASE)
 
-void kernel_init(void);
+static byte init_kernel_stack[0x2000] __used;
+
+__noreturn void kernel_init(void);
+
+__noreturn __naked void _kernel_init(void)
+{
+    __asm__ volatile("movl $init_kernel_stack, %esp\n"
+                     "call kernel_init\n");
+}
 
 __section(".entry.text") __noreturn void _start(void)
 {
@@ -64,12 +72,10 @@ __section(".entry.text") __noreturn void _start(void)
 
     __asm__ volatile("mov %0, %%cr3" : : "r"((u64)&pml4) : "memory");
 
-    kernel_init();
-
-    hlt();
+    _kernel_init();
 }
 
-void kernel_init(void)
+__noreturn void kernel_init(void)
 {
     com_init(COM1_PORT);
     interrupt_init();
@@ -82,4 +88,5 @@ void kernel_init(void)
 
     __asm__ volatile("int $0x22");
     __asm__ volatile("int3");
+    hlt();
 }
