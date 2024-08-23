@@ -10,3 +10,9 @@ BOOT_GDT_DATA_DESC=16
 BOOT_PAGE_TAB_ADDR=0x1000
 # Address where to bootloader is loaded into memory by BIOS
 BOOT_LOAD_ADDR=0x7c00
+# Physical address where the .entry section of the kernel is loaded
+KERN_ENTRY_ADDR=0x200000
+# Virtual base address for the kernel
+KERN_BASE_VADDR=0x80100000
+# Physical base address for the kernel
+KERN_BASE_PADDR=0x100000

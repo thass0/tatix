@@ -1,3 +1,4 @@
+#include <config.h>
 #include <tx/assert.h>
 #include <tx/base.h>
 #include <tx/com.h>
@@ -36,8 +37,6 @@ __section(".entry.data") __aligned(0x1000) static struct pt pt_vmem[8]; // PT pa
 
 #define PTE_REGION_SIZE BIT(PT_BIT_BASE)
 #define PDE_REGION_SIZE BIT(PD_BIT_BASE)
-
-#define KERN_BASE_VADDR 0x80100000LU
 
 void kernel_init(void);
 

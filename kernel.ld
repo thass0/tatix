@@ -1,27 +1,26 @@
+INCLUDE config.ld
+
 ENTRY(_start)
 
 SECTIONS
 {
     /* The first code that runs in the kernel needs its virtual and physical adddresses to line up */
-    . = 0x200000;
-    .entry : AT(0x200000)
+    . = KERN_ENTRY_ADDR;
+    .entry : AT(KERN_ENTRY_ADDR)
     {
         *(*.entry*);
     }
 
-    /* Virtual address of the kernel */
-    . = 0x80100000;
+    . = KERN_BASE_VADDR;
 
-    /* Physical address of the kernel text */
-    .text : AT(0x100000)
+    .text : AT(KERN_BASE_PADDR)
     {
         *(.text*);
     }
 
     .rodata : { *(.rodata*); }
 
-    /* Page align data segment */
-    . = ALIGN(0x1000);
+    . = ALIGN(PAGE_SIZE);
 
     .data : { *(.data*); }
     .bss :

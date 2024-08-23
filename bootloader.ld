@@ -1,7 +1,9 @@
+INCLUDE config.ld
+
 MEMORY
 {
-    bootloader (rwx) : ORIGIN = 0x7c00, LENGTH = 512
-    load_kernel (rwx) : ORIGIN = 0x7e00, LENGTH = 0x2000
+    bootloader (rwx) : ORIGIN = BOOT_LOAD_ADDR, LENGTH = SECTOR_SIZE
+    load_kernel (rwx) : ORIGIN = BOOT_LOAD_ADDR + SECTOR_SIZE, LENGTH = SECTOR_SIZE * (BOOT_SECTOR_COUNT - 1)
 }
 
 ENTRY(start_real_mode)
