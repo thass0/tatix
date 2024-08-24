@@ -8,7 +8,7 @@ struct dlist {
     struct dlist *next;
 };
 
-static inline void *dlist_init_empty(struct dlist *head)
+static inline void dlist_init_empty(struct dlist *head)
 {
     assert(head);
 
