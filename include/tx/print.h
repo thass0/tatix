@@ -6,5 +6,6 @@
 
 int print_str(struct str str);
 int print_fmt(struct str_buf buf, struct str fmt, ...);
+int print(struct str fmt, ...);
 
 #endif // __TX_PRINT_H__
