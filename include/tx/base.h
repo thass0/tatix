@@ -85,6 +85,7 @@ typedef double f64;
 #define countof(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define lengthof(str) (countof(str) - 1)
 #define alignof(x) ((sz) __alignof__(x))
+#define offsetof(type, member) __builtin_offsetof(type, member)
 #define NULL ((void *)0)
 #define true 1
 #define false 0
@@ -115,5 +116,6 @@ typedef __builtin_va_list va_list;
 #define __section(s) __attribute__((section(s)))
 #define __noreturn __attribute__((noreturn))
 #define __naked __attribute__((naked))
+#define __container_of(x, type, member) ((type *)((const volatile byte *)(x) - offsetof(type, member)))
 
 #endif // __TX_BASE_H__
