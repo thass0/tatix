@@ -46,9 +46,6 @@ void init_idt(void)
     idtr.limit = sizeof(struct idt_entry) * NUM_IDT_ENTRIES - 1;
     idtr.base = (u64)idt;
 
-    for (i32 i = 0; i < NUM_IDT_ENTRIES; i++)
-        init_idt_entry(&idt[i], 0, 0);
-
     init_idt_entry(&idt[0], (ptr)isr_stub_0, ATTR_INTERRUPT_GATE);
     init_idt_entry(&idt[1], (ptr)isr_stub_1, ATTR_INTERRUPT_GATE);
     init_idt_entry(&idt[2], (ptr)isr_stub_2, ATTR_INTERRUPT_GATE);
