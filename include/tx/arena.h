@@ -3,6 +3,7 @@
 
 #include <tx/assert.h>
 #include <tx/base.h>
+#include <tx/bytes.h>
 
 // Based on this eye-opening post: https://nullprogram.com/blog/2023/09/27/
 
@@ -44,6 +45,7 @@ static inline void *arena_alloc_aligned(struct arena *arn, sz n_bytes, sz align)
         crash("Out of memory");
     void *p = arn->beg + padding;
     arn->beg += padding + n_bytes;
+    memset(bytes_new(p, n_bytes), 0);
     return p;
 }
 
