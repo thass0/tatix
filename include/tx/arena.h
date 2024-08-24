@@ -56,9 +56,7 @@ static inline void *arena_alloc(struct arena *arn, sz n_bytes)
     return arena_alloc_aligned(arn, n_bytes, alignof(void *));
 }
 
-// Alloactes `n * size` bytes of of the arena. Will return `NULL` if the
-// arguments overflow the multiplication.
-static inline void *arena_alloc_array(struct arena *arn, sz n, sz size)
+static inline void *arena_alloc_aligned_array(struct arena *arn, sz n, sz size, sz align)
 {
     // Overflow check based on "calloc when multiply overflows" by David Jones:
     // https://drj11.wordpress.com/2008/06/04/calloc-when-multiply-overflows/
@@ -72,7 +70,14 @@ static inline void *arena_alloc_array(struct arena *arn, sz n, sz size)
 #else
 #error "Unsupported width of sz"
 #endif
-    return arena_alloc_aligned(arn, n * size, alignof(void *));
+    return arena_alloc_aligned(arn, n * size, align);
+}
+
+// Alloactes `n * size` bytes of of the arena. Will return `NULL` if the
+// arguments overflow the multiplication.
+static inline void *arena_alloc_array(struct arena *arn, sz n, sz size)
+{
+    return arena_alloc_aligned_array(arn, n, size, alignof(void *));
 }
 
 static inline struct str_buf fmt_buf_new(struct arena *arn, sz cap)
