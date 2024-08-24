@@ -89,4 +89,14 @@ static inline struct str_buf fmt_buf_new(struct arena *arn, sz cap)
     return buf;
 }
 
+static inline struct bytes bytes_from_arena(sz n, struct arena *arn)
+{
+    struct bytes bytes;
+    assert(arn);
+    assert(n > 0);
+    bytes.dat = arena_alloc(arn, n);
+    bytes.len = n;
+    return bytes;
+}
+
 #endif // __TX_ARENA_H__
