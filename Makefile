@@ -7,11 +7,14 @@ BUILD_DIR := build
 BOOTLOADER_DIR := bootloader
 SRC_DIR := src
 
-CC := gcc
-CPPFLAGS := -MMD -Iinclude/ $(BOOT_MACROS)
-CFLAGS := -std=c99 -ffreestanding -mcmodel=large -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -pedantic
+DEBUG_FLAGS := $(if $(DEBUG),-g,)
+QEMU_DEBUG_FLAGS := $(if $(DEBUG),-s -S,)
 
-NASM := nasm -f elf64 $(BOOT_MACROS)
+CC := gcc
+CPPFLAGS := -MMD -Iinclude/
+CFLAGS := $(DEBUG_FLAGS) -std=c99 -ffreestanding -mcmodel=large -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -Wuninitialized -Wmaybe-uninitialized -pedantic
+
+NASM := nasm -f elf64
 
 SRCS := $(wildcard $(SRC_DIR)/*)
 OBJS := $(patsubst $(SRC_DIR)/%, $(BUILD_DIR)/%.o, $(SRCS))
@@ -49,7 +52,7 @@ $(BUILD_DIR)/%.c.o: $(BOOTLOADER_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
 # Compile kernel
 
 $(KERNEL_ELF): $(OBJS) | $(BUILD_DIR) $(LINKER_CONFIG) kernel.ld
-	ld -L$(dir $(LINKER_CONFIG)) -T kernel.ld -o $@ $^
+	ld -L$(dir $(LINKER_CONFIG)) $(DEBUG_FLAGS) -T kernel.ld -o $@ $^
 
 # To recompile if headers change:
 -include $(DEPS)
@@ -75,7 +78,7 @@ $(BUILD_DIR):
 	mkdir $@
 
 boot: $(DISK_IMAGE)
-	qemu-system-x86_64 -m 3G -cpu max -display none -serial stdio -no-reboot -drive file=$<,format=raw,index=0,media=disk
+	qemu-system-x86_64 -m 3G -cpu max -display none -serial stdio -no-reboot -drive file=$<,format=raw,index=0,media=disk $(QEMU_DEBUG_FLAGS)
 
 fmt:
 	clang-format -i --style=file $(SRCS) $(wildcard include/*.h)
