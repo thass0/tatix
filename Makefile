@@ -7,16 +7,23 @@ BUILD_DIR := build
 BOOTLOADER_DIR := bootloader
 SRC_DIR := src
 
-ifeq ($(shell [ $(DEBUG) -ge 1 ] 2>/dev/null && echo yes), yes)
+ifeq ($(DEBUG),)
+	DEBUG := 0
+endif
+
+ifeq ($(shell [ $(DEBUG) -ge 2 ] 2>/dev/null && echo yes), yes)
     DEBUG_FLAGS := -g
 endif
-ifeq ($(shell [ $(DEBUG) -ge 2 ] 2>/dev/null && echo yes), yes)
-    QEMUD_DEBUG_FLAGS := -s -S
+ifeq ($(shell [ $(DEBUG) -ge 3 ] 2>/dev/null && echo yes), yes)
+    QEMU_DEBUG_FLAGS := -s -S
 endif
+
+$(info $(DEBUG_FLAGS))
+$(info $(QEMU_DEBUG_FLAGS))
 
 CC := gcc
 CPPFLAGS := -MMD -Iinclude/
-CFLAGS := $(DEBUG_FLAGS) -mgeneral-regs-only -std=c99 -ffreestanding -mcmodel=large -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -Wuninitialized -Wmaybe-uninitialized -pedantic
+CFLAGS := $(DEBUG_FLAGS) -mgeneral-regs-only -std=gnu99 -ffreestanding -mcmodel=large -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -Wuninitialized -Wmaybe-uninitialized -pedantic
 
 NASM := nasm -f elf64
 
@@ -62,7 +69,7 @@ $(KERNEL_ELF): $(OBJS) | $(BUILD_DIR) $(LINKER_CONFIG) kernel.ld
 -include $(DEPS)
 
 $(BUILD_DIR)/%.c.o: $(SRC_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
-	$(CC) $(CPPFLAGS) -I$(dir $(HEADER_CONFIG)) $(CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) -D__DEBUG__=$(DEBUG) -D__BASENAME__=\"$(notdir $<)\" -I$(dir $(HEADER_CONFIG)) $(CFLAGS) -c $< -o $@
 
 # Misc
 
