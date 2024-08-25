@@ -62,6 +62,7 @@ static struct pt *pt_get_or_alloc(struct page_table page_table, struct pt *pt, s
         ret = pool_alloc(page_table.pt_alloc);
         if (!ret)
             return NULL;
+        print_dbg(STR("Allocated page table page: 0x%lx\n"), ret);
         pt_insert(pt, idx, pte_from_paddr((paddr_t)ret, PT_FLAG_P | PT_FLAG_RW));
     }
 
@@ -82,6 +83,7 @@ int pt_map(struct page_table page_table, vaddr_t vaddr, paddr_t paddr)
     sz pt_idx = PT_IDX(vaddr, PT_BIT_BASE);
     assert(0 <= pt_idx && pt_idx < countof(pt->entries));
     pt->entries[pt_idx] = pte_from_paddr(paddr, PT_FLAG_P | PT_FLAG_RW);
+    print_dbg(STR("Created entry: pt_idx=%ld\n"), pt_idx);
     return 0;
 }
 
@@ -129,16 +131,20 @@ int pt_unmap(struct page_table page_table, vaddr_t vaddr)
     if (!(pt->entries[pt_idx].bits & PT_FLAG_P))
         return -1;
     pt->entries[pt_idx].bits &= ~PT_FLAG_P;
+    print_dbg(STR("Removed entry: pt_idx=%ld\n"), pt_idx);
 
     if (pt_is_empty(pt)) {
+        print_dbg(STR("Freeing page table: pt=0x%lx\n"), pt);
         pd->entries[PT_IDX(vaddr, PD_BIT_BASE)].bits &= ~PT_FLAG_P;
         pool_free(page_table.pt_alloc, pt);
     }
     if (pt_is_empty(pd)) {
+        print_dbg(STR("Freeing page directory: pd=0x%lx\n"), pd);
         pdpt->entries[PT_IDX(vaddr, PDPT_BIT_BASE)].bits &= ~PT_FLAG_P;
         pool_free(page_table.pt_alloc, pd);
     }
     if (pt_is_empty(pdpt)) {
+        print_dbg(STR("Freeing page directory pointer table: pdpt=0x%lx\n"), pdpt);
         page_table.pml4->entries[PT_IDX(vaddr, PML4_BIT_BASE)].bits &= ~PT_FLAG_P;
         pool_free(page_table.pt_alloc, pdpt);
     }
@@ -174,6 +180,7 @@ int vas_map(struct vas vas, struct vma vma)
     assert(vma.base <= PTR_MAX - vma.len);
     vaddr_t vaddr_end = vma.base + vma.len;
     int rc = 0;
+    print_dbg(STR("Mapping VMA: base=0x%lx len=0x%lx\n"), vma.base, vma.len);
     for (vaddr_t vaddr = vma.base; vaddr < vaddr_end; vaddr += PAGE_SIZE) {
         paddr_t paddr = (paddr_t)buddy_alloc(vas.phys_alloc, 0);
         if (unlikely(!paddr))
@@ -181,6 +188,7 @@ int vas_map(struct vas vas, struct vma vma)
         rc = pt_map(vas.pt, vaddr, paddr);
         if (unlikely(rc < 0))
             return rc;
+        print_dbg(STR("Mapped: 0x%lx ---> 0x%lx\n"), vaddr, paddr);
     }
     return 0;
 }
@@ -192,6 +200,7 @@ int vas_unmap(struct vas vas, struct vma vma)
     assert(vma.base <= PTR_MAX - vma.len);
     vaddr_t vaddr_end = vma.base + vma.len;
     int rc = 0;
+    print_dbg(STR("Unmapping VMA: base=0x%lx len=0x%lx\n"), vma.base, vma.len);
     for (vaddr_t vaddr = vma.base; vaddr < vaddr_end; vaddr += PAGE_SIZE) {
         paddr_t paddr = pt_walk(vas.pt, vaddr);
         if (unlikely(paddr == PADDR_INVALID))
@@ -200,6 +209,7 @@ int vas_unmap(struct vas vas, struct vma vma)
         rc = pt_unmap(vas.pt, vaddr);
         if (unlikely(rc < 0))
             return rc;
+        print_dbg(STR("Unmapped: 0x%lx -/-> 0x%lx\n"), vaddr, paddr);
     }
     return 0;
 }
