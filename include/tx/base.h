@@ -93,6 +93,11 @@ typedef double f64;
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define BIT(n) (1LLU << (n))
+#define ALIGN_UP(v, a) (((v) + (a) - 1) & ~((a) - 1))
+#define ALIGN_DOWN(v, a) ((v) & ~((a) - 1))
+#define unlikely(x) (__builtin_expect((!!(x)), 0))
+#define likely(x) (__builtin_expect((!!(x)), 1))
+#define IS_ALIGNED(v, a) (ALIGN_DOWN(v, a) == (v))
 
 ////////////////////////////////////////////////////////////////////////////////
 // Variadic functions                                                         //
