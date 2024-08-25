@@ -98,6 +98,7 @@ typedef double f64;
 #define unlikely(x) (__builtin_expect((!!(x)), 0))
 #define likely(x) (__builtin_expect((!!(x)), 1))
 #define IS_ALIGNED(v, a) (ALIGN_DOWN(v, a) == (v))
+#define DECONST(t, a) ((t)((uptr)((const void *)(a))))
 
 ////////////////////////////////////////////////////////////////////////////////
 // Variadic functions                                                         //
