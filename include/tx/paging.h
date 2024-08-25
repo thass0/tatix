@@ -15,8 +15,11 @@ struct pt {
 
 struct page_table {
     struct pt *pml4;
-    struct pool pt_alloc;
+    struct pool *pt_alloc;
 };
+
+// This is 62 bits and thus bigger than any allowed physical address (52 bit is the limit)
+#define PADDR_INVALID 0x3AADBAADBAADB000LL
 
 typedef ptr vaddr_t;
 typedef ptr paddr_t;
@@ -36,7 +39,11 @@ typedef ptr paddr_t;
 #define PTE_REGION_SIZE BIT(PT_BIT_BASE)
 #define PDE_REGION_SIZE BIT(PD_BIT_BASE)
 
-struct page_table *pt_alloc_page_table(struct arena *arn);
+struct page_table pt_alloc_page_table(struct arena *arn);
+
+int pt_map(struct page_table pt, vaddr_t vaddr, paddr_t paddr);
+paddr_t pt_walk(struct page_table pt, vaddr_t vaddr);
+int pt_unmap(struct page_table page_table, vaddr_t vaddr);
 
 int pt_map(struct page_table *pt, vaddr_t vaddr, paddr_t paddr);
 int pt_walk(struct page_table *pt, vaddr_t vaddr, paddr_t *paddr_ret);

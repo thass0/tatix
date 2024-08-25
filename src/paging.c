@@ -1,20 +1,22 @@
 #include <config.h>
 #include <tx/paging.h>
 
-static struct pool pt_alloc_init(sz n_pages, struct arena *arn)
+static struct pool *pt_alloc_init(sz n_pages, struct arena *arn)
 {
     assert(n_pages > 0);
+    struct pool *pool = arena_alloc(arn, sizeof(*pool));
     void *buf = arena_alloc_aligned_array(arn, n_pages, PAGE_SIZE, PAGE_SIZE);
     assert(buf);
     assert(n_pages <= SZ_MAX / PAGE_SIZE);
-    return pool_new(bytes_new(buf, n_pages * PAGE_SIZE), PAGE_SIZE);
+    *pool = pool_new(bytes_new(buf, n_pages * PAGE_SIZE), PAGE_SIZE);
+    return pool;
 }
 
-struct page_table *pt_alloc_page_table(struct arena *arn)
+struct page_table pt_alloc_page_table(struct arena *arn)
 {
-    struct page_table *pt = arena_alloc(arn, sizeof(*pt));
-    pt->pt_alloc = pt_alloc_init(32, arn);
-    pt->pml4 = pool_alloc(&pt->pt_alloc);
+    struct page_table pt;
+    pt.pt_alloc = pt_alloc_init(32, arn);
+    pt.pml4 = pool_alloc(pt.pt_alloc);
     return pt;
 }
 
@@ -46,14 +48,14 @@ static struct pt *pt_get(struct pt *pt, sz idx)
     return NULL;
 }
 
-static struct pt *pt_get_or_alloc(struct page_table *page_table, struct pt *pt, sz idx)
+static struct pt *pt_get_or_alloc(struct page_table page_table, struct pt *pt, sz idx)
 {
     struct pt *ret;
 
     ret = pt_get(pt, idx);
 
     if (!ret) {
-        ret = pool_alloc(&page_table->pt_alloc);
+        ret = pool_alloc(page_table.pt_alloc);
         if (!ret)
             return NULL;
         pt_insert(pt, idx, pte_from_paddr((paddr_t)ret, PT_FLAG_P | PT_FLAG_RW));
@@ -62,10 +64,9 @@ static struct pt *pt_get_or_alloc(struct page_table *page_table, struct pt *pt, 
     return ret;
 }
 
-int pt_map(struct page_table *page_table, vaddr_t vaddr, paddr_t paddr)
+int pt_map(struct page_table page_table, vaddr_t vaddr, paddr_t paddr)
 {
-    assert(page_table);
-    struct pt *pdpt = pt_get_or_alloc(page_table, page_table->pml4, PT_IDX(vaddr, PML4_BIT_BASE));
+    struct pt *pdpt = pt_get_or_alloc(page_table, page_table.pml4, PT_IDX(vaddr, PML4_BIT_BASE));
     if (!pdpt)
         return -1;
     struct pt *pd = pt_get_or_alloc(page_table, pdpt, PT_IDX(vaddr, PDPT_BIT_BASE));
@@ -80,10 +81,37 @@ int pt_map(struct page_table *page_table, vaddr_t vaddr, paddr_t paddr)
     return 0;
 }
 
-int pt_walk(struct page_table *page_table, vaddr_t vaddr, paddr_t *paddr_ret)
+paddr_t pt_walk(struct page_table page_table, vaddr_t vaddr)
 {
-    assert(page_table);
-    struct pt *pdpt = pt_get(page_table->pml4, PT_IDX(vaddr, PML4_BIT_BASE));
+    struct pt *pdpt = pt_get(page_table.pml4, PT_IDX(vaddr, PML4_BIT_BASE));
+    if (!pdpt)
+        return PADDR_INVALID;
+    struct pt *pd = pt_get(pdpt, PT_IDX(vaddr, PDPT_BIT_BASE));
+    if (!pd)
+        return PADDR_INVALID;
+    struct pt *pt = pt_get(pd, PT_IDX(vaddr, PD_BIT_BASE));
+    if (!pt)
+        return PADDR_INVALID;
+    sz pt_idx = PT_IDX(vaddr, PT_BIT_BASE);
+    assert(0 <= pt_idx && pt_idx < countof(pt->entries));
+    if (!(pt->entries[pt_idx].bits & PT_FLAG_P))
+        return PADDR_INVALID;
+    return paddr_from_pte(pt->entries[pt_idx]) | (vaddr & (BIT(11) - 1));
+}
+
+bool pt_is_empty(struct pt *pt)
+{
+    assert(pt);
+    for (sz i = 0; i < countof(pt->entries); i++) {
+        if (pt->entries[i].bits & PT_FLAG_P)
+            return false;
+    }
+    return true;
+}
+
+int pt_unmap(struct page_table page_table, vaddr_t vaddr)
+{
+    struct pt *pdpt = pt_get(page_table.pml4, PT_IDX(vaddr, PML4_BIT_BASE));
     if (!pdpt)
         return -1;
     struct pt *pd = pt_get(pdpt, PT_IDX(vaddr, PDPT_BIT_BASE));
@@ -96,6 +124,20 @@ int pt_walk(struct page_table *page_table, vaddr_t vaddr, paddr_t *paddr_ret)
     assert(0 <= pt_idx && pt_idx < countof(pt->entries));
     if (!(pt->entries[pt_idx].bits & PT_FLAG_P))
         return -1;
-    *paddr_ret = paddr_from_pte(pt->entries[pt_idx]) | (vaddr & (BIT(11) - 1));
+    pt->entries[pt_idx].bits &= ~PT_FLAG_P;
+
+    if (pt_is_empty(pt)) {
+        pd->entries[PT_IDX(vaddr, PD_BIT_BASE)].bits &= ~PT_FLAG_P;
+        pool_free(page_table.pt_alloc, pt);
+    }
+    if (pt_is_empty(pd)) {
+        pdpt->entries[PT_IDX(vaddr, PDPT_BIT_BASE)].bits &= ~PT_FLAG_P;
+        pool_free(page_table.pt_alloc, pd);
+    }
+    if (pt_is_empty(pdpt)) {
+        page_table.pml4->entries[PT_IDX(vaddr, PML4_BIT_BASE)].bits &= ~PT_FLAG_P;
+        pool_free(page_table.pt_alloc, pdpt);
+    }
+
     return 0;
 }
