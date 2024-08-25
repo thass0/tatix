@@ -129,6 +129,6 @@ void handle_interrupt(struct cpu_state *cpu_state)
         print_str(str_from_buf(buf));
         hlt();
     } else if (cpu_state->vector < IRQ_VECTORS_END) {
-        print_str(STR("Caught an IRQ\n"));
+        print_dbg(STR("Caught an IRQ: vector=%lu error_code=%lu\n"), cpu_state->vector, cpu_state->error_code);
     }
 }
