@@ -54,6 +54,7 @@ struct buddy *buddy_init(struct bytes area, struct arena *arn)
     assert(buddy->max_ord < N_FREE_LISTS);
     dlist_insert(&buddy->avail[buddy->max_ord].link, &block->link);
 
+    print_dbg(STR("Initialized buddy: base=0x%lx max_ord=0x%ld\n"), buddy->base, buddy->max_ord);
     return buddy;
 }
 
@@ -96,6 +97,7 @@ static inline struct block *split_block(struct block *block, sz ord)
 void *buddy_alloc(struct buddy *buddy, sz req_ord)
 {
     assert(req_ord >= 0);
+    assert(buddy);
 
     sz ord = req_ord;
     while (ord <= buddy->max_ord) {
@@ -104,15 +106,19 @@ void *buddy_alloc(struct buddy *buddy, sz req_ord)
         ord++;
     }
 
-    if (ord > buddy->max_ord)
-        return NULL; // No block is large enough to fit the allocation
+    if (ord > buddy->max_ord) {
+        print_dbg(STR("No block found, all blocks too small: ord=%ld\n"), req_ord);
+        return NULL;
+    }
 
     struct block *ret = __container_of(buddy->avail[ord].link.next, struct block, link);
     set_not_avail(buddy, ret, ord);
     dlist_remove(buddy->avail[ord].link.next);
 
-    if (ord == req_ord)
-        return ret; // The block is a perfect fit
+    if (ord == req_ord) {
+        print_dbg(STR("Found perfect fit: ret=0x%lx ord=0x%ld\n"), ret, ord);
+        return ret;
+    }
 
     // Split blocks until the order of the block that we return matches the order requested
     while (ord > req_ord) {
@@ -121,8 +127,10 @@ void *buddy_alloc(struct buddy *buddy, sz req_ord)
         set_avail(buddy, rem, ord);
         rem->ord = ord;
         dlist_insert(&buddy->avail[ord].link, &rem->link);
+        print_dbg(STR("Split blocks: ret=0x%lx rem=0x%lx ord=%ld\n"), ret, rem, ord);
     }
 
+    print_dbg(STR("Found block after splitting: ret=0x%lx ord=0x%ld\n"), ret, ord);
     return ret;
 }
 
@@ -157,11 +165,13 @@ void buddy_free(struct buddy *buddy, void *ptr, sz ord)
     assert(buddy);
     assert(0 <= ord && ord <= buddy->max_ord);
 
-    struct block *block = (struct block *)ptr;
+    struct block *block = ptr;
     struct block *buddy_block = get_buddy(buddy, block, ord);
 
+    print_dbg(STR("Freeing block: block=0x%lx ord=%ld\n"), block, ord);
+
     while (ord < buddy->max_ord && is_avail(buddy, buddy_block)) {
-        // Coalesce the two buddies into one block
+        print_dbg(STR("Coalescing blocks: block=0x%lx buddy_block=0x%lx ord=%ld\n"), block, buddy_block, ord);
         dlist_remove(&buddy_block->link);
         ord++;
         if (buddy_block < block)
