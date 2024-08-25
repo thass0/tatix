@@ -3,6 +3,7 @@
 
 #include <tx/arena.h>
 #include <tx/base.h>
+#include <tx/buddy.h>
 #include <tx/pool.h>
 
 struct pte {
@@ -23,6 +24,16 @@ struct page_table {
 
 typedef ptr vaddr_t;
 typedef ptr paddr_t;
+
+struct vas {
+    struct page_table pt;
+    struct buddy *phys_alloc;
+};
+
+struct vma {
+    vaddr_t base;
+    sz len;
+};
 
 // Get the index that `vaddr` has in some page table page where `base` is the
 // index of the first of the nine bits in `vaddr` that make up this index.
@@ -45,7 +56,9 @@ int pt_map(struct page_table pt, vaddr_t vaddr, paddr_t paddr);
 paddr_t pt_walk(struct page_table pt, vaddr_t vaddr);
 int pt_unmap(struct page_table page_table, vaddr_t vaddr);
 
-int pt_map(struct page_table *pt, vaddr_t vaddr, paddr_t paddr);
-int pt_walk(struct page_table *pt, vaddr_t vaddr, paddr_t *paddr_ret);
+struct vas vas_new(struct page_table pt, struct buddy *phys_alloc);
+struct vma vma_new(vaddr_t base, sz len);
+int vas_map(struct vas vas, struct vma vma);
+int vas_unmap(struct vas vas, struct vma vma);
 
 #endif // __TX_PAGING_H__

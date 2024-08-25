@@ -20,6 +20,10 @@ struct page_table pt_alloc_page_table(struct arena *arn)
     return pt;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// Creating mappings and walking page tables                                 //
+///////////////////////////////////////////////////////////////////////////////
+
 static inline paddr_t paddr_from_pte(struct pte pte)
 {
     return pte.bits & ~(BIT(11) - 1);
@@ -139,5 +143,63 @@ int pt_unmap(struct page_table page_table, vaddr_t vaddr)
         pool_free(page_table.pt_alloc, pdpt);
     }
 
+    return 0;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Managing VMAs (virtual memory areas)                                       //
+////////////////////////////////////////////////////////////////////////////////
+
+struct vma vma_new(vaddr_t base, sz len)
+{
+    struct vma vma;
+    vma.base = base;
+    vma.len = len;
+    return vma;
+}
+
+struct vas vas_init(struct page_table pt, struct buddy *phys_alloc)
+{
+    assert(phys_alloc);
+    struct vas vas;
+    vas.pt = pt;
+    vas.phys_alloc = phys_alloc;
+    return vas;
+}
+
+int vas_map(struct vas vas, struct vma vma)
+{
+    assert(vma.len > 0);
+    assert(IS_ALIGNED(vma.len, PAGE_SIZE));
+    assert(vma.base <= PTR_MAX - vma.len);
+    vaddr_t vaddr_end = vma.base + vma.len;
+    int rc = 0;
+    for (vaddr_t vaddr = vma.base; vaddr < vaddr_end; vaddr += PAGE_SIZE) {
+        paddr_t paddr = (paddr_t)buddy_alloc(vas.phys_alloc, 0);
+        if (unlikely(!paddr))
+            return -1;
+        rc = pt_map(vas.pt, vaddr, paddr);
+        if (unlikely(rc < 0))
+            return rc;
+    }
+    return 0;
+}
+
+int vas_unmap(struct vas vas, struct vma vma)
+{
+    assert(vma.len > 0);
+    assert(IS_ALIGNED(vma.len, PAGE_SIZE));
+    assert(vma.base <= PTR_MAX - vma.len);
+    vaddr_t vaddr_end = vma.base + vma.len;
+    int rc = 0;
+    for (vaddr_t vaddr = vma.base; vaddr < vaddr_end; vaddr += PAGE_SIZE) {
+        paddr_t paddr = pt_walk(vas.pt, vaddr);
+        if (unlikely(paddr == PADDR_INVALID))
+            return -1;
+        buddy_free(vas.phys_alloc, (void *)paddr, 0);
+        rc = pt_unmap(vas.pt, vaddr);
+        if (unlikely(rc < 0))
+            return rc;
+    }
     return 0;
 }
