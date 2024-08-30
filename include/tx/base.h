@@ -99,6 +99,9 @@ typedef double f64;
 #define likely(x) (__builtin_expect((!!(x)), 1))
 #define IS_ALIGNED(v, a) (ALIGN_DOWN(v, a) == (v))
 #define DECONST(t, a) ((t)((uptr)((const void *)(a))))
+#define static_assert(x) _static_assert(x, __LINE__)
+#define _static_assert(x, line) __static_assert(x, line)
+#define __static_assert(x, line) typedef __unused char __static_assert_##line[(x) ? 1 : -1]
 
 ////////////////////////////////////////////////////////////////////////////////
 // Variadic functions                                                         //
