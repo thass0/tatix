@@ -10,9 +10,13 @@ struct pte {
     u64 bits;
 } __packed;
 
+static_assert(sizeof(struct pte) == 8);
+
 struct pt {
     struct pte entries[512];
 } __packed;
+
+static_assert(sizeof(struct pt) == 0x1000);
 
 struct page_table {
     struct pt *pml4;

@@ -16,10 +16,14 @@ struct idt_entry {
     u32 reserved;
 } __packed;
 
+static_assert(sizeof(struct idt_entry) == 16);
+
 struct idtr {
     u16 limit;
     u64 base;
 } __packed;
+
+static_assert(sizeof(struct idtr) == 10);
 
 #define GATE_TYPE_INTERRUPT 0xe
 #define GATE_TYPE_TRAP 0xf
