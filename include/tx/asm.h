@@ -44,7 +44,12 @@ static inline void stosb(void *addr, u32 data, u32 cnt)
 
 static inline void lgdt(volatile void *addr)
 {
-    __asm__ volatile("lgdt (%0" : : "r"(addr));
+    __asm__ volatile("lgdt (%0)" : : "r"(addr));
+}
+
+static inline void ltr(u16 selector)
+{
+    __asm__ volatile("ltr %0" : : "r"(selector));
 }
 
 #endif // __TXT_ASM_H__
