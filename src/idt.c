@@ -93,7 +93,8 @@ void init_idt(void)
     init_idt_entry(&idt[47], (ptr)isr_stub_47, ATTR_INTERRUPT_GATE);
 
     // This is our system call interrupt. It needs to allow DPL user to call it.
-    init_idt_entry(&idt[IRQ_SYSCALL], (ptr)isr_stub_128, ATTR_INTERRUPT_GATE | (SEG_DESC_DPL_USER << SEG_DESC_DPL_SHIFT));
+    init_idt_entry(&idt[IRQ_SYSCALL], (ptr)isr_stub_128,
+                   ATTR_INTERRUPT_GATE | (SEG_DESC_DPL_USER << SEG_DESC_DPL_SHIFT));
 
     __asm__ volatile("lidt %0" : : "m"(idtr));
 }
