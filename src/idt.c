@@ -1,6 +1,7 @@
 #include <config.h>
 #include <tx/asm.h>
 #include <tx/base.h>
+#include <tx/gdt.h>
 #include <tx/isr.h>
 #include <tx/pic.h>
 
@@ -36,7 +37,8 @@ __aligned(16) static struct idt_entry idt[NUM_IDT_ENTRIES];
 void init_idt_entry(struct idt_entry *ent, ptr handler, u8 attributes)
 {
     ent->offset1 = (u16)(handler & 0xffff);
-    ent->seg_selector = BOOT_GDT_CODE_DESC;
+    // NOTE: The GDT is initialized before interrupts, so we can use constants from `gdt.h`.
+    ent->seg_selector = segment_selector(SEG_IDX_KERN_CODE, SEG_DESC_DPL_KERN);
     ent->ist = 0; // Disable the use of the IST, plus set the reserved bits to 0
     ent->attributes = attributes;
     ent->offset2 = (u16)((handler >> 16) & 0xffff);
@@ -89,6 +91,9 @@ void init_idt(void)
     init_idt_entry(&idt[45], (ptr)isr_stub_45, ATTR_INTERRUPT_GATE);
     init_idt_entry(&idt[46], (ptr)isr_stub_46, ATTR_INTERRUPT_GATE);
     init_idt_entry(&idt[47], (ptr)isr_stub_47, ATTR_INTERRUPT_GATE);
+
+    // This is our system call interrupt. It needs to allow DPL user to call it.
+    init_idt_entry(&idt[IRQ_SYSCALL], (ptr)isr_stub_128, ATTR_INTERRUPT_GATE | (SEG_DESC_DPL_USER << SEG_DESC_DPL_SHIFT));
 
     __asm__ volatile("lidt %0" : : "m"(idtr));
 }

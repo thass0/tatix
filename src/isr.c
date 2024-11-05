@@ -28,6 +28,11 @@ __naked void isr_stub_common(void)
     __asm__ volatile("mov %rsp, %rdi");
     __asm__ volatile("call handle_interrupt");
 
+    __asm__ volatile("jmp isr_return");
+}
+
+__naked void isr_return(void)
+{
     __asm__ volatile("pop %rax");
     __asm__ volatile("pop %rbx");
     __asm__ volatile("pop %rcx");
@@ -106,7 +111,9 @@ ISR_STUB(45)
 ISR_STUB(46)
 ISR_STUB(47)
 
-void fmt_cpu_state(struct cpu_state *cpu_state, struct str_buf *buf)
+ISR_STUB(128)
+
+void fmt_cpu_state(struct trap_frame *cpu_state, struct str_buf *buf)
 {
     fmt(buf,
         STR("rax: 0x%lx\nrbx: 0x%lx\nrcx: 0x%lx\nrdx: 0x%lx\nrsi: 0x%lx\nrdi: 0x%lx\nrbp: 0x%lx\n"
@@ -118,7 +125,7 @@ void fmt_cpu_state(struct cpu_state *cpu_state, struct str_buf *buf)
         cpu_state->rsp, cpu_state->ss);
 }
 
-void handle_interrupt(struct cpu_state *cpu_state)
+void handle_interrupt(struct trap_frame *cpu_state)
 {
     char underlying[1024];
     struct str_buf buf = str_buf_new(underlying, 0, countof(underlying));
@@ -130,5 +137,9 @@ void handle_interrupt(struct cpu_state *cpu_state)
         hlt();
     } else if (cpu_state->vector < IRQ_VECTORS_END) {
         print_dbg(STR("Caught an IRQ: vector=%lu error_code=%lu\n"), cpu_state->vector, cpu_state->error_code);
+    } else if (cpu_state->vector == IRQ_SYSCALL) {
+        print_dbg(STR("Caught a system call: vector=%lx\n"), cpu_state->vector);
+        fmt_cpu_state(cpu_state, &buf);
+        print_str(str_from_buf(buf));
     }
 }

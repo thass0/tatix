@@ -3,7 +3,7 @@
 
 #include <tx/base.h>
 
-struct cpu_state {
+struct trap_frame {
     u64 rax;
     u64 rbx;
     u64 rcx;
@@ -29,6 +29,8 @@ struct cpu_state {
     u64 rsp;
     u64 ss;
 } __packed;
+
+static_assert(sizeof(struct trap_frame) == 176);
 
 void isr_stub_0(void);
 void isr_stub_1(void);
@@ -70,7 +72,10 @@ void isr_stub_45(void);
 void isr_stub_46(void);
 void isr_stub_47(void);
 
-void handle_interrupt(struct cpu_state *);
+void isr_stub_128(void);
+
+__naked void isr_return(void);
+void handle_interrupt(struct trap_frame *);
 
 // Ranges for different types of interrupt vectors. Given as intervals: [beg; end)
 #define RESERVED_VECTORS_BEG 0
@@ -80,5 +85,7 @@ void handle_interrupt(struct cpu_state *);
 #define IRQ_VECTORS_BEG RESERVED_VECTORS_END
 #define IRQ_VECTORS_END 48
 #define NUM_IRQ_VECTORS (IRQ_VECTORS_END - IRQ_VECTORS_BEG)
+
+#define IRQ_SYSCALL 0x80
 
 #endif // __TX_ISR_H__
