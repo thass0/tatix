@@ -22,7 +22,18 @@ SECTIONS
 
     . = ALIGN(PAGE_SIZE);
 
-    .data : { *(.data*); }
+    .data :
+    {
+        *(.data*);
+    }
+
+    .init_proc :
+    {
+        _init_proc_start = .;
+        *(.init_proc*);
+        _init_proc_end = .;
+    }
+
     .bss :
     {
             *(.*bss*);
