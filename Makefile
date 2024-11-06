@@ -71,6 +71,9 @@ $(KERNEL_ELF): $(OBJS) | $(BUILD_DIR) $(LINKER_CONFIG) kernel.ld
 $(BUILD_DIR)/%.c.o: $(SRC_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
 	$(CC) $(CPPFLAGS) -D__DEBUG__=$(DEBUG) -D__BASENAME__=\"$(notdir $<)\" -I$(dir $(HEADER_CONFIG)) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/%.s.o: $(SRC_DIR)/%.s | $(BUILD_DIR)
+	$(NASM) $< -o $@
+
 # Misc
 
 $(LINKER_CONFIG): $(CONFIG)
