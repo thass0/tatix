@@ -31,4 +31,11 @@ static inline void memset(struct bytes bytes, byte value)
         bytes.dat[i] = value;
 }
 
+static inline void memcpy(struct bytes dest, struct bytes src)
+{
+    sz len = (dest.len < src.len) ? dest.len : src.len;
+    for (sz i = 0; i < len; i++)
+        dest.dat[i] = src.dat[i];
+}
+
 #endif // __TX_BYTES_H__
