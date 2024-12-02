@@ -53,4 +53,12 @@ static inline struct str str_from_range(char *beg, char *end)
     return str;
 }
 
+static inline struct str str_from(char *dat, sz len)
+{
+    struct str str;
+    str.dat = dat;
+    str.len = len;
+    return str;
+}
+
 #endif // __TX_STRING_H__
