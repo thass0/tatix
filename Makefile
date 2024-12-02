@@ -18,9 +18,6 @@ ifeq ($(shell [ $(DEBUG) -ge 3 ] 2>/dev/null && echo yes), yes)
     QEMU_DEBUG_FLAGS := -s -S
 endif
 
-$(info $(DEBUG_FLAGS))
-$(info $(QEMU_DEBUG_FLAGS))
-
 CC := gcc
 CPPFLAGS := -MMD -Iinclude/
 CFLAGS := $(DEBUG_FLAGS) -mgeneral-regs-only -std=gnu99 -ffreestanding -mcmodel=large -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -Wuninitialized -Wmaybe-uninitialized -pedantic
