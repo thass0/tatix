@@ -5,6 +5,7 @@
 #include <tx/fmt.h>
 #include <tx/isr.h>
 #include <tx/pic.h>
+#include <tx/syscall.h>
 
 __naked void isr_stub_common(void)
 {
@@ -141,5 +142,6 @@ void handle_interrupt(struct trap_frame *cpu_state)
         print_dbg(STR("Caught a system call: vector=%lx\n"), cpu_state->vector);
         fmt_cpu_state(cpu_state, &buf);
         print_str(str_from_buf(buf));
+        handle_syscall(cpu_state);
     }
 }
