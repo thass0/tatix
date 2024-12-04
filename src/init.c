@@ -18,13 +18,14 @@ __section(".entry.data") __aligned(0x1000) static struct pt pt_id[8]; // PT page
 __section(".entry.data") __aligned(0x1000) static struct pt pd_vmem; // PD table for virtual mapping
 __section(".entry.data") __aligned(0x1000) static struct pt pt_vmem[8]; // PT pages for virtual mapping (16 MB)
 
-static byte init_kernel_stack[0x2000] __used;
+#define INIT_KERNEL_STACK_SIZE 0x4000
+static byte init_kernel_stack[INIT_KERNEL_STACK_SIZE] __used;
 
 __noreturn void kernel_init(void);
 
 __noreturn __naked void _kernel_init(void)
 {
-    __asm__ volatile("movl $init_kernel_stack, %esp\n"
+    __asm__ volatile("movl $init_kernel_stack + " TOSTRING(INIT_KERNEL_STACK_SIZE) ", %esp\n"
                      "call kernel_init\n");
 }
 
@@ -55,10 +56,9 @@ __section(".entry.text") __noreturn void _start(void)
     _kernel_init();
 }
 
-union __aligned(0x2000) kernel_stack
-{
+union __aligned(0x8000) kernel_stack {
     struct proc *proc;
-    byte stack[0x2000];
+    byte stack[0x8000];
 };
 
 typedef u32 pid_t;

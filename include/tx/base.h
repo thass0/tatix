@@ -90,6 +90,7 @@ typedef double f64;
 #define true 1
 #define false 0
 #define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define BIT(n) (1LLU << (n))
