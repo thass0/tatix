@@ -137,24 +137,25 @@ void proc_init(struct buddy *phys_alloc, struct arena *arn)
     // TODO: This should be kernel-only memory. It uses PT_FLAG_US right now because I couldn't
     // get the code to work otherwise. But this is not correct! I need to fix this and remove PT_FLAG_US
     for (sz offset = 0; offset < 0x800000; offset += PAGE_SIZE)
-        assert(pt_map(proc->vas.pt, KERN_BASE_VADDR + offset, KERN_BASE_PADDR + offset,
-                      PT_FLAG_P | PT_FLAG_RW | PT_FLAG_US) == 0);
+        assert(!pt_map(proc->vas.pt, KERN_BASE_VADDR + offset, KERN_BASE_PADDR + offset,
+                       PT_FLAG_P | PT_FLAG_RW | PT_FLAG_US)
+                    .is_error);
 
     struct vma user_code = vma_new(0x100000, 0x16000);
-    assert(vas_map(proc->vas, user_code, PT_FLAG_P | PT_FLAG_RW | PT_FLAG_US) == 0);
-    assert(vas_memcpy(proc->vas, user_code, bytes_new(_init_proc_start, _init_proc_end - _init_proc_start)) == 0);
+    assert(!vas_map(proc->vas, user_code, PT_FLAG_P | PT_FLAG_RW | PT_FLAG_US).is_error);
+    assert(!vas_memcpy(proc->vas, user_code, bytes_new(_init_proc_start, _init_proc_end - _init_proc_start)).is_error);
     proc->trap_frame->rip = user_code.base;
 
     proc->trap_frame->cs = segment_selector(SEG_IDX_USER_CODE, SEG_DESC_DPL_USER);
     proc->trap_frame->ss = segment_selector(SEG_IDX_USER_DATA, SEG_DESC_DPL_USER); // TODO: Probably not needed
     struct vma user_stack = vma_new(0x200000, 0x2000);
-    assert(vas_map(proc->vas, user_stack, PT_FLAG_P | PT_FLAG_RW | PT_FLAG_US) == 0);
+    assert(!vas_map(proc->vas, user_stack, PT_FLAG_P | PT_FLAG_RW | PT_FLAG_US).is_error);
     proc->trap_frame->rsp = user_stack.base + user_stack.len - 1;
     proc->trap_frame->rbp = 0;
 
     print_str(STR("*** Processes setup has worked\n"));
 
-    load_cr3(pt_walk(current_page_table(), (vaddr_t)proc->vas.pt.pml4));
+    load_cr3(result_paddr_t_checked(pt_walk(current_page_table(), (vaddr_t)proc->vas.pt.pml4)));
 
     print_str(STR("*** I did the mapping correctly :^)\n"));
 

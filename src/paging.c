@@ -72,7 +72,9 @@ static struct pt *pt_get_or_alloc(struct page_table page_table, struct pt *pt, s
         ret = pool_alloc(page_table.pt_alloc);
         if (!ret)
             return NULL;
-        sz paddr_ret = pt_walk(current_page_table(), (vaddr_t)ret);
+        // NOTE: The memory in the pool for the page table pages must already be mapped,
+        // meaning `pt_walk` won't return an error here.
+        paddr_t paddr_ret = result_paddr_t_checked(pt_walk(current_page_table(), (vaddr_t)ret));
         print_dbg(STR("Allocated page table page: vaddr=0x%lx paddr=0x%lx\n"), ret, paddr_ret);
         pt_insert(pt, idx, pte_from_paddr(paddr_ret, flags));
     }
@@ -80,39 +82,39 @@ static struct pt *pt_get_or_alloc(struct page_table page_table, struct pt *pt, s
     return ret;
 }
 
-int pt_map(struct page_table page_table, vaddr_t vaddr, paddr_t paddr, int flags)
+struct result pt_map(struct page_table page_table, vaddr_t vaddr, paddr_t paddr, int flags)
 {
     struct pt *pdpt = pt_get_or_alloc(page_table, page_table.pml4, PT_IDX(vaddr, PML4_BIT_BASE), flags);
     if (!pdpt)
-        return -1;
+        return result_error(ENOMEM);
     struct pt *pd = pt_get_or_alloc(page_table, pdpt, PT_IDX(vaddr, PDPT_BIT_BASE), flags);
     if (!pd)
-        return -1;
+        return result_error(ENOMEM);
     struct pt *pt = pt_get_or_alloc(page_table, pd, PT_IDX(vaddr, PD_BIT_BASE), flags);
     if (!pd)
-        return -1;
+        return result_error(ENOMEM);
     sz pt_idx = PT_IDX(vaddr, PT_BIT_BASE);
     assert(0 <= pt_idx && pt_idx < countof(pt->entries));
     pt->entries[pt_idx] = pte_from_paddr(paddr, flags);
-    return 0;
+    return result_ok();
 }
 
-paddr_t pt_walk(struct page_table page_table, vaddr_t vaddr)
+struct result_paddr_t pt_walk(struct page_table page_table, vaddr_t vaddr)
 {
     struct pt *pdpt = pt_get(page_table.pml4, PT_IDX(vaddr, PML4_BIT_BASE));
     if (!pdpt)
-        return PADDR_INVALID;
+        return result_paddr_t_error(EINVAL);
     struct pt *pd = pt_get(pdpt, PT_IDX(vaddr, PDPT_BIT_BASE));
     if (!pd)
-        return PADDR_INVALID;
+        return result_paddr_t_error(EINVAL);
     struct pt *pt = pt_get(pd, PT_IDX(vaddr, PD_BIT_BASE));
     if (!pt)
-        return PADDR_INVALID;
+        return result_paddr_t_error(EINVAL);
     sz pt_idx = PT_IDX(vaddr, PT_BIT_BASE);
     assert(0 <= pt_idx && pt_idx < countof(pt->entries));
     if (!(pt->entries[pt_idx].bits & PT_FLAG_P))
-        return PADDR_INVALID;
-    return paddr_from_pte(pt->entries[pt_idx]) | (vaddr & (BIT(11) - 1));
+        return result_paddr_t_error(EINVAL);
+    return result_paddr_t_ok(paddr_from_pte(pt->entries[pt_idx]) | (vaddr & (BIT(11) - 1)));
 }
 
 bool pt_is_empty(struct pt *pt)
@@ -125,21 +127,21 @@ bool pt_is_empty(struct pt *pt)
     return true;
 }
 
-int pt_unmap(struct page_table page_table, vaddr_t vaddr)
+struct result pt_unmap(struct page_table page_table, vaddr_t vaddr)
 {
     struct pt *pdpt = pt_get(page_table.pml4, PT_IDX(vaddr, PML4_BIT_BASE));
     if (!pdpt)
-        return -1;
+        return result_error(EINVAL);
     struct pt *pd = pt_get(pdpt, PT_IDX(vaddr, PDPT_BIT_BASE));
     if (!pd)
-        return -1;
+        return result_error(EINVAL);
     struct pt *pt = pt_get(pd, PT_IDX(vaddr, PD_BIT_BASE));
     if (!pt)
-        return -1;
+        return result_error(EINVAL);
     sz pt_idx = PT_IDX(vaddr, PT_BIT_BASE);
     assert(0 <= pt_idx && pt_idx < countof(pt->entries));
     if (!(pt->entries[pt_idx].bits & PT_FLAG_P))
-        return -1;
+        return result_error(EINVAL);
     pt->entries[pt_idx].bits &= ~PT_FLAG_P;
     print_dbg(STR("Removed entry: pt_idx=%ld\n"), pt_idx);
 
@@ -159,7 +161,7 @@ int pt_unmap(struct page_table page_table, vaddr_t vaddr)
         pool_free(page_table.pt_alloc, pdpt);
     }
 
-    return 0;
+    return result_ok();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -183,48 +185,48 @@ struct vas vas_new(struct page_table pt, struct buddy *phys_alloc)
     return vas;
 }
 
-int vas_map(struct vas vas, struct vma vma, int flags)
+struct result vas_map(struct vas vas, struct vma vma, int flags)
 {
     assert(vma.len > 0);
     assert(IS_ALIGNED(vma.len, PAGE_SIZE));
     assert(vma.base <= PTR_MAX - vma.len);
     vaddr_t vaddr_end = vma.base + vma.len;
-    int rc = 0;
+    struct result res = result_ok();
     print_dbg(STR("Mapping VMA: base=0x%lx len=0x%lx\n"), vma.base, vma.len);
     for (vaddr_t vaddr = vma.base; vaddr < vaddr_end; vaddr += PAGE_SIZE) {
         paddr_t paddr = (paddr_t)buddy_alloc(vas.phys_alloc, 0);
         if (unlikely(!paddr))
-            return -1;
-        rc = pt_map(vas.pt, vaddr, paddr, flags);
-        if (unlikely(rc < 0))
-            return rc;
+            return result_error(ENOMEM);
+        res = pt_map(vas.pt, vaddr, paddr, flags);
+        if (unlikely(res.is_error))
+            return res;
         print_dbg(STR("Mapped: 0x%lx ---> 0x%lx\n"), vaddr, paddr);
     }
-    return 0;
+    return res;
 }
 
-int vas_unmap(struct vas vas, struct vma vma)
+struct result vas_unmap(struct vas vas, struct vma vma)
 {
     assert(vma.len > 0);
     assert(IS_ALIGNED(vma.len, PAGE_SIZE));
     assert(vma.base <= PTR_MAX - vma.len);
     vaddr_t vaddr_end = vma.base + vma.len;
-    int rc = 0;
+    struct result res = result_ok();
     print_dbg(STR("Unmapping VMA: base=0x%lx len=0x%lx\n"), vma.base, vma.len);
     for (vaddr_t vaddr = vma.base; vaddr < vaddr_end; vaddr += PAGE_SIZE) {
-        paddr_t paddr = pt_walk(vas.pt, vaddr);
-        if (unlikely(paddr == PADDR_INVALID))
-            return -1;
-        buddy_free(vas.phys_alloc, (void *)paddr, 0);
-        rc = pt_unmap(vas.pt, vaddr);
-        if (unlikely(rc < 0))
-            return rc;
+        struct result_paddr_t paddr = pt_walk(vas.pt, vaddr);
+        if (unlikely(paddr.is_error))
+            return result_error(paddr.code);
+        buddy_free(vas.phys_alloc, (void *)result_paddr_t_checked(paddr), 0);
+        res = pt_unmap(vas.pt, vaddr);
+        if (unlikely(res.is_error))
+            return res;
         print_dbg(STR("Unmapped: 0x%lx -/-> 0x%lx\n"), vaddr, paddr);
     }
-    return 0;
+    return res;
 }
 
-int vas_memcpy(struct vas vas, struct vma vma, struct bytes src)
+struct result vas_memcpy(struct vas vas, struct vma vma, struct bytes src)
 {
     assert(vma.len > 0);
     assert(IS_ALIGNED(vma.len, PAGE_SIZE));
@@ -237,13 +239,13 @@ int vas_memcpy(struct vas vas, struct vma vma, struct bytes src)
               src.len);
 
     for (vaddr_t vaddr = vma.base; vaddr < vaddr_end && offset < src.len; vaddr += PAGE_SIZE, offset += PAGE_SIZE) {
-        paddr_t paddr = pt_walk(vas.pt, vaddr);
-        if (unlikely(paddr == PADDR_INVALID))
-            return -1;
-        void *dest = (void *)paddr;
+        struct result_paddr_t paddr = pt_walk(vas.pt, vaddr);
+        if (unlikely(paddr.is_error))
+            return result_error(EINVAL);
+        void *dest = (void *)result_paddr_t_checked(paddr);
         memcpy(bytes_new(dest, PAGE_SIZE),
                bytes_new(src.dat + offset, src.len - offset >= PAGE_SIZE ? PAGE_SIZE : src.len - offset));
     }
 
-    return 0;
+    return result_ok();
 }
