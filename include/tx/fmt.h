@@ -2,6 +2,7 @@
 #define __TX_FMT_H__
 
 #include <tx/base.h>
+#include <tx/error.h>
 #include <tx/string.h>
 
 // Formatting is based on: https://nullprogram.com/blog/2023/02/13/
@@ -11,39 +12,39 @@
 // functions. `fmt` and `vfmt` implement a printf-like syntax for convenience
 // while the `append_*` functions implement formatting of different data types.
 
-static inline int append_str(struct str s, struct str_buf *buf)
+static inline struct result append_str(struct str s, struct str_buf *buf)
 {
     if (!buf)
-        return -1;
+        return result_error(EINVAL);
 
     if (buf->cap < buf->len + s.len)
-        return -1;
+        return result_error(ENOMEM);
 
     for (sz i = 0; i < s.len; i++)
         (buf->dat + buf->len)[i] = s.dat[i];
     buf->len += s.len;
 
-    return 0;
+    return result_ok();
 }
 
-static inline int append_char(char ch, struct str_buf *buf)
+static inline struct result append_char(char ch, struct str_buf *buf)
 {
     if (!buf)
-        return -1;
+        return result_error(EINVAL);
 
     // Capacity will be exceeded if we add one byte.
     if (buf->cap == buf->len)
-        return -1;
+        return result_error(ENOMEM);
 
     buf->dat[buf->len++] = ch;
 
-    return 0;
+    return result_ok();
 }
 
-static inline int append_i64(i64 x, struct str_buf *buf)
+static inline struct result append_i64(i64 x, struct str_buf *buf)
 {
     if (!buf)
-        return -1;
+        return result_error(EINVAL);
 
     char tmp[64];
     char *end = tmp + countof(tmp);
@@ -61,10 +62,10 @@ static inline int append_i64(i64 x, struct str_buf *buf)
     return append_str(str_from_range(beg, end), buf);
 }
 
-static inline int append_u64(u64 x, struct str_buf *buf)
+static inline struct result append_u64(u64 x, struct str_buf *buf)
 {
     if (!buf)
-        return -1;
+        return result_error(EINVAL);
 
     char tmp[64];
     char *end = tmp + countof(tmp);
@@ -79,10 +80,10 @@ static inline int append_u64(u64 x, struct str_buf *buf)
 
 enum fmt_hex_alpha { HEX_ALPHA_UPPER, HEX_ALPHA_LOWER };
 
-static inline int append_hex(u64 x, enum fmt_hex_alpha alpha, struct str_buf *buf)
+static inline struct result append_hex(u64 x, enum fmt_hex_alpha alpha, struct str_buf *buf)
 {
     if (!buf)
-        return -1;
+        return result_error(EINVAL);
 
     char tmp[64];
     char *end = tmp + countof(tmp);
@@ -105,20 +106,20 @@ static inline int append_hex(u64 x, enum fmt_hex_alpha alpha, struct str_buf *bu
     return append_str(str_from_range(beg, end), buf);
 }
 
-static inline int append_ptr(void *p, struct str_buf *buf)
+static inline struct result append_ptr(void *p, struct str_buf *buf)
 {
     return append_hex((u64)p, HEX_ALPHA_LOWER, buf);
 }
 
-static inline int vfmt(struct str_buf *buf, struct str fmt, va_list argp)
+static inline struct result vfmt(struct str_buf *buf, struct str fmt, va_list argp)
 {
     enum { NONE, L, HH, H } modifier = NONE;
     enum { NOTHING, MODIFIER, CONVERSION } expect = NOTHING;
-    int rc = 0;
+    struct result res = result_ok();
     sz i = 0;
 
     if (!buf || !buf->dat || !fmt.dat || fmt.len < 0)
-        return -1;
+        return result_error(EINVAL);
 
     while (i < fmt.len) {
         if (expect == NOTHING && fmt.dat[i] == '%') {
@@ -164,54 +165,54 @@ static inline int vfmt(struct str_buf *buf, struct str fmt, va_list argp)
             case 'i':
             case 'd':
                 if (modifier == L)
-                    rc = append_i64((i64)va_arg(argp, i64), buf);
+                    res = append_i64((i64)va_arg(argp, i64), buf);
                 if (modifier == H)
-                    rc = append_i64((i64)va_arg(argp, i32) & 0xffff, buf);
+                    res = append_i64((i64)va_arg(argp, i32) & 0xffff, buf);
                 if (modifier == HH)
-                    rc = append_i64((i64)va_arg(argp, i32) & 0xff, buf);
+                    res = append_i64((i64)va_arg(argp, i32) & 0xff, buf);
                 if (modifier == NONE)
-                    rc = append_i64((i64)va_arg(argp, i32), buf);
+                    res = append_i64((i64)va_arg(argp, i32), buf);
                 modifier = NONE;
                 break;
             case 'u':
                 if (modifier == L)
-                    rc = append_u64((u64)va_arg(argp, u64), buf);
+                    res = append_u64((u64)va_arg(argp, u64), buf);
                 if (modifier == H)
-                    rc = append_u64((u64)va_arg(argp, u32) & 0xffff, buf);
+                    res = append_u64((u64)va_arg(argp, u32) & 0xffff, buf);
                 if (modifier == HH)
-                    rc = append_u64((u64)va_arg(argp, u32) & 0xff, buf);
+                    res = append_u64((u64)va_arg(argp, u32) & 0xff, buf);
                 if (modifier == NONE)
-                    rc = append_u64((u64)va_arg(argp, u32), buf);
+                    res = append_u64((u64)va_arg(argp, u32), buf);
                 modifier = NONE;
                 break;
             case 'x':
                 if (modifier == L)
-                    rc = append_hex((u64)va_arg(argp, u64), HEX_ALPHA_LOWER, buf);
+                    res = append_hex((u64)va_arg(argp, u64), HEX_ALPHA_LOWER, buf);
                 if (modifier == H)
-                    rc = append_hex((u64)va_arg(argp, u32) & 0xffff, HEX_ALPHA_LOWER, buf);
+                    res = append_hex((u64)va_arg(argp, u32) & 0xffff, HEX_ALPHA_LOWER, buf);
                 if (modifier == HH)
-                    rc = append_hex((u64)va_arg(argp, u32) & 0xff, HEX_ALPHA_LOWER, buf);
+                    res = append_hex((u64)va_arg(argp, u32) & 0xff, HEX_ALPHA_LOWER, buf);
                 if (modifier == NONE)
-                    rc = append_hex((u64)va_arg(argp, u32), HEX_ALPHA_LOWER, buf);
+                    res = append_hex((u64)va_arg(argp, u32), HEX_ALPHA_LOWER, buf);
                 modifier = NONE;
                 break;
             case 'X':
                 if (modifier == L)
-                    rc = append_hex((u64)va_arg(argp, u64), HEX_ALPHA_UPPER, buf);
+                    res = append_hex((u64)va_arg(argp, u64), HEX_ALPHA_UPPER, buf);
                 if (modifier == H)
-                    rc = append_hex((u64)va_arg(argp, u32) & 0xffff, HEX_ALPHA_UPPER, buf);
+                    res = append_hex((u64)va_arg(argp, u32) & 0xffff, HEX_ALPHA_UPPER, buf);
                 if (modifier == HH)
-                    rc = append_hex((u64)va_arg(argp, u32) & 0xff, HEX_ALPHA_UPPER, buf);
+                    res = append_hex((u64)va_arg(argp, u32) & 0xff, HEX_ALPHA_UPPER, buf);
                 if (modifier == NONE)
-                    rc = append_hex((u64)va_arg(argp, u32), HEX_ALPHA_UPPER, buf);
+                    res = append_hex((u64)va_arg(argp, u32), HEX_ALPHA_UPPER, buf);
                 modifier = NONE;
                 break;
             case 's': {
                 struct str s = va_arg(argp, struct str);
                 if (!STR_IS_NULL(s))
-                    rc = append_str(s, buf);
+                    res = append_str(s, buf);
                 else
-                    rc = append_str(STR("(NULL)"), buf);
+                    res = append_str(STR("(NULL)"), buf);
                 modifier = NONE;
                 break;
             }
@@ -219,8 +220,8 @@ static inline int vfmt(struct str_buf *buf, struct str fmt, va_list argp)
                 break;
             }
 
-            if (rc < 0)
-                return rc;
+            if (res.is_error)
+                return res;
 
             expect = NOTHING;
             i++;
@@ -228,17 +229,17 @@ static inline int vfmt(struct str_buf *buf, struct str fmt, va_list argp)
         }
     }
 
-    return rc;
+    return res;
 }
 
-static inline int fmt(struct str_buf *buf, struct str fmt, ...)
+static inline struct result fmt(struct str_buf *buf, struct str fmt, ...)
 {
     va_list argp;
-    int rc = 0;
+    struct result res = result_ok();
     va_start(argp, fmt);
-    rc = vfmt(buf, fmt, argp);
+    res = vfmt(buf, fmt, argp);
     va_end(argp);
-    return rc;
+    return res;
 }
 
 #endif // __TX_FMT_H__

@@ -30,7 +30,7 @@
 #define DIV_LOW 1
 #define DIV_HIGH 0
 
-int com_init(u16 port)
+struct result com_init(u16 port)
 {
     // Setup Line Control Register
     u8 lcr = inb(port + OFFSET_LINE_CONTROL);
@@ -51,19 +51,19 @@ int com_init(u16 port)
     outb(port + OFFSET_MODEM_CONTROL, MODEM_CONTROL_LOOP);
     outb(port, 0xbe);
     if (inb(port) != 0xbe)
-        return -1;
+        return result_error(EIO);
     outb(port, 0xff);
     if (inb(port) != 0xff)
-        return -1;
+        return result_error(EIO);
 
     outb(port + OFFSET_MODEM_CONTROL, 0);
-    return 0;
+    return result_ok();
 }
 
-int com_write(u16 port, struct str str)
+struct result com_write(u16 port, struct str str)
 {
     if (!str.dat || str.len <= 0)
-        return -1;
+        return result_error(EINVAL);
 
     while (str.len--) {
         while (!(inb(port + OFFSET_LINE_STATUS) & LINE_STATUS_TX_READY))
@@ -71,15 +71,15 @@ int com_write(u16 port, struct str str)
         outb(port, *str.dat++);
     }
 
-    return 0;
+    return result_ok();
 }
 
-int com_read(u16 port, struct str_buf *buf)
+struct result com_read(u16 port, struct str_buf *buf)
 {
     sz len = 0;
 
     if (!buf || !buf->dat || buf->cap <= 0)
-        return -1;
+        return result_error(EINVAL);
 
     while (len < buf->cap) {
         while (!(inb(port + OFFSET_LINE_STATUS) & LINE_STATUS_RX_READY))
@@ -88,5 +88,5 @@ int com_read(u16 port, struct str_buf *buf)
     }
 
     buf->len = len;
-    return 0;
+    return result_ok();
 }

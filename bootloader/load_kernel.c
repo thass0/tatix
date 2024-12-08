@@ -26,10 +26,10 @@
 
 __section(".elf_buf") static byte elf_buf[0x200];
 
-int com_write(u16 port, struct str str)
+struct result com_write(u16 port, struct str str)
 {
     if (!str.dat || str.len <= 0)
-        return -1;
+        return result_error(EINVAL);
 
     while (str.len--) {
         while (!(inb(port + COM_OFFSET_LINE_STATUS) & COM_LINE_STATUS_TX_READY))
@@ -37,25 +37,25 @@ int com_write(u16 port, struct str str)
         outb(port, *str.dat++);
     }
 
-    return 0;
+    return result_ok();
 }
 
-int print_str(struct str str)
+struct result _print_str(struct str str)
 {
     return com_write(COM_PORT, str);
 }
 
-int print_fmt(struct str_buf buf, struct str fmt, ...)
+struct result _print_fmt(struct str_buf buf, struct str fmt, ...)
 {
     va_list argp;
-    int rc;
+    struct result res = result_ok();
     va_start(argp, fmt);
-    rc = vfmt(&buf, fmt, argp);
-    if (rc < 0)
-        return rc;
-    rc = com_write(COM_PORT, str_from_buf(buf));
+    res = vfmt(&buf, fmt, argp);
+    if (res.is_error)
+        return res;
+    res = com_write(COM_PORT, str_from_buf(buf));
     va_end(argp);
-    return rc;
+    return res;
 }
 
 static inline void disk_wait(void)
@@ -160,21 +160,21 @@ void load_kernel(void)
     char underlying[1024];
     struct str_buf buf = str_buf_new(underlying, 0, countof(underlying));
 
-    print_str(STR("Loading kernel ELF\n"));
+    _print_str(STR("Loading kernel ELF\n"));
     elf = (struct elf64_hdr *)elf_buf;
     disk_read((byte *)elf, sizeof(struct elf64_hdr), 0, BOOT_SECTOR_COUNT);
 
     if (elf_verify(elf) < 0) {
-        print_str(STR("Failed to verify ELF\n"));
+        _print_str(STR("Failed to verify ELF\n"));
         return;
     }
 
-    print_fmt(buf, STR("Loading program headers: phdr_tab_offset=0x%lx phdr_count=%hu phdr_size=%hu\n"),
-              elf->phdr_tab_offset, elf->phdr_count, elf->phdr_size);
+    _print_fmt(buf, STR("Loading program headers: phdr_tab_offset=0x%lx phdr_count=%hu phdr_size=%hu\n"),
+               elf->phdr_tab_offset, elf->phdr_count, elf->phdr_size);
 
     n_load = elf->phdr_tab_offset + elf->phdr_size * elf->phdr_count;
     if (n_load > countof(elf_buf)) {
-        print_fmt(buf, STR("ELF buf is not big enough to load %lu bytes\n"), n_load);
+        _print_fmt(buf, STR("ELF buf is not big enough to load %lu bytes\n"), n_load);
         return;
     }
     disk_read((byte *)elf, n_load, 0, BOOT_SECTOR_COUNT);
@@ -185,8 +185,8 @@ void load_kernel(void)
     for (; phdr_iter < phdr_end; phdr_iter++) {
         if (phdr_iter->type != PT_LOAD)
             continue;
-        print_fmt(buf, STR("Loading segment: paddr=0x%lx file_size=0x%lx mem_size=0x%lx offset=0x%lx\n"),
-                  phdr_iter->paddr, phdr_iter->file_size, phdr_iter->mem_size, phdr_iter->offset);
+        _print_fmt(buf, STR("Loading segment: paddr=0x%lx file_size=0x%lx mem_size=0x%lx offset=0x%lx\n"),
+                   phdr_iter->paddr, phdr_iter->file_size, phdr_iter->mem_size, phdr_iter->offset);
         paddr = (byte *)phdr_iter->paddr;
         disk_read(paddr, phdr_iter->file_size, phdr_iter->offset, BOOT_SECTOR_COUNT);
         if (phdr_iter->mem_size > phdr_iter->file_size)
@@ -194,6 +194,6 @@ void load_kernel(void)
     }
 
     entry = (entry_func_t)elf->entry;
-    print_fmt(buf, STR("Calling entry: 0x%lx\n"), entry);
+    _print_fmt(buf, STR("Calling entry: 0x%lx\n"), entry);
     entry();
 }
