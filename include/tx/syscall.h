@@ -6,6 +6,6 @@
 #define SYSCALL_NUM_READ 0
 #define SYSCALL_NUM_WRITE 1
 
-int handle_syscall(struct trap_frame *cpu_state);
+void handle_syscall(struct trap_frame *cpu_state);
 
 #endif // __TX_SYSCALL_H__
