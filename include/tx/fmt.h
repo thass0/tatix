@@ -216,7 +216,12 @@ static inline struct result vfmt(struct str_buf *buf, struct str fmt, va_list ar
                 modifier = NONE;
                 break;
             }
+            case 'c':
+                res = append_char((char)va_arg(argp, i32) & 0xff, buf);
+                modifier = NONE;
+                break;
             default:
+                res = result_error(EINVAL);
                 break;
             }
 
