@@ -78,6 +78,14 @@ static struct pt *pt_get_or_alloc(struct page_table page_table, struct pt *pt, s
         paddr_t paddr_ret = result_paddr_t_checked(pt_walk(current_page_table(), (vaddr_t)ret));
         print_dbg(STR("Allocated page table page: vaddr=0x%lx paddr=0x%lx\n"), ret, paddr_ret);
         pt_insert(pt, idx, pte_from_paddr(paddr_ret, flags));
+    } else {
+        struct pte pte = pt->entries[idx]; // Safe because `pt_get` succeeded.
+        // Update the existing PTE if the new flags are _more_ permissive than before.
+        if ((flags & PT_FLAG_US) && !(pte.bits & PT_FLAG_US))
+            pte.bits |= PT_FLAG_US;
+        if ((flags & PT_FLAG_RW) && !(pte.bits & PT_FLAG_RW))
+            pte.bits |= PT_FLAG_RW;
+        pt_insert(pt, idx, pte);
     }
 
     return ret;

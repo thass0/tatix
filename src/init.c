@@ -134,11 +134,9 @@ void proc_init(struct buddy *phys_alloc, struct arena *arn)
     proc->vas = vas_new(pt_alloc_page_table(arn), phys_alloc);
 
     // Map the kernel virtual addresses into the process.
-    // TODO: This should be kernel-only memory. It uses PT_FLAG_US right now because I couldn't
-    // get the code to work otherwise. But this is not correct! I need to fix this and remove PT_FLAG_US
     for (sz offset = 0; offset < 0x800000; offset += PAGE_SIZE)
         assert(!pt_map(proc->vas.pt, KERN_BASE_VADDR + offset, KERN_BASE_PADDR + offset,
-                       PT_FLAG_P | PT_FLAG_RW | PT_FLAG_US)
+                       PT_FLAG_P | PT_FLAG_RW)
                     .is_error);
 
     struct vma user_code = vma_new(0x100000, 0x16000);
