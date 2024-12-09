@@ -1,4 +1,5 @@
 #include <config.h>
+#include <tx/fmt.h>
 #include <tx/paging.h>
 
 static struct pool *pt_alloc_init(sz n_pages, struct arena *arn)
@@ -162,6 +163,53 @@ struct result pt_unmap(struct page_table page_table, vaddr_t vaddr)
     }
 
     return result_ok();
+}
+
+static void _pt_fmt_indent(struct str_buf *buf, i16 level)
+{
+    assert(buf);
+    // OOM errors in `append_str` are ignored here because they will be caught
+    // the next time `buf` is used for formatting.
+    for (i16 i = 0; i < level; i++)
+        append_str(STR("    "), buf);
+}
+
+static struct result _pt_fmt(struct pt *pt, struct str_buf *buf, i16 level, i16 depth, vaddr_t base_vaddr)
+{
+    assert(pt);
+    assert(buf);
+    assert(level >= 0 && level <= depth);
+    assert(depth <= 3);
+
+    struct result res = result_ok();
+    struct pte entry = { 0 };
+    vaddr_t vaddr = 0;
+
+    for (sz idx = 0; idx < countof(pt->entries); idx++) {
+        entry = pt->entries[idx];
+        if (entry.bits & PT_FLAG_P) {
+            vaddr = base_vaddr + (idx << (PML4_BIT_BASE - (level * 9)));
+            _pt_fmt_indent(buf, level);
+            res = fmt(buf, STR("%ld : %c%c vaddr=0x%lx paddr=0x%lx\n"), idx, (entry.bits & PT_FLAG_US) ? 'u' : 's',
+                      (entry.bits & PT_FLAG_RW) ? 'w' : 'r', vaddr, paddr_from_pte(entry));
+            if (res.is_error)
+                return res;
+            if (level < depth) {
+                res = _pt_fmt((struct pt *)paddr_from_pte(entry), buf, level + 1, depth, vaddr);
+                if (res.is_error)
+                    return res;
+            }
+        }
+    }
+
+    return res;
+}
+
+struct result pt_fmt(struct page_table page_table, struct str_buf *buf, i16 depth)
+{
+    assert(buf);
+    assert(depth <= 3);
+    return _pt_fmt(page_table.pml4, buf, 0, depth, 0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

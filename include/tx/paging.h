@@ -66,6 +66,15 @@ struct result pt_map(struct page_table pt, vaddr_t vaddr, paddr_t paddr, int fla
 struct result_paddr_t pt_walk(struct page_table pt, vaddr_t vaddr);
 struct result pt_unmap(struct page_table page_table, vaddr_t vaddr);
 
+// Walk the first `depth + 1` levels of the page table and print all existing entries.
+// A depth of 0 will only print the PML4 and the maximum depth of 3 will print all
+// mapped addresses. Prepare to use a very big buffer for depth 3.
+// NOTE (IMPORTANT): This function dereferences physical addresses internally, because
+// the addresses stored in page tables are all physical addresses. This means that
+// this function will page fault if the physical addresses where the page table pages
+// reside aren't identity mapped.
+struct result pt_fmt(struct page_table page_table, struct str_buf *buf, i16 depth);
+
 struct vas vas_new(struct page_table pt, struct buddy *phys_alloc);
 struct vma vma_new(vaddr_t base, sz len);
 // For `flags` see `pt_map`.
