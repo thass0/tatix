@@ -8,7 +8,7 @@ static struct result handle_syscall_write(i32 fd __unused, char *buf, sz len)
         return result_error(EINVAL);
     if (len < 0)
         return result_error(EINVAL);
-    return print_str(str_from(buf, len));
+    return print_str(str_new(buf, len));
 }
 
 void handle_syscall(struct trap_frame *cpu_state)

@@ -53,7 +53,7 @@ static inline struct str str_from_range(char *beg, char *end)
     return str;
 }
 
-static inline struct str str_from(char *dat, sz len)
+static inline struct str str_new(char *dat, sz len)
 {
     struct str str;
     str.dat = dat;
