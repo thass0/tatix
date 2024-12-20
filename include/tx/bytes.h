@@ -2,7 +2,7 @@
 #define __TX_BYTES_H__
 
 #include <tx/base.h>
-#include <tx/string.h>
+#include <tx/stringdef.h>
 
 struct bytes {
     byte *dat;

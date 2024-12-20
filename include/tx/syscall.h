@@ -5,6 +5,8 @@
 
 #define SYSCALL_NUM_READ 0
 #define SYSCALL_NUM_WRITE 1
+// #define SYSCALL_NUM_EXECVE 59
+// #define SYSCALL_NUM_EXIT 60
 
 void handle_syscall(struct trap_frame *cpu_state);
 

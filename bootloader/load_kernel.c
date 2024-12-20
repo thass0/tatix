@@ -2,7 +2,7 @@
 #include <tx/asm.h>
 #include <tx/base.h>
 #include <tx/fmt.h>
-#include <tx/string.h>
+#include <tx/stringdef.h>
 
 #define ATA_IO_PORT_BASE 0x1f0
 #define ATA_OFFSET_SECTOR_COUNT 2

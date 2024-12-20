@@ -4,7 +4,7 @@
 #include <tx/asm.h>
 #include <tx/base.h>
 #include <tx/print.h>
-#include <tx/string.h>
+#include <tx/stringdef.h>
 
 #define crash(msg) __crash(msg, __FILE__, __LINE__)
 

@@ -3,7 +3,7 @@
 
 #include <tx/base.h>
 #include <tx/error.h>
-#include <tx/string.h>
+#include <tx/stringdef.h>
 
 // Formatting is based on: https://nullprogram.com/blog/2023/02/13/
 

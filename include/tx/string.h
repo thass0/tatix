@@ -1,64 +1,15 @@
 #ifndef __TX_STRING_H__
 #define __TX_STRING_H__
 
-#include <tx/base.h>
+#include <tx/assert.h>
+#include <tx/stringdef.h>
 
-struct str {
-    char *dat;
-    sz len;
-};
-
-struct str_buf {
-    char *dat;
-    sz len;
-    sz cap;
-};
-
-#define STR(s)                         \
-    (struct str)                       \
-    {                                  \
-        .dat = (s), .len = lengthof(s) \
-    }
-
-#define STR_IS_NULL(s) ((s).dat == NULL)
-
-static inline struct str_buf str_buf_new(char *dat, sz len, sz cap)
+static inline char str_buf_get_checked(struct str_buf *buf, sz idx)
 {
-    struct str_buf buf;
-    buf.dat = dat;
-    buf.len = len;
-    buf.cap = cap;
-    return buf;
-}
-
-static inline void str_buf_clear(struct str_buf *buf)
-{
-    if (buf)
-        buf->len = 0;
-}
-
-static inline struct str str_from_buf(struct str_buf buf)
-{
-    struct str str;
-    str.dat = buf.dat;
-    str.len = buf.len;
-    return str;
-}
-
-static inline struct str str_from_range(char *beg, char *end)
-{
-    struct str str;
-    str.dat = beg;
-    str.len = end - beg;
-    return str;
-}
-
-static inline struct str str_new(char *dat, sz len)
-{
-    struct str str;
-    str.dat = dat;
-    str.len = len;
-    return str;
+    assert(buf);
+    assert(idx >= 0);
+    assert(idx < buf->len);
+    return buf->dat[idx];
 }
 
 #endif // __TX_STRING_H__

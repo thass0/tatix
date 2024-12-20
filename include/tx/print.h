@@ -3,7 +3,7 @@
 
 #include <tx/base.h>
 #include <tx/error.h>
-#include <tx/string.h>
+#include <tx/stringdef.h>
 
 struct result print_str(struct str str);
 struct result print_fmt(struct str_buf buf, struct str fmt, ...);
