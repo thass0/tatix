@@ -25,7 +25,7 @@ __noreturn void kernel_init(void);
 
 __noreturn __naked void _kernel_init(void)
 {
-    __asm__ volatile("movl $init_kernel_stack + " TOSTRING(INIT_KERNEL_STACK_SIZE) ", %esp\n"
+    __asm__ volatile("movl $init_kernel_stack + " TOSTRING(INIT_KERNEL_STACK_SIZE) " - 1, %esp\n"
                      "call kernel_init\n");
 }
 
