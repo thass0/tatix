@@ -12,4 +12,11 @@ static inline char str_buf_get_checked(struct str_buf *buf, sz idx)
     return buf->dat[idx];
 }
 
+static inline void str_buf_pop(struct str_buf *buf)
+{
+    assert(buf);
+    if (buf->len > 0)
+        buf->len--;
+}
+
 #endif // __TX_STRING_H__
