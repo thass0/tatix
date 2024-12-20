@@ -131,21 +131,21 @@ void handle_interrupt(struct trap_frame *cpu_state)
     char underlying[1024];
     struct str_buf buf = str_buf_new(underlying, 0, countof(underlying));
 
-    print_str(STR("---------- Interrupt handler begin ----------\n"));
+    print_dbg(STR("*** Interrupt handler start\n"));
 
     if (cpu_state->vector < RESERVED_VECTORS_END) {
         fmt_cpu_state(cpu_state, &buf);
-        print_str(STR("Error: caught unimplemented system interrupt\nSystem state:\n"));
-        print_str(str_from_buf(buf));
+        print_dbg(STR("Error: caught unimplemented system interrupt\nSystem state:\n"));
+        print_dbg(str_from_buf(buf));
         hlt();
     } else if (cpu_state->vector < IRQ_VECTORS_END) {
-        print_fmt(buf, STR("Caught an IRQ: vector=%lu error_code=%lu\n"), cpu_state->vector, cpu_state->error_code);
+        print_dbg(STR("Caught an IRQ: vector=%lu error_code=%lu\n"), cpu_state->vector, cpu_state->error_code);
     } else if (cpu_state->vector == IRQ_SYSCALL) {
-        print_dbg(STR("Caught a system call: vector=%lx\n"), cpu_state->vector);
         fmt_cpu_state(cpu_state, &buf);
-        print_str(str_from_buf(buf));
+        print_dbg(STR("Caught a system call: vector=%lx\n"), cpu_state->vector);
+        print_dbg(str_from_buf(buf));
         handle_syscall(cpu_state);
     }
 
-    print_str(STR("---------- Interrupt handler end   ----------\n"));
+    print_dbg(STR("*** Interrupt handler end\n"));
 }
