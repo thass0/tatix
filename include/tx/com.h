@@ -2,7 +2,7 @@
 #define __TX_COM__
 
 #include <tx/base.h>
-#include <tx/error.h>
+#include <tx/errordef.h>
 #include <tx/stringdef.h>
 
 #define COM1_PORT 0x3f8

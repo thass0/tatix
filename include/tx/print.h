@@ -2,7 +2,7 @@
 #define __TX_PRINT_H__
 
 #include <tx/base.h>
-#include <tx/error.h>
+#include <tx/errordef.h>
 #include <tx/stringdef.h>
 
 struct result print_str(struct str str);

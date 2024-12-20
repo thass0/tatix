@@ -2,7 +2,7 @@
 #define __TX_FMT_H__
 
 #include <tx/base.h>
-#include <tx/error.h>
+#include <tx/errordef.h>
 #include <tx/stringdef.h>
 
 // Formatting is based on: https://nullprogram.com/blog/2023/02/13/
