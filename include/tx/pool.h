@@ -1,6 +1,7 @@
 #ifndef __TX_POOL_H__
 #define __TX_POOL_H__
 
+#include <tx/arena.h>
 #include <tx/assert.h>
 #include <tx/base.h>
 #include <tx/bytes.h>
@@ -72,6 +73,22 @@ static inline void pool_free(struct pool *pool, void *block)
 
     *(ptr *)block = (ptr)pool->head;
     pool->head = block;
+}
+
+/**
+ * Allocate a pool from an arena.
+ */
+static inline struct pool *pool_from_arena(sz n, sz size, struct arena *arn)
+{
+    assert(size > 0);
+    assert(n > 0);
+    assert(arn);
+    struct pool *pool = arena_alloc(arn, sizeof(*pool));
+    void *buf = arena_alloc_aligned_array(arn, n, size, size);
+    assert(buf);
+    assert(n <= SZ_MAX / size);
+    *pool = pool_new(bytes_new(buf, n * size), size);
+    return pool;
 }
 
 #endif /* __TX_POOL_H__ */
