@@ -1,4 +1,4 @@
-#ifndef __TXPOOL_H__
+#ifndef __TX_POOL_H__
 #define __TX_POOL_H__
 
 #include <tx/assert.h>
