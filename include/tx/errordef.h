@@ -68,5 +68,6 @@ static inline struct result result_ok(void)
 #define EIO 5
 #define ENOMEM 12
 #define EINVAL 22
+#define ENAMETOOLONG 36
 
 #endif // __TX_ERRORDEF_H__
