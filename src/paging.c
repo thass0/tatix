@@ -2,21 +2,10 @@
 #include <tx/fmt.h>
 #include <tx/paging.h>
 
-static struct pool *pt_alloc_init(sz n_pages, struct arena *arn)
-{
-    assert(n_pages > 0);
-    struct pool *pool = arena_alloc(arn, sizeof(*pool));
-    void *buf = arena_alloc_aligned_array(arn, n_pages, PAGE_SIZE, PAGE_SIZE);
-    assert(buf);
-    assert(n_pages <= SZ_MAX / PAGE_SIZE);
-    *pool = pool_new(bytes_new(buf, n_pages * PAGE_SIZE), PAGE_SIZE);
-    return pool;
-}
-
 struct page_table pt_alloc_page_table(struct arena *arn)
 {
     struct page_table pt;
-    pt.pt_alloc = pt_alloc_init(32, arn);
+    pt.pt_alloc = pool_from_arena(32, PAGE_SIZE, arn);
     pt.pml4 = pool_alloc(pt.pt_alloc);
     return pt;
 }
