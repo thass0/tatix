@@ -2,6 +2,8 @@
 #define __TX_ERROR_H__
 
 #include <tx/assert.h>
+#include <tx/base.h>
+#include <tx/errordef.h>
 
 // NOTE: `struct_result(name, type)` can only be used in contexts, where `assert` is availble.
 // This is essentially everywhere, except in the functions used to implement `assert`.
