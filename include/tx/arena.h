@@ -18,16 +18,13 @@ struct arena {
     byte *end;
 };
 
-// Create a new arena. It uses `buf` as its source of memory. buf is assumed
-// to have a capacity of `buf_cap` bytes.
-static inline struct arena arena_new(void *buf, sz buf_cap)
+// Create a new arena that uses `arena` as its source of memory.
+static inline struct arena arena_new(struct bytes area)
 {
     struct arena arn;
 
-    assert(buf);
-
-    arn.beg = buf;
-    arn.end = arn.beg + buf_cap;
+    arn.beg = area.dat;
+    arn.end = arn.beg + area.len;
 
     return arn;
 }

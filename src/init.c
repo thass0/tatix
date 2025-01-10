@@ -165,7 +165,7 @@ void proc_init(struct buddy *phys_alloc, struct arena *arn)
 
 __noreturn void kernel_init(void)
 {
-    struct arena arn = arena_new((void *)KERN_DATA_VADDR, KERN_DATA_LEN);
+    struct arena arn = arena_new(bytes_new((void *)KERN_DATA_VADDR, KERN_DATA_LEN));
 
     gdt_init();
     com_init(COM1_PORT);
