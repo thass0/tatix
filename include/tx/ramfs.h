@@ -37,7 +37,7 @@ struct ram_fs {
 
 struct ram_fs ram_fs_new(struct buddy *alloc, struct arena *arn);
 struct result_ram_fs_node ram_fs_create_dir(struct ram_fs *rfs, struct str dirname, struct arena scratch);
-struct result_ram_fs_node ram_fs_create(struct ram_fs *rfs, struct str filename);
+struct result_ram_fs_node ram_fs_create_file(struct ram_fs *rfs, struct str filename, struct arena scratch);
 struct result_ram_fs_node ram_fs_open(struct ram_fs *rfs, struct str filename);
 struct result_sz ram_fs_read(struct ram_fs_node *rfs_node, struct str_buf sbuf, sz offset);
 struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct str str, sz offset);
