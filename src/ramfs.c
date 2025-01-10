@@ -524,10 +524,10 @@ static void test_ram_fs_create_file(struct arena arn)
     assert(file_res.is_error);
     assert(file_res.code == ENOTDIR);
 
-    // Attempt to create a file with a trailing slash.
-    // TODO: Add a flag to the parser to track if a trailing slash was found
-    // file_res = ram_fs_create_file(&rfs, STR("/foo/trailing_slash/"), arn);
-    // assert(file_res.is_error);
+    // Attempt to create a file with a trailing '/'. We accept this as a valid call as calling the
+    // function `ram_fs_create_file` clearly expresses the intent of creating a file.
+    file_res = ram_fs_create_file(&rfs, STR("/foo/trailing_slash/"), arn);
+    assert(!file_res.is_error);
 }
 
 void ram_fs_run_tests(struct arena arn)
