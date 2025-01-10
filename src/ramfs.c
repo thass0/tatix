@@ -253,7 +253,16 @@ struct ram_fs ram_fs_new(struct buddy *alloc, struct arena *arn)
     // easy to predict the maximum size for a path.
     rfs.node_alloc = pool_from_arena(RAM_FS_MAX_NODES_NUM, sizeof(struct ram_fs_node), arn);
     rfs.string_alloc = arena_new(bytes_from_arena(0x5000, arn));
-    rfs.root = NULL; // TODO: Create a root as expected by the `create*` functions
+
+    // The root must exists from the beginning as `ram_fs_create_common` needs it but can't create it itself.
+    struct ram_fs_node *root_dir = arena_alloc_aligned(arn, sizeof(*root_dir), alignof(*root_dir));
+    root_dir->first = NULL;
+    root_dir->next = NULL;
+    root_dir->type = RAM_FS_TYPE_DIR;
+    root_dir->name = STR("");
+    root_dir->data = bytes_new(NULL, 0);
+
+    rfs.root = root_dir;
     return rfs;
 }
 
@@ -423,15 +432,6 @@ static void test_ram_fs_create_dir(struct arena arn)
     struct buddy *rfs_data_alloc = buddy_init(bytes_from_arena(RAM_FS_MAX_BYTES_NUM, &arn), &arn);
     struct ram_fs rfs = ram_fs_new(rfs_data_alloc, &arn);
 
-    struct ram_fs_node *root_dir = arena_alloc_aligned(&arn, sizeof(*root_dir), alignof(*root_dir));
-    root_dir->first = NULL;
-    root_dir->next = NULL;
-    root_dir->type = RAM_FS_TYPE_DIR;
-    root_dir->name = STR("");
-    root_dir->data = bytes_new(NULL, 0);
-
-    rfs.root = root_dir;
-
     struct result_ram_fs_node dir_res;
 
     // Create two directories /foo and /foo/bar
@@ -448,7 +448,7 @@ static void test_ram_fs_create_dir(struct arena arn)
     assert(bar_dir->type == RAM_FS_TYPE_DIR);
     assert(str_is_equal(bar_dir->name, STR("bar")));
 
-    assert(root_dir->first == foo_dir);
+    assert(rfs.root->first == foo_dir);
     assert(foo_dir->first == bar_dir);
 
     // Create another directory in /foo next to /foo/bar
@@ -480,14 +480,6 @@ static void test_ram_fs_create_file(struct arena arn)
 {
     struct buddy *rfs_data_alloc = buddy_init(bytes_from_arena(RAM_FS_MAX_BYTES_NUM, &arn), &arn);
     struct ram_fs rfs = ram_fs_new(rfs_data_alloc, &arn);
-
-    struct ram_fs_node *root_dir = arena_alloc_aligned(&arn, sizeof(*root_dir), alignof(*root_dir));
-    root_dir->first = NULL;
-    root_dir->next = NULL;
-    root_dir->type = RAM_FS_TYPE_DIR;
-    root_dir->name = STR("");
-    root_dir->data = bytes_new(NULL, 0);
-    rfs.root = root_dir;
 
     struct result_ram_fs_node dir_res;
     struct result_ram_fs_node file_res;
