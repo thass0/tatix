@@ -1,4 +1,3 @@
-#include "tx/stringdef.h"
 #include <tx/arena.h>
 #include <tx/base.h>
 #include <tx/error.h>
@@ -16,10 +15,9 @@ struct path_name {
     // array contains string slices pointing into `src`. Each of these slices represents one component
     // of a path without '/' characters.
     struct str src;
+    // The path '/' is represented by a `struct path_name` where `n_components` is 0, the empty path.
     sz n_components;
     struct str *components;
-    // True if the path started with '/'. If the path is only '/', without any other components,
-    // this is true and `n_components` is 0.
     bool is_absolute;
 };
 
@@ -163,6 +161,25 @@ static struct ram_fs_node *ram_fs_node_lookup(struct ram_fs *rfs, struct path_na
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Node creation                                                             //
+///////////////////////////////////////////////////////////////////////////////
+
+struct ram_fs_node *ram_fs_node_alloc_dir(struct ram_fs *rfs, struct str dirname)
+{
+    struct ram_fs_node *dir = pool_alloc(rfs->node_alloc);
+    if (!dir)
+        return NULL;
+    dir->first = NULL;
+    dir->next = NULL;
+    dir->type = RAM_FS_TYPE_DIR;
+    struct str_buf name_buf = str_buf_from_arena(&rfs->string_alloc, dirname.len);
+    append_str(dirname, &name_buf);
+    dir->name = str_from_buf(name_buf);
+    dir->data = bytes_new(NULL, 0);
+    return dir;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Public functions                                                          //
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -172,11 +189,72 @@ struct ram_fs ram_fs_new(struct buddy *alloc, struct arena *arn)
     rfs.data_alloc = alloc;
     // TODO: Allow dynamically sized file systems.
     rfs.node_alloc = pool_from_arena(RAM_FS_MAX_NODES_NUM, sizeof(struct ram_fs_node), arn);
+    rfs.string_alloc = arena_new(bytes_from_arena(0x5000, arn));
     rfs.root = NULL;
     return rfs;
 }
 
-struct result_ram_fs_node ram_fs_create_dir(struct ram_fs *rfs, struct str dirname);
+struct result_ram_fs_node ram_fs_create_dir(struct ram_fs *rfs, struct str dirpath, struct arena scratch)
+{
+    assert(rfs);
+
+    struct result_path_name path_res = path_name_parse(dirpath, &scratch);
+    if (path_res.is_error)
+        return result_ram_fs_node_error(path_res.code);
+
+    struct path_name path = result_path_name_checked(path_res);
+    if (path.n_components == 0) {
+        // Path was '/'. The root is created along with the file system and must already exist.
+        return result_ram_fs_node_error(EEXIST);
+    }
+
+    assert(path.is_absolute); // TODO: Verify that lookups also work once relative paths are implemented.
+    struct str dirname = path.components[path.n_components - 1];
+
+    // For parent lookup, we need to ignore the name of the new directory.
+    path.n_components--;
+    struct ram_fs_node *parent = ram_fs_node_lookup(rfs, path);
+
+    if (!parent) {
+        // Parent directory doesn't exist so this one can't be created.
+        return result_ram_fs_node_error(ENOENT);
+    }
+
+    if (parent->type != RAM_FS_TYPE_DIR) {
+        // We can't add a sub-directory to a file.
+        return result_ram_fs_node_error(ENOTDIR);
+    }
+
+    // Look for conflicts
+    if (parent->first) {
+        struct ram_fs_node *curr = parent->first;
+        while (curr) {
+            if (str_is_equal(curr->name, dirname)) {
+                return result_ram_fs_node_error(EEXIST);
+            }
+            curr = curr->next;
+        }
+    }
+
+    struct ram_fs_node *dir = ram_fs_node_alloc_dir(rfs, dirname);
+
+    if (!dir) {
+        return result_ram_fs_node_error(ENOMEM);
+    }
+
+    if (parent->first) {
+        // Add the new directory after the last node in the parent directory.
+        struct ram_fs_node *curr = parent->first;
+        while (curr->next)
+            curr = curr->next;
+        curr->next = dir;
+    } else {
+        // Make the new directory the first entry in the parent directory.
+        parent->first = dir;
+    }
+
+    return result_ram_fs_node_ok(dir);
+}
 
 struct result_ram_fs_node ram_fs_create(struct ram_fs *rfs, struct str filename);
 
@@ -329,9 +407,55 @@ static void test_ram_fs_node_lookup(struct arena arn)
     assert(ram_fs_node_lookup(&rfs, result_path_name_checked(path_name_parse(STR("/blah/bar"), &arn))) == bar_file);
 }
 
+static void test_ram_fs_create_dir(struct arena arn)
+{
+    struct buddy *rfs_data_alloc = buddy_init(bytes_from_arena(RAM_FS_MAX_BYTES_NUM, &arn), &arn);
+    struct ram_fs rfs = ram_fs_new(rfs_data_alloc, &arn);
+
+    struct ram_fs_node *root_dir = arena_alloc_aligned(&arn, sizeof(*root_dir), alignof(*root_dir));
+    root_dir->first = NULL;
+    root_dir->next = NULL;
+    root_dir->type = RAM_FS_TYPE_DIR;
+    root_dir->name = STR("");
+    root_dir->data = bytes_new(NULL, 0);
+
+    rfs.root = root_dir;
+
+    struct result_ram_fs_node dir_res;
+
+    // Create two directories /foo and /foo/bar
+
+    dir_res = ram_fs_create_dir(&rfs, STR("/foo"), arn);
+    assert(!dir_res.is_error);
+    struct ram_fs_node *foo_dir = result_ram_fs_node_checked(dir_res);
+
+    dir_res = ram_fs_create_dir(&rfs, STR("/foo/bar"), arn);
+    assert(!dir_res.is_error);
+    struct ram_fs_node *bar_dir = result_ram_fs_node_checked(dir_res);
+
+    assert(root_dir->first == foo_dir);
+    assert(foo_dir->first == bar_dir);
+
+    // Can't create the same directory again
+    dir_res = ram_fs_create_dir(&rfs, STR("/foo/bar"), arn);
+    assert(dir_res.is_error);
+    assert(dir_res.code == EEXIST);
+
+    // Can't create root directory
+    dir_res = ram_fs_create_dir(&rfs, STR("/"), arn);
+    assert(dir_res.is_error);
+    assert(dir_res.code == EEXIST);
+
+    // Can't create directory without parent directory
+    dir_res = ram_fs_create_dir(&rfs, STR("/this-doesn't-exist/bar/"), arn);
+    assert(dir_res.is_error);
+    assert(dir_res.code == ENOENT);
+}
+
 void ram_fs_run_tests(struct arena arn)
 {
-    test_ram_fs_node_lookup(arn);
     test_path_name_parse(arn);
+    test_ram_fs_node_lookup(arn);
+    test_ram_fs_create_dir(arn);
     print_str(STR("RAM FS TESTS PASSED!!!\n"));
 }

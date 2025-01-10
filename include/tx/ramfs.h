@@ -28,13 +28,15 @@ struct ram_fs_node {
 struct_result(ram_fs_node, struct ram_fs_node *)
 
 struct ram_fs {
+    // TODO: The memory allocation strategy here is terrible.
     struct buddy *data_alloc;
     struct pool *node_alloc;
+    struct arena string_alloc;
     struct ram_fs_node *root;
 };
 
 struct ram_fs ram_fs_new(struct buddy *alloc, struct arena *arn);
-struct result_ram_fs_node ram_fs_create_dir(struct ram_fs *rfs, struct str dirname);
+struct result_ram_fs_node ram_fs_create_dir(struct ram_fs *rfs, struct str dirname, struct arena scratch);
 struct result_ram_fs_node ram_fs_create(struct ram_fs *rfs, struct str filename);
 struct result_ram_fs_node ram_fs_open(struct ram_fs *rfs, struct str filename);
 struct result_sz ram_fs_read(struct ram_fs_node *rfs_node, struct str_buf sbuf, sz offset);

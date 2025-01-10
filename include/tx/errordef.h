@@ -65,8 +65,11 @@ static inline struct result result_ok(void)
 // These are the errno values because these are well-known and seem exhaustive enough.
 // For example, see https://en.wikipedia.org/wiki/Errno.h
 
+#define ENOENT 2
 #define EIO 5
 #define ENOMEM 12
+#define EEXIST 17
+#define ENOTDIR 20
 #define EINVAL 22
 #define ENAMETOOLONG 36
 
