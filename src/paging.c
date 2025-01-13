@@ -239,7 +239,7 @@ struct result vas_map(struct vas vas, struct vma vma, int flags)
     struct result res = result_ok();
     print_dbg(STR("Mapping VMA: base=0x%lx len=0x%lx\n"), vma.base, vma.len);
     for (vaddr_t vaddr = vma.base; vaddr < vaddr_end; vaddr += PAGE_SIZE) {
-        paddr_t paddr = (paddr_t)buddy_alloc(vas.phys_alloc, 0);
+        paddr_t paddr = (paddr_t)buddy_alloc(vas.phys_alloc, PAGE_SIZE);
         if (unlikely(!paddr))
             return result_error(ENOMEM);
         res = pt_map(vas.pt, vaddr, paddr, flags);
