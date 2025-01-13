@@ -5,8 +5,8 @@ ENTRY(_start)
 SECTIONS
 {
     /* The first code that runs in the kernel needs its virtual and physical adddresses to line up */
-    . = KERN_ENTRY_ADDR;
-    .entry : AT(KERN_ENTRY_ADDR)
+    . = KERN_ENTRY_PADDR;
+    .entry : AT(KERN_ENTRY_PADDR)
     {
         *(*.entry*);
     }
