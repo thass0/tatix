@@ -52,9 +52,16 @@ static inline void ltr(u16 selector)
     __asm__ volatile("ltr %0" : : "r"(selector));
 }
 
-static inline void load_cr3(u64 cr3)
+static inline void write_cr3(u64 cr3)
 {
     __asm__ volatile("mov %0, %%cr3" : : "r"(cr3) : "memory");
+}
+
+static inline u64 read_cr3(void)
+{
+    u64 cr3 = 0;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    return cr3;
 }
 
 #endif // __TXT_ASM_H__

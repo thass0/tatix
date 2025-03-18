@@ -1,13 +1,117 @@
 #include <config.h>
 #include <tx/fmt.h>
 #include <tx/paging.h>
+#include <tx/pool.h>
 
-struct page_table pt_alloc_page_table(struct arena *arn)
+// NOTE(VERY IMPORTANT): By default, all pointers use virtual addresses in the virtual
+// memory areas used by the kernel (high memory). These can be assumed to be safe to
+// dereference. Care should be taken when dealing with physical addresses and with
+// virtual addresses outside of kernel memory.
+
+///////////////////////////////////////////////////////////////////////////////
+// Initialization and virt-phys translations                                 //
+///////////////////////////////////////////////////////////////////////////////
+
+// TODO(sync): Protect global variables.
+
+// Allocator used to allocate page table pages. It returns virtual memory addresses.
+// Initialized by `paging_init`.
+static struct pool global_pt_page_alloc;
+// Root of global page table. Initialized by `paging_init`.
+static struct page_table global_page_table;
+
+// The below values for address translation are initialized by `paging_init`.
+// The offsets must be added to a physical address to get the corresponding virtual address.
+// This way of translating between physical and virtual addresses abuses the fact that we are
+// currently using linear mappings between virtual and physical addresses for kernel memory.
+// The offsets may be negative.
+static sz kernel_code_offset;
+static struct addr_mapping kernel_code_addrs;
+static sz kernel_dyn_offset;
+static struct addr_mapping kernel_dyn_addrs;
+
+static inline bool in_range(ptr p, ptr base, sz len)
 {
-    struct page_table pt;
-    pt.pt_alloc = pool_from_arena(32, PAGE_SIZE, arn);
-    pt.pml4 = pool_alloc(pt.pt_alloc);
-    return pt;
+    return p >= base && p < base + len;
+}
+
+// NOTE: Multiple virtual addresses can point to the same physical address. This function returns the
+// virtual address (in high memory) that's used by the kernel to access the physical address. There may
+// be processes that use a different virtual address to access the same physical page.
+static vaddr_t phys_to_virt(paddr_t paddr)
+{
+    if (!paddr)
+        return 0; // To not have to check for NULL before calling this function.
+    if (in_range(paddr, kernel_dyn_addrs.pbase, kernel_dyn_addrs.len))
+        return paddr + kernel_dyn_offset;
+    else if (in_range(paddr, kernel_code_addrs.pbase, kernel_code_addrs.len))
+        return paddr + kernel_code_offset;
+    print_dbg(STR("paddr=0x%lx\n"), paddr);
+    crash("Invalid address");
+}
+
+static paddr_t virt_to_phys(vaddr_t vaddr)
+{
+    if (!vaddr)
+        return 0; // To not have to check for NULL before calling this function.
+    if (in_range(vaddr, kernel_dyn_addrs.vbase, kernel_dyn_addrs.len))
+        return vaddr - kernel_dyn_offset;
+    else if (in_range(vaddr, kernel_code_addrs.vbase, kernel_code_addrs.len))
+        return vaddr - kernel_code_offset;
+    print_dbg(STR("vaddr=0x%lx\n"), vaddr);
+    crash("Invalid address");
+}
+
+struct vaddr_range paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn_addrs)
+{
+    assert(PAGE_SIZE == 0x1000);
+
+    sz n_pages = ALIGN_UP(code_addrs.len + dyn_addrs.len, PAGE_SIZE) / PAGE_SIZE;
+    sz n_pts = ALIGN_UP(n_pages, NUM_PT_ENTRIES) / NUM_PT_ENTRIES;
+    sz n_pds = ALIGN_UP(n_pts, NUM_PT_ENTRIES) / NUM_PT_ENTRIES;
+    sz n_pdpts = ALIGN_UP(n_pds, NUM_PT_ENTRIES) / NUM_PT_ENTRIES;
+    sz n_pml4s = ALIGN_UP(n_pdpts, NUM_PT_ENTRIES) / NUM_PT_ENTRIES;
+
+    // We reserve twice the number of page table pages required to map all available memory.
+    sz pt_bytes = 2 * PAGE_SIZE * (n_pts + n_pds + n_pdpts + n_pml4s);
+
+    assert(dyn_addrs.len / 200 > pt_bytes); // Make sure we don't accidentally waste tons of memory on page tables.
+    assert(pt_bytes < 16 * 0x100000); // Ensure pt pages are inside the mapped region (see _start).
+
+    print_dbg(STR("Paging with n_pages=%ld n_pts=%ld n_pds=%ld n_pdpts=%ld n_pml4s=%ld pt_bytes=0x%lx\n"), n_pages,
+              n_pts, n_pds, n_pdpts, n_pml4s, pt_bytes);
+
+    global_pt_page_alloc = pool_new(bytes_new((void *)dyn_addrs.vbase, pt_bytes), PAGE_SIZE);
+    global_page_table.pml4 = pool_alloc(&global_pt_page_alloc);
+    assert(global_page_table.pml4);
+
+    // The translation constants must be set of before calling `pt_map` for the first time because
+    // `pt_map` internally uses address translation.
+
+    // Code and data address translation constants
+    kernel_code_offset = code_addrs.vbase - code_addrs.pbase;
+    kernel_code_addrs = code_addrs;
+
+    // Dynamic memory address translation constants
+    kernel_dyn_offset = dyn_addrs.vbase - dyn_addrs.pbase;
+    kernel_dyn_addrs = dyn_addrs;
+
+    // Code and data
+    for (sz offset = 0; offset < code_addrs.len; offset += PAGE_SIZE)
+        assert(!pt_map(global_page_table, code_addrs.vbase + offset, code_addrs.pbase + offset, PT_FLAG_P | PT_FLAG_RW)
+                    .is_error);
+
+    // Dynamic memory
+    for (sz offset = 0; offset < dyn_addrs.len; offset += PAGE_SIZE)
+        assert(!pt_map(global_page_table, dyn_addrs.vbase + offset, dyn_addrs.pbase + offset, PT_FLAG_P | PT_FLAG_RW)
+                    .is_error);
+
+    write_cr3(virt_to_phys((vaddr_t)global_page_table.pml4));
+
+    struct vaddr_range ret;
+    ret.base = dyn_addrs.vbase + pt_bytes;
+    ret.len = dyn_addrs.len - pt_bytes;
+    return ret;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -16,12 +120,10 @@ struct page_table pt_alloc_page_table(struct arena *arn)
 
 struct page_table current_page_table(void)
 {
-    struct page_table pt;
-    u64 pml4;
-    pt.pt_alloc = NULL;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(pml4));
-    pt.pml4 = (struct pt *)pml4;
-    return pt;
+    struct pt *pml4 = (struct pt *)phys_to_virt(read_cr3());
+    // It does not make sense to return a value if the CR3 register and the global page table are out of sync.
+    assert(pml4 == global_page_table.pml4);
+    return global_page_table;
 }
 
 static inline paddr_t paddr_from_pte(struct pte pte)
@@ -42,29 +144,30 @@ static void pt_insert(struct pt *pt, sz idx, struct pte pte)
     pt->entries[idx] = pte;
 }
 
+// Always returns a virtual address
 static struct pt *pt_get(struct pt *pt, sz idx)
 {
     assert(pt);
     assert(0 <= idx && idx < countof(pt->entries));
 
-    if (pt->entries[idx].bits & PT_FLAG_P)
-        return (struct pt *)paddr_from_pte(pt->entries[idx]);
+    if (pt->entries[idx].bits & PT_FLAG_P) {
+        paddr_t paddr = paddr_from_pte(pt->entries[idx]);
+        return (struct pt *)phys_to_virt(paddr);
+    }
     return NULL;
 }
 
-static struct pt *pt_get_or_alloc(struct page_table page_table, struct pt *pt, sz idx, int flags)
+static struct pt *pt_get_or_alloc(struct pt *pt, sz idx, int flags)
 {
     struct pt *ret;
 
     ret = pt_get(pt, idx);
 
     if (!ret) {
-        ret = pool_alloc(page_table.pt_alloc);
+        ret = pool_alloc(&global_pt_page_alloc);
         if (!ret)
             return NULL;
-        // NOTE: The memory in the pool for the page table pages must already be mapped,
-        // meaning `pt_walk` won't return an error here.
-        paddr_t paddr_ret = result_paddr_t_checked(pt_walk(current_page_table(), (vaddr_t)ret));
+        paddr_t paddr_ret = virt_to_phys((vaddr_t)ret);
         print_dbg(STR("Allocated page table page: vaddr=0x%lx paddr=0x%lx\n"), ret, paddr_ret);
         pt_insert(pt, idx, pte_from_paddr(paddr_ret, flags));
     } else {
@@ -82,13 +185,13 @@ static struct pt *pt_get_or_alloc(struct page_table page_table, struct pt *pt, s
 
 struct result pt_map(struct page_table page_table, vaddr_t vaddr, paddr_t paddr, int flags)
 {
-    struct pt *pdpt = pt_get_or_alloc(page_table, page_table.pml4, PT_IDX(vaddr, PML4_BIT_BASE), flags);
+    struct pt *pdpt = pt_get_or_alloc(page_table.pml4, PT_IDX(vaddr, PML4_BIT_BASE), flags);
     if (!pdpt)
         return result_error(ENOMEM);
-    struct pt *pd = pt_get_or_alloc(page_table, pdpt, PT_IDX(vaddr, PDPT_BIT_BASE), flags);
+    struct pt *pd = pt_get_or_alloc(pdpt, PT_IDX(vaddr, PDPT_BIT_BASE), flags);
     if (!pd)
         return result_error(ENOMEM);
-    struct pt *pt = pt_get_or_alloc(page_table, pd, PT_IDX(vaddr, PD_BIT_BASE), flags);
+    struct pt *pt = pt_get_or_alloc(pd, PT_IDX(vaddr, PD_BIT_BASE), flags);
     if (!pd)
         return result_error(ENOMEM);
     sz pt_idx = PT_IDX(vaddr, PT_BIT_BASE);
@@ -127,6 +230,8 @@ bool pt_is_empty(struct pt *pt)
 
 struct result pt_unmap(struct page_table page_table, vaddr_t vaddr)
 {
+    if (!page_table.pml4)
+        return result_error(EINVAL);
     struct pt *pdpt = pt_get(page_table.pml4, PT_IDX(vaddr, PML4_BIT_BASE));
     if (!pdpt)
         return result_error(EINVAL);
@@ -146,17 +251,17 @@ struct result pt_unmap(struct page_table page_table, vaddr_t vaddr)
     if (pt_is_empty(pt)) {
         print_dbg(STR("Freeing page table: pt=0x%lx\n"), pt);
         pd->entries[PT_IDX(vaddr, PD_BIT_BASE)].bits &= ~PT_FLAG_P;
-        pool_free(page_table.pt_alloc, pt);
+        pool_free(&global_pt_page_alloc, pt);
     }
     if (pt_is_empty(pd)) {
         print_dbg(STR("Freeing page directory: pd=0x%lx\n"), pd);
         pdpt->entries[PT_IDX(vaddr, PDPT_BIT_BASE)].bits &= ~PT_FLAG_P;
-        pool_free(page_table.pt_alloc, pd);
+        pool_free(&global_pt_page_alloc, pd);
     }
     if (pt_is_empty(pdpt)) {
         print_dbg(STR("Freeing page directory pointer table: pdpt=0x%lx\n"), pdpt);
         page_table.pml4->entries[PT_IDX(vaddr, PML4_BIT_BASE)].bits &= ~PT_FLAG_P;
-        pool_free(page_table.pt_alloc, pdpt);
+        pool_free(&global_pt_page_alloc, pdpt);
     }
 
     return result_ok();
@@ -221,12 +326,14 @@ struct vma vma_new(vaddr_t base, sz len)
     return vma;
 }
 
-struct vas vas_new(struct page_table pt, struct buddy *phys_alloc)
+struct vas vas_new(struct page_table pt, struct pt_alloc alloc)
 {
-    assert(phys_alloc);
+    assert(alloc.a);
+    assert(alloc.alloc);
+    assert(alloc.free);
     struct vas vas;
     vas.pt = pt;
-    vas.phys_alloc = phys_alloc;
+    vas.alloc = alloc;
     return vas;
 }
 
@@ -239,7 +346,7 @@ struct result vas_map(struct vas vas, struct vma vma, int flags)
     struct result res = result_ok();
     print_dbg(STR("Mapping VMA: base=0x%lx len=0x%lx\n"), vma.base, vma.len);
     for (vaddr_t vaddr = vma.base; vaddr < vaddr_end; vaddr += PAGE_SIZE) {
-        paddr_t paddr = (paddr_t)buddy_alloc(vas.phys_alloc, PAGE_SIZE);
+        paddr_t paddr = virt_to_phys((vaddr_t)vas.alloc.alloc(vas.alloc.a, PAGE_SIZE, PAGE_SIZE));
         if (unlikely(!paddr))
             return result_error(ENOMEM);
         res = pt_map(vas.pt, vaddr, paddr, flags);
@@ -262,7 +369,7 @@ struct result vas_unmap(struct vas vas, struct vma vma)
         struct result_paddr_t paddr = pt_walk(vas.pt, vaddr);
         if (unlikely(paddr.is_error))
             return result_error(paddr.code);
-        buddy_free(vas.phys_alloc, (void *)result_paddr_t_checked(paddr), 0);
+        vas.alloc.free(vas.alloc.a, (void *)phys_to_virt(result_paddr_t_checked(paddr)), PAGE_SIZE);
         res = pt_unmap(vas.pt, vaddr);
         if (unlikely(res.is_error))
             return res;
@@ -284,10 +391,16 @@ struct result vas_memcpy(struct vas vas, struct vma vma, struct bytes src)
               src.len);
 
     for (vaddr_t vaddr = vma.base; vaddr < vaddr_end && offset < src.len; vaddr += PAGE_SIZE, offset += PAGE_SIZE) {
+        // There is some pointer laundering going on here. First, we walk the page table of the VAS (which is
+        // not necessarily the active page table) to find the physical address of the current virtual address.
+        // This virtual address could be from the virtual memory region used by the process, not the kernel. But
+        // the physical address will be accessible from some kernel virtual address (because this is true for all
+        // physical pages we allocate). Thus, by passing the physical address to `phys_to_virt`, we get a kernel
+        // virtual address that can be used to write to the requested page in the VMA.
         struct result_paddr_t paddr = pt_walk(vas.pt, vaddr);
         if (unlikely(paddr.is_error))
             return result_error(EINVAL);
-        void *dest = (void *)result_paddr_t_checked(paddr);
+        void *dest = (void *)phys_to_virt(result_paddr_t_checked(paddr));
         memcpy(bytes_new(dest, PAGE_SIZE),
                bytes_new(src.dat + offset, src.len - offset >= PAGE_SIZE ? PAGE_SIZE : src.len - offset));
     }

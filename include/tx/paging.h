@@ -14,15 +14,16 @@ struct pte {
 
 static_assert(sizeof(struct pte) == 8);
 
+#define NUM_PT_ENTRIES 512
+
 struct pt {
-    struct pte entries[512];
+    struct pte entries[NUM_PT_ENTRIES];
 } __packed;
 
 static_assert(sizeof(struct pt) == 0x1000);
 
 struct page_table {
     struct pt *pml4;
-    struct pool *pt_alloc;
 };
 
 typedef ptr vaddr_t;
@@ -30,12 +31,33 @@ typedef ptr paddr_t;
 
 struct_result(paddr_t, paddr_t)
 
+struct pt_alloc {
+    void *a; // Allocator structure
+    void *(*alloc)(void *a, sz size, sz align);
+    void (*free)(void *a, void *ptr, sz size);
+};
+
 struct vas {
     struct page_table pt;
-    struct buddy *phys_alloc;
+    // Allocator hands out virtual addresses from kernel memory that point to free pages. If the addresses
+    // aren't from kernel memory, the underlying physical addresses won't be translated back to the correct
+    // virtual addresses when trying to free it.
+    struct pt_alloc alloc;
 };
 
 struct vma {
+    vaddr_t base;
+    sz len;
+};
+
+// Specifies a linear mapping between a contiguous region of virtual and of physical memory.
+struct addr_mapping {
+    vaddr_t vbase;
+    paddr_t pbase;
+    sz len;
+};
+
+struct vaddr_range {
     vaddr_t base;
     sz len;
 };
@@ -57,14 +79,20 @@ struct vma {
 #define PTE_REGION_SIZE BIT(PT_BIT_BASE)
 #define PDE_REGION_SIZE BIT(PD_BIT_BASE)
 
-struct page_table pt_alloc_page_table(struct arena *arn);
+// To call this function, the beginning of the address range specified by `dyn_addrs` must
+// already be mapped. This is because this function will use memory starting at `dyn_addrs.vbase`
+// for page table pages. Not all of the `dyn_addrs.len` bytes will be used for page table pages,
+// so not all of them need to be mapped before calling this function.
+// Returns a contiguous region of virtual addresses that can be dynamically allocated by the kernel.
+struct vaddr_range paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn_addrs);
 
+// Return kernel virtual address to currently used page table
 struct page_table current_page_table(void);
 
 // For `flags` see `PT_FLAG_*`.
 struct result pt_map(struct page_table pt, vaddr_t vaddr, paddr_t paddr, int flags);
 struct result_paddr_t pt_walk(struct page_table pt, vaddr_t vaddr);
-struct result pt_unmap(struct page_table page_table, vaddr_t vaddr);
+struct result pt_unmap(struct page_table pt, vaddr_t vaddr);
 
 // Walk the first `depth + 1` levels of the page table and print all existing entries.
 // A depth of 0 will only print the PML4 and the maximum depth of 3 will print all
@@ -75,7 +103,7 @@ struct result pt_unmap(struct page_table page_table, vaddr_t vaddr);
 // reside aren't identity mapped.
 struct result pt_fmt(struct page_table page_table, struct str_buf *buf, i16 depth);
 
-struct vas vas_new(struct page_table pt, struct buddy *phys_alloc);
+struct vas vas_new(struct page_table pt, struct pt_alloc alloc);
 struct vma vma_new(vaddr_t base, sz len);
 // For `flags` see `pt_map`.
 struct result vas_map(struct vas vas, struct vma vma, int flags);
