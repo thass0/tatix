@@ -87,7 +87,7 @@ static void set_bitmap(struct buddy *buddy, void *addr, sz ord, byte value)
     assert(ord >= 0);
 
     sz bit_idx = ((byte *)addr - buddy->base) / PAGE_SIZE;
-    sz bit_end = bit_idx + (1 << ord);
+    sz bit_end = bit_idx + length_of_order(ord);
     assert(buddy->bitmap.len <= SZ_MAX / BYTE_WIDTH);
     assert(bit_end <= buddy->bitmap.len * BYTE_WIDTH);
     for (; bit_idx < bit_end; bit_idx++) {
@@ -153,7 +153,7 @@ static void *buddy_alloc_raw(struct buddy *buddy, sz req_ord)
         print_dbg(STR("Split blocks: ret=0x%lx rem=0x%lx ord=%ld\n"), ret, rem, ord);
     }
 
-    print_dbg(STR("Found block after splitting: ret=0x%lx ord=0x%ld\n"), ret, ord);
+    print_dbg(STR("Found block after splitting: ret=0x%lx ord=0x%lx\n"), ret, ord);
     return ret;
 }
 
