@@ -8,6 +8,7 @@
 #include <tx/gdt.h>
 #include <tx/idt.h>
 #include <tx/isr.h>
+#include <tx/kvalloc.h>
 #include <tx/paging.h>
 #include <tx/print.h>
 
@@ -36,6 +37,7 @@ __section(".entry.text") __noreturn void _start(void)
     // `KERN_BASE_VADDR` to the same first 16 MB of memory. The kernel uses virtual addresses with
     // `KERN_BAES_VADDR` as their base. So once the page table is set, we can jump into the part of the
     // kernel that uses virtual addresses. Refer to the linker script kernel.ld for more detail.
+    // NOTE: The identity mapping is only required until jumping into the kernel mapped with virtual addresses.
 
     pml4.entries[PT_IDX(0, PML4_BIT_BASE)].bits = (u64)&pdpt | PT_FLAG_P | PT_FLAG_RW;
     pdpt.entries[PT_IDX(0, PDPT_BIT_BASE)].bits = (u64)&pd_id | PT_FLAG_P | PT_FLAG_RW;
@@ -73,7 +75,6 @@ struct proc {
     struct trap_frame *trap_frame;
     struct context *context;
     pid_t pid;
-    struct arena *arn;
 };
 
 #define MAX_PID 1024
@@ -93,6 +94,26 @@ struct proc *proc_alloc_pid(void)
     return proc;
 }
 
+// Wrapper around pool allocation so the pool allocator can be used with `struct alloc` from paging.
+void *pt_pool_alloc(void *pool_ptr, sz size, sz align)
+{
+    assert(pool_ptr);
+    struct pool *pool = pool_ptr;
+    assert(align == PAGE_SIZE);
+    assert(size == PAGE_SIZE);
+    assert(pool->size == size);
+    return pool_alloc(pool);
+}
+
+void pt_pool_free(void *pool_ptr, void *ptr, sz size)
+{
+    assert(pool_ptr);
+    struct pool *pool = pool_ptr;
+    assert(size == PAGE_SIZE);
+    assert(pool->size == size);
+    pool_free(pool, ptr);
+}
+
 extern char _init_proc_start[];
 extern char _init_proc_end[];
 
@@ -103,19 +124,19 @@ __naked __noreturn void trapret(void)
     __asm__ volatile("jmp handle_interrupt");
 }
 
-void proc_init(struct buddy *phys_alloc, struct arena *arn)
+void proc_init(void)
 {
     struct proc *proc = proc_alloc_pid();
-    assert(proc); /* TODO: If all PIDs are used, we should try to purge unused processes */
-    proc->arn = arn;
+    assert(proc); // TODO: If all PIDs are used, we should try to purge unused processes
 
-    union kernel_stack *kern_stack = arena_alloc_aligned(arn, sizeof(union kernel_stack), alignof(union kernel_stack));
+    union kernel_stack *kern_stack =
+        kvalloc_alloc(sizeof(union kernel_stack), PAGE_SIZE); // TODO: Maybe need bigger alignment?
     kern_stack->proc = proc;
     proc->kstack = kern_stack;
     struct task_state *ts = tss_get_global();
     ptr rsp = (u64)kern_stack + sizeof(union kernel_stack) - 8;
     ts->rsp0 = rsp;
-    print_dbg(STR("***** Kernel stack: 0x%lx\n"), rsp);
+    print_dbg(STR("Kernel stack: 0x%lx\n"), rsp);
 
     rsp -= sizeof(*proc->trap_frame);
     proc->trap_frame = (struct trap_frame *)rsp;
@@ -127,17 +148,22 @@ void proc_init(struct buddy *phys_alloc, struct arena *arn)
     rsp -= sizeof(ptr *);
     *(ptr *)rsp = (ptr)trapret;
 
-    // rsp -= sizeof(*proc->context);
-    // proc->context = (struct context *)rsp;
-    // proc->context->rip = forkret;
+    struct pool *data_pool;
+    struct pt_alloc data_alloc;
+    sz data_alloc_size = 0x20000;
+    void *data_alloc_mem = kvalloc_alloc(data_alloc_size, PAGE_SIZE);
+    assert(data_alloc_mem);
+    data_pool = kvalloc_alloc(sizeof(*data_pool), alignof(*data_pool));
+    assert(data_pool);
+    *data_pool = pool_new(bytes_new(data_alloc_mem, data_alloc_size), PAGE_SIZE);
+    data_alloc.a = data_pool;
+    data_alloc.alloc = pt_pool_alloc;
+    data_alloc.free = pt_pool_free;
 
-    proc->vas = vas_new(pt_alloc_page_table(arn), phys_alloc);
-
-    // Map the kernel virtual addresses into the process.
-    for (sz offset = 0; offset < 0x800000; offset += PAGE_SIZE)
-        assert(!pt_map(proc->vas.pt, KERN_BASE_VADDR + offset, KERN_BASE_PADDR + offset,
-                       PT_FLAG_P | PT_FLAG_RW)
-                    .is_error);
+    // TODO: When switching processes, a pointer to the process-specific part of the page table should
+    // be copied to the `struct proc`. We can save memory on the page tables this way becasue the kernel
+    // is only mapped once.
+    proc->vas = vas_new(current_page_table(), data_alloc);
 
     struct vma user_code = vma_new(0x100000, 0x16000);
     assert(!vas_map(proc->vas, user_code, PT_FLAG_P | PT_FLAG_RW | PT_FLAG_US).is_error);
@@ -151,13 +177,8 @@ void proc_init(struct buddy *phys_alloc, struct arena *arn)
     proc->trap_frame->rsp = user_stack.base + user_stack.len - 1;
     proc->trap_frame->rbp = 0;
 
-    print_str(STR("*** Processes setup has worked\n"));
+    print_dbg(STR("*** Set up initial process\n"));
 
-    load_cr3(result_paddr_t_checked(pt_walk(current_page_table(), (vaddr_t)proc->vas.pt.pml4)));
-
-    print_str(STR("*** I did the mapping correctly :^)\n"));
-
-    print_dbg(STR("Stack top before: 0x%lx\n"), rsp);
     // Switch stacks and return. The return value is taken from the top of the new stack.
     __asm__ volatile("mov %0, %%rsp" : : "r"(rsp) : "memory");
     __asm__ volatile("ret");
@@ -165,8 +186,6 @@ void proc_init(struct buddy *phys_alloc, struct arena *arn)
 
 __noreturn void kernel_init(void)
 {
-    struct arena arn = arena_new(bytes_new((void *)KERN_DATA_VADDR, KERN_DATA_LEN));
-
     gdt_init();
     com_init(COM1_PORT);
     interrupt_init();
@@ -177,31 +196,22 @@ __noreturn void kernel_init(void)
                   "   \\ \\_\\  \\ \\_\\ \\_\\   \\ \\_\\  \\ \\_\\  /\\_\\/\\_\\\n"
                   "    \\/_/   \\/_/\\/_/    \\/_/   \\/_/  \\/_/\\/_/\n"));
 
-    struct buddy *phys_alloc = buddy_init(bytes_new((void *)KERN_PHYS_PADDR, KERN_PHYS_LEN), &arn);
-    // struct buddy *phys_alloc = NULL;
-    proc_init(phys_alloc, &arn);
+    assert(KERN_DYN_PADDR > KERN_BASE_PADDR && KERN_DYN_PADDR - KERN_BASE_PADDR == KERN_DYN_VADDR - KERN_BASE_VADDR);
+    sz code_len = KERN_DYN_PADDR - KERN_BASE_PADDR;
+    struct addr_mapping code_addrs;
+    code_addrs.vbase = KERN_BASE_VADDR;
+    code_addrs.pbase = KERN_BASE_PADDR;
+    code_addrs.len = code_len;
+    struct addr_mapping dyn_addrs;
+    dyn_addrs.vbase = KERN_DYN_VADDR;
+    dyn_addrs.pbase = KERN_DYN_PADDR;
+    dyn_addrs.len = KERN_DYN_LEN;
 
-    __asm__ volatile("int $34"); /* Just to see if interrupts work :) */
+    struct vaddr_range dyn = paging_init(code_addrs, dyn_addrs);
 
-    // void *ptr = NULL;
-    // arena_alloc(&arn, 8);
-    // struct bytes area = bytes_from_arena(0x11490, &arn);
-    // struct buddy *buddy = buddy_init(area, &arn);
-    // assert((ptr = buddy_alloc(buddy, 0)) && ptr == (void *)0x80301000);
-    // buddy_free(buddy, ptr, 0);
-    // assert((ptr = buddy_alloc(buddy, 1)) && ptr == (void *)0x80301000);
-    // buddy_free(buddy, ptr, 1);
-    // assert((ptr = buddy_alloc(buddy, 2)) && ptr == (void *)0x80301000);
-    // assert((ptr = buddy_alloc(buddy, 1)) && ptr == (void *)0x80305000);
-    // buddy_free(buddy, ptr, 1);
-    // assert((ptr = buddy_alloc(buddy, 2)) && ptr == (void *)0x80305000);
+    kvalloc_init(bytes_new((void *)dyn.base, dyn.len));
 
-    // print_str(STR("*** Worked, all assertions succeeded\n"));
-
-    // struct vas vas = vas_new(0x400000, 0x40000, &arn);
-    // int rc = vas_map(vas, (struct vma){ .base = 0x2000, .len = 0x3000 });
-    // print_dbg(STR("rc=%d\n"), rc);
-    // assert(vas_unmap(vas, (struct vma){ .base = 0x2000, .len = 0x3000 }) == 0);
+    proc_init();
 
     hlt();
 }
