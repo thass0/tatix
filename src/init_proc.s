@@ -28,7 +28,7 @@ _init_proc:
     int 0x80
 
 
-loop:
+loop: ; Can't use the hlt instruction because it's privileged
     pause
     jmp loop
 
