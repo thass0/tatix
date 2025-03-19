@@ -1,6 +1,7 @@
 #ifndef __TX_BUDDY_H__
 #define __TX_BUDDY_H__
 
+#include <tx/alloc.h>
 #include <tx/arena.h>
 #include <tx/base.h>
 #include <tx/bytes.h>
@@ -34,5 +35,9 @@ void *buddy_alloc(struct buddy *buddy, sz size);
 // and `size` must be greater than zero. `ptr` may be NULL. The size must match that
 // or the original allocation.
 void buddy_free(struct buddy *buddy, void *ptr, sz size);
+
+// For `struct alloc`.
+void *buddy_alloc_wrapper(void *a, sz size, sz align __unused);
+void buddy_free_wrapper(void *a, void *ptr, sz size);
 
 #endif // __TX_BUDDY_H__

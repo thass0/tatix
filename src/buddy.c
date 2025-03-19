@@ -235,3 +235,13 @@ void buddy_free(struct buddy *buddy, void *ptr, sz size)
     sz ord = order_of(min_power_of_two_geq(real_size) / PAGE_SIZE);
     buddy_free_raw(buddy, ptr, ord);
 }
+
+void *buddy_alloc_wrapper(void *a, sz size, sz align __unused)
+{
+    return buddy_alloc((struct buddy *)a, size);
+}
+
+void buddy_free_wrapper(void *a, void *ptr, sz size)
+{
+    buddy_free((struct buddy *)a, ptr, size);
+}
