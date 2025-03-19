@@ -1,6 +1,7 @@
 #ifndef __TX_PAGING_H__
 #define __TX_PAGING_H__
 
+#include <tx/alloc.h>
 #include <tx/arena.h>
 #include <tx/assert.h>
 #include <tx/base.h>
@@ -31,18 +32,12 @@ typedef ptr paddr_t;
 
 struct_result(paddr_t, paddr_t)
 
-struct pt_alloc {
-    void *a; // Allocator structure
-    void *(*alloc)(void *a, sz size, sz align);
-    void (*free)(void *a, void *ptr, sz size);
-};
-
 struct vas {
     struct page_table pt;
     // Allocator hands out virtual addresses from kernel memory that point to free pages. If the addresses
     // aren't from kernel memory, the underlying physical addresses won't be translated back to the correct
     // virtual addresses when trying to free it.
-    struct pt_alloc alloc;
+    struct alloc alloc;
 };
 
 struct vma {
@@ -103,7 +98,7 @@ struct result pt_unmap(struct page_table pt, vaddr_t vaddr);
 // reside aren't identity mapped.
 struct result pt_fmt(struct page_table page_table, struct str_buf *buf, i16 depth);
 
-struct vas vas_new(struct page_table pt, struct pt_alloc alloc);
+struct vas vas_new(struct page_table pt, struct alloc alloc);
 struct vma vma_new(vaddr_t base, sz len);
 // For `flags` see `pt_map`.
 struct result vas_map(struct vas vas, struct vma vma, int flags);

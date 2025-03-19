@@ -326,11 +326,8 @@ struct vma vma_new(vaddr_t base, sz len)
     return vma;
 }
 
-struct vas vas_new(struct page_table pt, struct pt_alloc alloc)
+struct vas vas_new(struct page_table pt, struct alloc alloc)
 {
-    assert(alloc.a);
-    assert(alloc.alloc);
-    assert(alloc.free);
     struct vas vas;
     vas.pt = pt;
     vas.alloc = alloc;
@@ -346,7 +343,7 @@ struct result vas_map(struct vas vas, struct vma vma, int flags)
     struct result res = result_ok();
     print_dbg(STR("Mapping VMA: base=0x%lx len=0x%lx\n"), vma.base, vma.len);
     for (vaddr_t vaddr = vma.base; vaddr < vaddr_end; vaddr += PAGE_SIZE) {
-        paddr_t paddr = virt_to_phys((vaddr_t)vas.alloc.alloc(vas.alloc.a, PAGE_SIZE, PAGE_SIZE));
+        paddr_t paddr = virt_to_phys((vaddr_t)alloc_alloc(vas.alloc, PAGE_SIZE, PAGE_SIZE));
         if (unlikely(!paddr))
             return result_error(ENOMEM);
         res = pt_map(vas.pt, vaddr, paddr, flags);
@@ -369,7 +366,7 @@ struct result vas_unmap(struct vas vas, struct vma vma)
         struct result_paddr_t paddr = pt_walk(vas.pt, vaddr);
         if (unlikely(paddr.is_error))
             return result_error(paddr.code);
-        vas.alloc.free(vas.alloc.a, (void *)phys_to_virt(result_paddr_t_checked(paddr)), PAGE_SIZE);
+        alloc_free(vas.alloc, (void *)phys_to_virt(result_paddr_t_checked(paddr)), PAGE_SIZE);
         res = pt_unmap(vas.pt, vaddr);
         if (unlikely(res.is_error))
             return res;

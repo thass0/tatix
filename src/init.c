@@ -149,16 +149,13 @@ void proc_init(void)
     *(ptr *)rsp = (ptr)trapret;
 
     struct pool *data_pool;
-    struct pt_alloc data_alloc;
     sz data_alloc_size = 0x20000;
     void *data_alloc_mem = kvalloc_alloc(data_alloc_size, PAGE_SIZE);
     assert(data_alloc_mem);
     data_pool = kvalloc_alloc(sizeof(*data_pool), alignof(*data_pool));
     assert(data_pool);
     *data_pool = pool_new(bytes_new(data_alloc_mem, data_alloc_size), PAGE_SIZE);
-    data_alloc.a = data_pool;
-    data_alloc.alloc = pt_pool_alloc;
-    data_alloc.free = pt_pool_free;
+    struct alloc data_alloc = alloc_new(data_pool, pt_pool_alloc, pt_pool_free);
 
     // TODO: When switching processes, a pointer to the process-specific part of the page table should
     // be copied to the `struct proc`. We can save memory on the page tables this way becasue the kernel
