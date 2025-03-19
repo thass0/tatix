@@ -308,7 +308,27 @@ struct result_ram_fs_node ram_fs_open(struct ram_fs *rfs, struct str filename)
     return result_ram_fs_node_ok(node);
 }
 
-struct result_sz ram_fs_read(struct ram_fs_node *rfs_node, struct str_buf sbuf, sz offset);
+struct result_sz ram_fs_read(struct ram_fs_node *rfs_node, struct str_buf *sbuf, sz offset)
+{
+    assert(rfs_node);
+    assert(sbuf);
+
+    if (rfs_node->type != RAM_FS_TYPE_FILE)
+        return result_sz_error(EINVAL);
+
+    if (offset > rfs_node->data.len)
+        return result_sz_error(EINVAL);
+    if (offset == rfs_node->data.len)
+        return result_sz_ok(0);
+
+    sz avail = rfs_node->data.len - offset;
+    sz read_len = MIN(sbuf->cap, avail);
+    struct result res = append_str(str_new((char *)rfs_node->data.dat + offset, read_len), sbuf);
+
+    if (res.is_error)
+        return result_sz_error(res.code);
+    return result_sz_ok(read_len);
+}
 
 struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct str str, sz offset);
 
@@ -563,7 +583,7 @@ static void test_ram_fs_create_file(struct arena arn)
     assert(!file_res.is_error);
 }
 
-void test_ram_fs_open(struct arena arn)
+static void test_ram_fs_open(struct arena arn)
 {
     struct arena arn_cpy = arn; // Used to we can create fresh `struct ram_fs` structures twice.
     struct ram_fs rfs = ram_fs_new(test_helper_create_alloc(&arn_cpy));
@@ -637,6 +657,70 @@ void test_ram_fs_open(struct arena arn)
     assert(res.code == ENOENT);
 }
 
+static void test_ram_fs_read(struct arena arn)
+{
+    struct ram_fs rfs = ram_fs_new(test_helper_create_alloc(&arn));
+
+    struct result_sz res;
+    struct str_buf sbuf;
+
+    // Manually setting up the file system structure to avoid dependency on file creation logic
+    struct ram_fs_node *file_node = arena_alloc_aligned(&arn, sizeof(*file_node), alignof(*file_node));
+    file_node->first = NULL;
+    file_node->next = NULL;
+    file_node->type = RAM_FS_TYPE_FILE;
+    file_node->name = STR("file");
+    file_node->data = bytes_new("Hello, world!", 13);
+
+    rfs.root->first = file_node;
+
+    // Read the entire file
+    sbuf = str_buf_from_arena(&arn, 13);
+    res = ram_fs_read(file_node, &sbuf, 0);
+    assert(!res.is_error);
+    assert(result_sz_checked(res) == 13);
+    assert(str_is_equal(str_from_buf(sbuf), STR("Hello, world!")));
+
+    // Read a part of the file
+    sbuf = str_buf_from_arena(&arn, 5);
+    res = ram_fs_read(file_node, &sbuf, 7);
+    assert(!res.is_error);
+    assert(result_sz_checked(res) == 5);
+    assert(str_is_equal(str_from_buf(sbuf), STR("world")));
+
+    // Read past the end of the file
+    sbuf = str_buf_from_arena(&arn, 5);
+    res = ram_fs_read(file_node, &sbuf, 13);
+    assert(!res.is_error);
+    assert(result_sz_checked(res) == 0);
+    assert(str_is_equal(str_from_buf(sbuf), STR("")));
+
+    // Read with offset past the end of the file
+    sbuf = str_buf_from_arena(&arn, 5);
+    res = ram_fs_read(file_node, &sbuf, 14);
+    assert(res.is_error);
+    assert(res.code == EINVAL);
+
+    // Read with offset past the end of the file
+    sbuf = str_buf_from_arena(&arn, 5);
+    res = ram_fs_read(file_node, &sbuf, 15);
+    assert(res.is_error);
+    assert(res.code == EINVAL);
+
+    // Reject reading from a directory
+    struct ram_fs_node *dir_node = arena_alloc_aligned(&arn, sizeof(*dir_node), alignof(*dir_node));
+    dir_node->first = NULL;
+    dir_node->next = NULL;
+    dir_node->type = RAM_FS_TYPE_DIR;
+    dir_node->name = STR("dir");
+    dir_node->data = bytes_new(NULL, 0);
+
+    sbuf = str_buf_from_arena(&arn, 5);
+    res = ram_fs_read(dir_node, &sbuf, 0);
+    assert(res.is_error);
+    assert(res.code == EINVAL);
+}
+
 void ram_fs_run_tests(struct arena arn)
 {
     test_path_name_parse(arn);
@@ -644,5 +728,6 @@ void ram_fs_run_tests(struct arena arn)
     test_ram_fs_create_dir(arn);
     test_ram_fs_create_file(arn);
     test_ram_fs_open(arn);
+    test_ram_fs_read(arn);
     print_str(STR("RAM FS TESTS PASSED!!!\n"));
 }
