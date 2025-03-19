@@ -77,7 +77,7 @@ struct buddy *buddy_init(struct bytes area, struct arena *arn)
     assert(buddy->max_ord < N_FREE_LISTS);
     dlist_insert(&buddy->avail[buddy->max_ord].link, &block->link);
 
-    print_dbg(STR("Initialized buddy: base=0x%lx max_ord=0x%ld\n"), buddy->base, buddy->max_ord);
+    print_dbg(STR("Initialized buddy: base=0x%lx max_ord=%ld\n"), buddy->base, buddy->max_ord);
     return buddy;
 }
 
@@ -139,7 +139,7 @@ static void *buddy_alloc_raw(struct buddy *buddy, sz req_ord)
     dlist_remove(buddy->avail[ord].link.next);
 
     if (ord == req_ord) {
-        print_dbg(STR("Found perfect fit: ret=0x%lx ord=0x%ld\n"), ret, ord);
+        print_dbg(STR("Found perfect fit: ret=0x%lx ord=%ld\n"), ret, ord);
         return ret;
     }
 
@@ -153,7 +153,7 @@ static void *buddy_alloc_raw(struct buddy *buddy, sz req_ord)
         print_dbg(STR("Split blocks: ret=0x%lx rem=0x%lx ord=%ld\n"), ret, rem, ord);
     }
 
-    print_dbg(STR("Found block after splitting: ret=0x%lx ord=0x%lx\n"), ret, ord);
+    print_dbg(STR("Found block after splitting: ret=0x%lx ord=%ld\n"), ret, ord);
     return ret;
 }
 
