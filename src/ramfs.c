@@ -166,21 +166,22 @@ static struct ram_fs_node *ram_fs_node_lookup(struct ram_fs *rfs, struct path_na
 
 struct ram_fs_node *ram_fs_node_alloc(struct ram_fs *rfs, struct str name, enum ram_fs_node_type type)
 {
-    struct ram_fs_node *dir = pool_alloc(&rfs->node_alloc);
-    if (!dir)
+    struct ram_fs_node *node = pool_alloc(&rfs->node_alloc);
+    if (!node)
         return NULL;
-    dir->first = NULL;
-    dir->next = NULL;
-    dir->type = type;
+    node->first = NULL;
+    node->next = NULL;
+    node->type = type;
+    node->fs = rfs;
 
     struct str_buf name_buf;
     name_buf.dat = alloc_alloc(rfs->data_alloc, name.len, alignof(void *));
     name_buf.len = 0;
     name_buf.cap = name.len;
     append_str(name, &name_buf);
-    dir->name = str_from_buf(name_buf);
-    dir->data = bytes_new(NULL, 0);
-    return dir;
+    node->name = str_from_buf(name_buf);
+    node->data = str_buf_new(NULL, 0, 0);
+    return node;
 }
 
 static struct result_ram_fs_node ram_fs_create_common(struct ram_fs *rfs, struct str nodepath,
@@ -247,31 +248,36 @@ static struct result_ram_fs_node ram_fs_create_common(struct ram_fs *rfs, struct
 // Public functions                                                          //
 ///////////////////////////////////////////////////////////////////////////////
 
-struct ram_fs ram_fs_new(struct alloc alloc)
+struct ram_fs *ram_fs_new(struct alloc alloc)
 {
-    struct ram_fs rfs;
+    struct ram_fs *rfs;
+
+    rfs = alloc_alloc(alloc, sizeof(*rfs), alignof(*rfs));
+    assert(rfs);
 
     sz node_mem_size = RAM_FS_MAX_NODES_NUM * sizeof(struct ram_fs_node);
     void *node_mem = alloc_alloc(alloc, node_mem_size, alignof(struct ram_fs_node));
     assert(node_mem);
-    rfs.node_alloc = pool_new(bytes_new(node_mem, node_mem_size), sizeof(struct ram_fs_node));
+    rfs->node_alloc = pool_new(bytes_new(node_mem, node_mem_size), sizeof(struct ram_fs_node));
 
     sz scratch_mem_size = 4 * PATH_NAME_MAX_LEN;
     void *scratch_mem = alloc_alloc(alloc, scratch_mem_size, alignof(void *));
     assert(scratch_mem);
-    rfs.scratch = arena_new(bytes_new(scratch_mem, scratch_mem_size));
+    rfs->scratch = arena_new(bytes_new(scratch_mem, scratch_mem_size));
 
-    rfs.data_alloc = alloc;
+    rfs->data_alloc = alloc;
 
     // The root must exists from the beginning as `ram_fs_create_common` needs it but can't create it itself.
-    struct ram_fs_node *root_dir = pool_alloc(&rfs.node_alloc);
+    struct ram_fs_node *root_dir = pool_alloc(&rfs->node_alloc);
     root_dir->first = NULL;
     root_dir->next = NULL;
     root_dir->type = RAM_FS_TYPE_DIR;
     root_dir->name = STR("");
-    root_dir->data = bytes_new(NULL, 0);
+    root_dir->data = str_buf_new(NULL, 0, 0);
+    root_dir->fs = rfs;
 
-    rfs.root = root_dir;
+    rfs->root = root_dir;
+
     return rfs;
 }
 
@@ -284,7 +290,15 @@ struct result_ram_fs_node ram_fs_create_dir(struct ram_fs *rfs, struct str dirpa
 struct result_ram_fs_node ram_fs_create_file(struct ram_fs *rfs, struct str filepath)
 {
     assert(rfs);
-    return ram_fs_create_common(rfs, filepath, RAM_FS_TYPE_FILE);
+    struct result_ram_fs_node node_res = ram_fs_create_common(rfs, filepath, RAM_FS_TYPE_FILE);
+    if (node_res.is_error)
+        return node_res;
+    struct ram_fs_node *node = result_ram_fs_node_checked(node_res);
+    void *data = alloc_alloc(rfs->data_alloc, RAM_FS_DEFAULT_FILE_SIZE, alignof(void *));
+    if (!data)
+        return result_ram_fs_node_error(ENOMEM);
+    node->data = str_buf_new(data, 0, RAM_FS_DEFAULT_FILE_SIZE);
+    return result_ram_fs_node_ok(node);
 }
 
 struct result_ram_fs_node ram_fs_open(struct ram_fs *rfs, struct str filename)
@@ -330,7 +344,46 @@ struct result_sz ram_fs_read(struct ram_fs_node *rfs_node, struct str_buf *sbuf,
     return result_sz_ok(read_len);
 }
 
-struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct str str, sz offset);
+struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct str str, sz offset)
+{
+    assert(rfs_node);
+
+    if (rfs_node->type != RAM_FS_TYPE_FILE)
+        return result_sz_error(EINVAL);
+
+    // Files are initialized to contain some data when created.
+    assert(rfs_node->data.dat != NULL && rfs_node->data.cap != 0);
+
+    // An offset outside of the file doesn't make sense. If the offset is equal to the file length,
+    // the write operation appends to the file.
+    if (offset > rfs_node->data.len)
+        return result_sz_error(EINVAL);
+
+    if (str.len + offset > rfs_node->data.cap) {
+        // The write operation exceeds the capacity of the file. We need to reallocate the data.
+        sz new_data_cap = 2 * rfs_node->data.cap;
+        void *new_data = alloc_alloc(rfs_node->fs->data_alloc, new_data_cap, alignof(void *));
+        if (!new_data)
+            return result_sz_error(ENOMEM);
+        struct str_buf new_data_buf = str_buf_new(new_data, 0, new_data_cap);
+        append_str(str_from_buf(rfs_node->data), &new_data_buf);
+        rfs_node->data = new_data_buf;
+    }
+
+    // Now we have: str.len + offset <= rfs_node->data.cap => str.len <= rfs_node->data.cap - offset
+    sz avail = rfs_node->data.cap - offset;
+    assert(str.len <= avail); // Make sure the reallocation above worked as expected.
+    sz write_len = MIN(str.len, avail);
+
+    // Make sure we don't write of out bounds of the buffer. These assertions may seem redundant, but
+    // better safe than sorry.
+    assert(rfs_node->data.cap >= offset);
+    assert(write_len <= rfs_node->data.cap - offset);
+    memcpy(bytes_new((byte *)rfs_node->data.dat + offset, write_len), bytes_from_str(str));
+    rfs_node->data.len = MAX(rfs_node->data.len, offset + write_len);
+
+    return result_sz_ok(write_len);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 // Tests                                                                     //
@@ -439,7 +492,7 @@ static void test_path_name_parse(struct arena arn)
 
 static void test_ram_fs_node_lookup(struct arena arn)
 {
-    struct ram_fs rfs = ram_fs_new(test_helper_create_alloc(&arn));
+    struct ram_fs *rfs = ram_fs_new(test_helper_create_alloc(&arn));
 
     struct ram_fs_node *root_dir = arena_alloc_aligned(&arn, sizeof(*root_dir), alignof(*root_dir));
     struct ram_fs_node *blah_dir = arena_alloc_aligned(&arn, sizeof(*blah_dir), alignof(*blah_dir));
@@ -450,63 +503,67 @@ static void test_ram_fs_node_lookup(struct arena arn)
     root_dir->next = NULL;
     root_dir->type = RAM_FS_TYPE_DIR;
     root_dir->name = STR("");
-    root_dir->data = bytes_new(NULL, 0);
+    root_dir->data = str_buf_new(NULL, 0, 0);
+    root_dir->fs = rfs;
 
     blah_dir->first = NULL;
     blah_dir->next = NULL;
     blah_dir->type = RAM_FS_TYPE_DIR;
     blah_dir->name = STR("blah");
-    blah_dir->data = bytes_new(NULL, 0);
+    blah_dir->data = str_buf_new(NULL, 0, 0);
+    blah_dir->fs = rfs;
 
     foo_file->first = NULL;
     foo_file->next = NULL;
     foo_file->type = RAM_FS_TYPE_FILE;
     foo_file->name = STR("foo");
-    foo_file->data = bytes_new(NULL, 0);
+    foo_file->data = str_buf_new(NULL, 0, 0);
+    foo_file->fs = rfs;
 
     bar_file->first = NULL;
     bar_file->next = NULL;
     bar_file->type = RAM_FS_TYPE_FILE;
     bar_file->name = STR("bar");
-    bar_file->data = bytes_new(NULL, 0);
+    bar_file->data = str_buf_new(NULL, 0, 0);
+    bar_file->fs = rfs;
 
     root_dir->first = blah_dir;
     blah_dir->first = foo_file;
     foo_file->next = bar_file;
 
-    rfs.root = root_dir;
+    rfs->root = root_dir;
 
-    assert(ram_fs_node_lookup(&rfs, result_path_name_checked(path_name_parse(STR("/"), &arn))) == root_dir);
-    assert(ram_fs_node_lookup(&rfs, result_path_name_checked(path_name_parse(STR("/blah"), &arn))) == blah_dir);
-    assert(ram_fs_node_lookup(&rfs, result_path_name_checked(path_name_parse(STR("/blah/foo"), &arn))) == foo_file);
-    assert(ram_fs_node_lookup(&rfs, result_path_name_checked(path_name_parse(STR("/blah/bar"), &arn))) == bar_file);
+    assert(ram_fs_node_lookup(rfs, result_path_name_checked(path_name_parse(STR("/"), &arn))) == root_dir);
+    assert(ram_fs_node_lookup(rfs, result_path_name_checked(path_name_parse(STR("/blah"), &arn))) == blah_dir);
+    assert(ram_fs_node_lookup(rfs, result_path_name_checked(path_name_parse(STR("/blah/foo"), &arn))) == foo_file);
+    assert(ram_fs_node_lookup(rfs, result_path_name_checked(path_name_parse(STR("/blah/bar"), &arn))) == bar_file);
 }
 
 static void test_ram_fs_create_dir(struct arena arn)
 {
-    struct ram_fs rfs = ram_fs_new(test_helper_create_alloc(&arn));
+    struct ram_fs *rfs = ram_fs_new(test_helper_create_alloc(&arn));
 
     struct result_ram_fs_node dir_res;
 
     // Create two directories /foo and /foo/bar
 
-    dir_res = ram_fs_create_dir(&rfs, STR("/foo"));
+    dir_res = ram_fs_create_dir(rfs, STR("/foo"));
     assert(!dir_res.is_error);
     struct ram_fs_node *foo_dir = result_ram_fs_node_checked(dir_res);
     assert(foo_dir->type == RAM_FS_TYPE_DIR);
     assert(str_is_equal(foo_dir->name, STR("foo")));
 
-    dir_res = ram_fs_create_dir(&rfs, STR("/foo/bar"));
+    dir_res = ram_fs_create_dir(rfs, STR("/foo/bar"));
     assert(!dir_res.is_error);
     struct ram_fs_node *bar_dir = result_ram_fs_node_checked(dir_res);
     assert(bar_dir->type == RAM_FS_TYPE_DIR);
     assert(str_is_equal(bar_dir->name, STR("bar")));
 
-    assert(rfs.root->first == foo_dir);
+    assert(rfs->root->first == foo_dir);
     assert(foo_dir->first == bar_dir);
 
     // Create another directory in /foo next to /foo/bar
-    dir_res = ram_fs_create_dir(&rfs, STR("/foo/baz"));
+    dir_res = ram_fs_create_dir(rfs, STR("/foo/baz"));
     assert(!dir_res.is_error);
     struct ram_fs_node *baz_dir = result_ram_fs_node_checked(dir_res);
     assert(baz_dir->type == RAM_FS_TYPE_DIR);
@@ -515,49 +572,49 @@ static void test_ram_fs_create_dir(struct arena arn)
     assert(bar_dir->next == baz_dir);
 
     // Can't create the same directory again
-    dir_res = ram_fs_create_dir(&rfs, STR("/foo/bar"));
+    dir_res = ram_fs_create_dir(rfs, STR("/foo/bar"));
     assert(dir_res.is_error);
     assert(dir_res.code == EEXIST);
 
     // Can't create root directory
-    dir_res = ram_fs_create_dir(&rfs, STR("/"));
+    dir_res = ram_fs_create_dir(rfs, STR("/"));
     assert(dir_res.is_error);
     assert(dir_res.code == EEXIST);
 
     // Can't create directory without parent directory
-    dir_res = ram_fs_create_dir(&rfs, STR("/this-doesn't-exist/bar/"));
+    dir_res = ram_fs_create_dir(rfs, STR("/this-doesn't-exist/bar/"));
     assert(dir_res.is_error);
     assert(dir_res.code == ENOENT);
 }
 
 static void test_ram_fs_create_file(struct arena arn)
 {
-    struct ram_fs rfs = ram_fs_new(test_helper_create_alloc(&arn));
+    struct ram_fs *rfs = ram_fs_new(test_helper_create_alloc(&arn));
 
     struct result_ram_fs_node dir_res;
     struct result_ram_fs_node file_res;
 
     // Create a parent directory /foo for our files
-    dir_res = ram_fs_create_dir(&rfs, STR("/foo"));
+    dir_res = ram_fs_create_dir(rfs, STR("/foo"));
     assert(!dir_res.is_error);
     struct ram_fs_node *foo_dir = result_ram_fs_node_checked(dir_res);
     assert(foo_dir->type == RAM_FS_TYPE_DIR);
     assert(str_is_equal(foo_dir->name, STR("foo")));
 
     // Create a file /foo/bar.txt and verify its correctness
-    file_res = ram_fs_create_file(&rfs, STR("/foo/bar.txt"));
+    file_res = ram_fs_create_file(rfs, STR("/foo/bar.txt"));
     assert(!file_res.is_error);
     struct ram_fs_node *bar_file = result_ram_fs_node_checked(file_res);
     assert(bar_file->type == RAM_FS_TYPE_FILE);
     assert(str_is_equal(bar_file->name, STR("bar.txt")));
 
     // Attempt to create the same file again
-    file_res = ram_fs_create_file(&rfs, STR("/foo/bar.txt"));
+    file_res = ram_fs_create_file(rfs, STR("/foo/bar.txt"));
     assert(file_res.is_error);
     assert(file_res.code == EEXIST);
 
     // Create another file in the same directory and make sure the links are correct
-    file_res = ram_fs_create_file(&rfs, STR("/foo/baz.txt"));
+    file_res = ram_fs_create_file(rfs, STR("/foo/baz.txt"));
     assert(!file_res.is_error);
     struct ram_fs_node *baz_file = result_ram_fs_node_checked(file_res);
     assert(baz_file->type == RAM_FS_TYPE_FILE);
@@ -568,25 +625,25 @@ static void test_ram_fs_create_file(struct arena arn)
     assert(baz_file->next == NULL);
 
     // Attempt to create a file in a non-existent parent directory
-    file_res = ram_fs_create_file(&rfs, STR("/nonexistent/dir/file.txt"));
+    file_res = ram_fs_create_file(rfs, STR("/nonexistent/dir/file.txt"));
     assert(file_res.is_error);
     assert(file_res.code == ENOENT);
 
     // Attempt to create a file inside another file
-    file_res = ram_fs_create_file(&rfs, STR("/foo/bar.txt/subfile"));
+    file_res = ram_fs_create_file(rfs, STR("/foo/bar.txt/subfile"));
     assert(file_res.is_error);
     assert(file_res.code == ENOTDIR);
 
     // Attempt to create a file with a trailing '/'. We accept this as a valid call as calling the
     // function `ram_fs_create_file` clearly expresses the intent of creating a file.
-    file_res = ram_fs_create_file(&rfs, STR("/foo/trailing_slash/"));
+    file_res = ram_fs_create_file(rfs, STR("/foo/trailing_slash/"));
     assert(!file_res.is_error);
 }
 
 static void test_ram_fs_open(struct arena arn)
 {
     struct arena arn_cpy = arn; // Used to we can create fresh `struct ram_fs` structures twice.
-    struct ram_fs rfs = ram_fs_new(test_helper_create_alloc(&arn_cpy));
+    struct ram_fs *rfs = ram_fs_new(test_helper_create_alloc(&arn_cpy));
 
     // Manually setting up the file system structure to avoid dependency on file creation logic
     struct ram_fs_node *dir_node = arena_alloc_aligned(&arn_cpy, sizeof(*dir_node), alignof(*dir_node));
@@ -596,70 +653,72 @@ static void test_ram_fs_open(struct arena arn)
     dir_node->next = NULL;
     dir_node->type = RAM_FS_TYPE_DIR;
     dir_node->name = STR("dir");
-    dir_node->data = bytes_new(NULL, 0);
+    dir_node->data = str_buf_new(NULL, 0, 0);
+    dir_node->fs = rfs;
 
     file_node->first = NULL;
     file_node->next = NULL;
     file_node->type = RAM_FS_TYPE_FILE;
     file_node->name = STR("file");
-    file_node->data = bytes_new(NULL, 0);
+    file_node->data = str_buf_new(NULL, 0, 0);
+    file_node->fs = rfs;
 
-    rfs.root->first = dir_node;
+    rfs->root->first = dir_node;
     dir_node->next = file_node;
 
     struct result_ram_fs_node res;
 
     // Root path returns root node
-    res = ram_fs_open(&rfs, STR("/"));
+    res = ram_fs_open(rfs, STR("/"));
     assert(!res.is_error);
-    assert(result_ram_fs_node_checked(res) == rfs.root);
+    assert(result_ram_fs_node_checked(res) == rfs->root);
 
     // Valid directory path returns directory node
-    res = ram_fs_open(&rfs, STR("/dir"));
+    res = ram_fs_open(rfs, STR("/dir"));
     assert(!res.is_error);
     assert(result_ram_fs_node_checked(res) == dir_node);
 
     // Valid file path returns file node
-    res = ram_fs_open(&rfs, STR("/file"));
+    res = ram_fs_open(rfs, STR("/file"));
     assert(!res.is_error);
     assert(result_ram_fs_node_checked(res) == file_node);
 
     // Non-existent path returns ENOENT error
-    res = ram_fs_open(&rfs, STR("/invalid"));
+    res = ram_fs_open(rfs, STR("/invalid"));
     assert(res.is_error);
     assert(res.code == ENOENT);
 
     // Trailing slash on directory path is handled correctly
-    res = ram_fs_open(&rfs, STR("/dir/"));
+    res = ram_fs_open(rfs, STR("/dir/"));
     assert(!res.is_error);
     assert(result_ram_fs_node_checked(res) == dir_node);
 
     // Consecutive slashes result in ENOENT error
-    res = ram_fs_open(&rfs, STR("/dir//file"));
+    res = ram_fs_open(rfs, STR("/dir//file"));
     assert(res.is_error);
     assert(res.code == ENOENT);
 
     // Can't use file as intermediate path
-    res = ram_fs_open(&rfs, STR("/file/dir"));
+    res = ram_fs_open(rfs, STR("/file/dir"));
     assert(res.is_error);
     assert(res.code == ENOENT);
 
     // Path lookup in empty filesystem returns ENOENT error
     arn_cpy = arn;
-    struct ram_fs empty_rfs = ram_fs_new(test_helper_create_alloc(&arn_cpy));
-    res = ram_fs_open(&empty_rfs, STR("/dir"));
+    struct ram_fs *empty_rfs = ram_fs_new(test_helper_create_alloc(&arn_cpy));
+    res = ram_fs_open(empty_rfs, STR("/dir"));
     assert(res.is_error);
     assert(res.code == ENOENT);
 
     // Case sensitivity results in ENOENT error for mismatched case
-    res = ram_fs_open(&rfs, STR("/DIR"));
+    res = ram_fs_open(rfs, STR("/DIR"));
     assert(res.is_error);
     assert(res.code == ENOENT);
 }
 
 static void test_ram_fs_read(struct arena arn)
 {
-    struct ram_fs rfs = ram_fs_new(test_helper_create_alloc(&arn));
+    struct ram_fs *rfs = ram_fs_new(test_helper_create_alloc(&arn));
 
     struct result_sz res;
     struct str_buf sbuf;
@@ -670,9 +729,11 @@ static void test_ram_fs_read(struct arena arn)
     file_node->next = NULL;
     file_node->type = RAM_FS_TYPE_FILE;
     file_node->name = STR("file");
-    file_node->data = bytes_new("Hello, world!", 13);
+    file_node->data = str_buf_from_arena(&arn, 13);
+    file_node->fs = rfs;
+    append_str(STR("Hello, world!"), &file_node->data);
 
-    rfs.root->first = file_node;
+    rfs->root->first = file_node;
 
     // Read the entire file
     sbuf = str_buf_from_arena(&arn, 13);
@@ -713,12 +774,66 @@ static void test_ram_fs_read(struct arena arn)
     dir_node->next = NULL;
     dir_node->type = RAM_FS_TYPE_DIR;
     dir_node->name = STR("dir");
-    dir_node->data = bytes_new(NULL, 0);
+    dir_node->data = str_buf_new(NULL, 0, 0);
+    dir_node->fs = rfs;
 
     sbuf = str_buf_from_arena(&arn, 5);
     res = ram_fs_read(dir_node, &sbuf, 0);
     assert(res.is_error);
     assert(res.code == EINVAL);
+}
+
+static void test_ram_fs_write(struct arena arn)
+{
+    struct ram_fs *rfs = ram_fs_new(test_helper_create_alloc(&arn));
+
+    struct result_sz res;
+
+    // Manually setting up the file system structure to avoid dependency on file creation logic.
+    struct ram_fs_node *file_node = arena_alloc_aligned(&arn, sizeof(*file_node), alignof(*file_node));
+    file_node->first = NULL;
+    file_node->next = NULL;
+    file_node->type = RAM_FS_TYPE_FILE;
+    file_node->name = STR("file");
+    file_node->fs = rfs;
+    file_node->data = str_buf_from_arena(&arn, 13);
+
+    rfs->root->first = file_node;
+
+    // Write to an empty file
+    res = ram_fs_write(file_node, STR("Hello, world!"), 0);
+    assert(!res.is_error);
+    assert(result_sz_checked(res) == 13);
+    assert(str_is_equal(str_from_buf(file_node->data), STR("Hello, world!")));
+
+    // Write to the beginning of the file
+    res = ram_fs_write(file_node, STR("Adieu, "), 0);
+    assert(!res.is_error);
+    assert(result_sz_checked(res) == 7);
+    assert(str_is_equal(str_from_buf(file_node->data), STR("Adieu, world!")));
+
+    // Write to the end of the file
+    res = ram_fs_write(file_node, STR("!!!"), 13);
+    assert(!res.is_error);
+    assert(result_sz_checked(res) == 3);
+    assert(str_is_equal(str_from_buf(file_node->data), STR("Adieu, world!!!!")));
+
+    // Write to the middle of the file
+    res = ram_fs_write(file_node, STR("friend"), 7);
+    assert(!res.is_error);
+    assert(result_sz_checked(res) == 6);
+    assert(str_is_equal(str_from_buf(file_node->data), STR("Adieu, friend!!!")));
+
+    // Write with offset past the end of the file
+    res = ram_fs_write(file_node, STR("!!!"), 21);
+    assert(res.is_error);
+    assert(res.code == EINVAL);
+
+    // Write with an offset close to the end of the file so part of the write exceeds the end of the file.
+    res = ram_fs_write(file_node, STR("......"), 13);
+    assert(!res.is_error);
+    assert(result_sz_checked(res) == 6);
+    assert(str_is_equal(str_from_buf(file_node->data), STR("Adieu, friend......")));
 }
 
 void ram_fs_run_tests(struct arena arn)
@@ -729,5 +844,6 @@ void ram_fs_run_tests(struct arena arn)
     test_ram_fs_create_file(arn);
     test_ram_fs_open(arn);
     test_ram_fs_read(arn);
+    test_ram_fs_write(arn);
     print_str(STR("RAM FS TESTS PASSED!!!\n"));
 }

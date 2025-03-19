@@ -3,6 +3,7 @@
 #ifndef __TX_RAMFS_H__
 #define __TX_RAMFS_H__
 
+#include <config.h>
 #include <tx/alloc.h>
 #include <tx/base.h>
 #include <tx/buddy.h>
@@ -11,6 +12,7 @@
 #include <tx/string.h>
 
 #define RAM_FS_MAX_NODES_NUM 10000
+#define RAM_FS_DEFAULT_FILE_SIZE PAGE_SIZE
 
 enum ram_fs_node_type {
     RAM_FS_TYPE_FILE,
@@ -25,7 +27,9 @@ struct ram_fs_node {
     enum ram_fs_node_type type;
     struct str name;
     // Data of the file if this node is of type RAM_FS_TYPE_FILE.
-    struct bytes data;
+    struct str_buf data;
+    // Pointer back to parent FS.
+    struct ram_fs *fs;
 };
 
 struct_result(ram_fs_node, struct ram_fs_node *)
@@ -38,7 +42,7 @@ struct ram_fs {
     struct ram_fs_node *root;
 };
 
-struct ram_fs ram_fs_new(struct alloc alloc);
+struct ram_fs *ram_fs_new(struct alloc alloc);
 struct result_ram_fs_node ram_fs_create_dir(struct ram_fs *rfs, struct str dirname);
 struct result_ram_fs_node ram_fs_create_file(struct ram_fs *rfs, struct str filename);
 struct result_ram_fs_node ram_fs_open(struct ram_fs *rfs, struct str filename);
