@@ -2,6 +2,15 @@ INCLUDE config.ld
 
 ENTRY(_start)
 
+PHDRS
+{
+    entry_seg PT_LOAD FLAGS(7); /* rwx */
+    text_seg PT_LOAD FLAGS(5); /* r-x */
+    rodata_seg PT_LOAD FLAGS(4); /* r-- */
+    data_seg PT_LOAD FLAGS(6); /* rw- */
+    extra_seg PT_LOAD FLAGS(4); /* r-- */
+}
+
 SECTIONS
 {
     /* The first code that runs in the kernel needs its virtual and physical adddresses to line up */
@@ -9,36 +18,36 @@ SECTIONS
     .entry : AT(KERN_ENTRY_PADDR)
     {
         *(*.entry*);
-    }
+    } :entry_seg
 
     . = KERN_BASE_VADDR;
 
     .text : AT(KERN_BASE_PADDR)
     {
         *(.text*);
-    }
+    } :text_seg
 
-    .rodata : { *(.rodata*); }
+    .rodata : { *(.rodata*); } :rodata_seg
 
     . = ALIGN(PAGE_SIZE);
 
     .data :
     {
         *(.data*);
-    }
+    } :data_seg
+
+    .bss :
+    {
+            *(.*bss*);
+            *(COMMON);
+    } :data_seg
 
     .init_proc :
     {
         _init_proc_start = .;
         *(.init_proc*);
         _init_proc_end = .;
-    }
-
-    .bss :
-    {
-            *(.*bss*);
-            *(COMMON);
-    }
+    } :extra_seg
 
     /DISCARD/ :
     {
