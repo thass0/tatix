@@ -836,6 +836,47 @@ static void test_ram_fs_write(struct arena arn)
     assert(str_is_equal(str_from_buf(file_node->data), STR("Adieu, friend......")));
 }
 
+static void test_ram_fs_e2e(struct arena arn)
+{
+    struct ram_fs *rfs = ram_fs_new(test_helper_create_alloc(&arn));
+
+    struct result_ram_fs_node res;
+    struct result_sz res_sz;
+
+    // Create a directory /foo and a file /foo/bar.txt
+    res = ram_fs_create_dir(rfs, STR("/foo"));
+    assert(!res.is_error);
+
+    res = ram_fs_create_file(rfs, STR("/foo/bar.txt"));
+    assert(!res.is_error);
+    struct ram_fs_node *bar_file = result_ram_fs_node_checked(res);
+
+    // Write to bar_file
+    res_sz = ram_fs_write(bar_file, STR("Blah"), 0);
+    assert(!res_sz.is_error);
+    assert(result_sz_checked(res_sz) == 4);
+
+    // Open the file again and write to it
+    res = ram_fs_open(rfs, STR("/foo/bar.txt"));
+    assert(!res.is_error);
+    struct ram_fs_node *bar_file_opened = result_ram_fs_node_checked(res);
+
+    res_sz = ram_fs_write(bar_file_opened, STR("Hello, world!"), 0);
+    assert(!res_sz.is_error);
+    assert(result_sz_checked(res_sz) == 13);
+
+    // Open the file and read from it
+    res = ram_fs_open(rfs, STR("/foo/bar.txt"));
+    assert(!res.is_error);
+    bar_file_opened = result_ram_fs_node_checked(res);
+
+    struct str_buf sbuf = str_buf_from_arena(&arn, 13);
+    res_sz = ram_fs_read(bar_file_opened, &sbuf, 0);
+    assert(!res_sz.is_error);
+    assert(result_sz_checked(res_sz) == 13);
+    assert(str_is_equal(str_from_buf(sbuf), STR("Hello, world!")));
+}
+
 void ram_fs_run_tests(struct arena arn)
 {
     test_path_name_parse(arn);
@@ -845,5 +886,6 @@ void ram_fs_run_tests(struct arena arn)
     test_ram_fs_open(arn);
     test_ram_fs_read(arn);
     test_ram_fs_write(arn);
+    test_ram_fs_e2e(arn);
     print_str(STR("RAM FS TESTS PASSED!!!\n"));
 }
