@@ -105,6 +105,19 @@ static struct result_path_name path_name_parse(struct str name, struct arena *ar
     return result_path_name_ok(path);
 }
 
+struct str path_name_to_str(struct path_name path_name, struct arena *arn)
+{
+    struct str_buf sbuf = str_buf_from_arena(arn, PATH_NAME_MAX_LEN);
+    if (path_name.is_absolute)
+        append_char('/', &sbuf);
+    for (sz i = 0; i < path_name.n_components; i++) {
+        if (i)
+            append_char('/', &sbuf);
+        append_str(path_name.components[i], &sbuf);
+    }
+    return str_from_buf(sbuf);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Node lookup                                                               //
 ///////////////////////////////////////////////////////////////////////////////
@@ -488,6 +501,32 @@ static void test_path_name_parse(struct arena arn)
     path_name_res = path_name_parse(str_from_buf(sbuf), &arn);
     assert(path_name_res.is_error);
     assert(path_name_res.code == ENAMETOOLONG);
+}
+
+static void test_path_name_to_str(struct arena arn)
+{
+    struct result_path_name path_name_res;
+    struct path_name path_name;
+
+    path_name_res = path_name_parse(STR("/"), &arn);
+    assert(!path_name_res.is_error);
+    path_name = result_path_name_checked(path_name_res);
+    assert(str_is_equal(path_name_to_str(path_name, &arn), STR("/")));
+
+    path_name_res = path_name_parse(STR("/foo/bar"), &arn);
+    assert(!path_name_res.is_error);
+    path_name = result_path_name_checked(path_name_res);
+    assert(str_is_equal(path_name_to_str(path_name, &arn), STR("/foo/bar")));
+
+    path_name_res = path_name_parse(STR("/foo//bar"), &arn);
+    assert(!path_name_res.is_error);
+    path_name = result_path_name_checked(path_name_res);
+    assert(str_is_equal(path_name_to_str(path_name, &arn), STR("/foo/bar")));
+
+    path_name_res = path_name_parse(STR("/./blah/../..//.../"), &arn);
+    assert(!path_name_res.is_error);
+    path_name = result_path_name_checked(path_name_res);
+    assert(str_is_equal(path_name_to_str(path_name, &arn), STR("/./blah/../../...")));
 }
 
 static void test_ram_fs_node_lookup(struct arena arn)
@@ -880,6 +919,7 @@ static void test_ram_fs_e2e(struct arena arn)
 void ram_fs_run_tests(struct arena arn)
 {
     test_path_name_parse(arn);
+    test_path_name_to_str(arn);
     test_ram_fs_node_lookup(arn);
     test_ram_fs_create_dir(arn);
     test_ram_fs_create_file(arn);
