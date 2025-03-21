@@ -198,9 +198,12 @@ struct ram_fs_node *ram_fs_node_alloc(struct ram_fs *rfs, struct str name, enum 
 }
 
 static struct result_ram_fs_node ram_fs_create_common(struct ram_fs *rfs, struct str nodepath,
-                                                      enum ram_fs_node_type type)
+                                                      enum ram_fs_node_type type, bool recursive, struct arena scratch)
 {
-    struct arena scratch = rfs->scratch;
+    // NOTE: This function calls itself recursively when creating directories recursively.
+    // So be careful to not reset the scratch arena in the recursive call. Otherwise, existing
+    // memory allocations will be messed up.
+
     struct result_path_name path_res = path_name_parse(nodepath, &scratch);
     if (path_res.is_error)
         return result_ram_fs_node_error(path_res.code);
@@ -219,8 +222,17 @@ static struct result_ram_fs_node ram_fs_create_common(struct ram_fs *rfs, struct
     struct ram_fs_node *parent = ram_fs_node_lookup(rfs, path);
 
     if (!parent) {
-        // Parent directory doesn't exist so this node can't be created.
-        return result_ram_fs_node_error(ENOENT);
+        if (!recursive) {
+            // Parent directory doesn't exist so this node can't be created.
+            return result_ram_fs_node_error(ENOENT);
+        }
+
+        struct str parent_path = path_name_to_str(path, &scratch);
+        print_dbg(STR("parent_path: '%s'\n"), parent_path);
+        struct result_ram_fs_node parent_res = ram_fs_create_common(rfs, parent_path, RAM_FS_TYPE_DIR, true, scratch);
+        if (parent_res.is_error)
+            return parent_res;
+        parent = result_ram_fs_node_checked(parent_res);
     }
 
     if (parent->type != RAM_FS_TYPE_DIR) {
@@ -294,16 +306,16 @@ struct ram_fs *ram_fs_new(struct alloc alloc)
     return rfs;
 }
 
-struct result_ram_fs_node ram_fs_create_dir(struct ram_fs *rfs, struct str dirpath)
+struct result_ram_fs_node ram_fs_create_dir(struct ram_fs *rfs, struct str dirpath, bool recursive)
 {
     assert(rfs);
-    return ram_fs_create_common(rfs, dirpath, RAM_FS_TYPE_DIR);
+    return ram_fs_create_common(rfs, dirpath, RAM_FS_TYPE_DIR, recursive, rfs->scratch);
 }
 
-struct result_ram_fs_node ram_fs_create_file(struct ram_fs *rfs, struct str filepath)
+struct result_ram_fs_node ram_fs_create_file(struct ram_fs *rfs, struct str filepath, bool recursive)
 {
     assert(rfs);
-    struct result_ram_fs_node node_res = ram_fs_create_common(rfs, filepath, RAM_FS_TYPE_FILE);
+    struct result_ram_fs_node node_res = ram_fs_create_common(rfs, filepath, RAM_FS_TYPE_FILE, recursive, rfs->scratch);
     if (node_res.is_error)
         return node_res;
     struct ram_fs_node *node = result_ram_fs_node_checked(node_res);
@@ -586,13 +598,13 @@ static void test_ram_fs_create_dir(struct arena arn)
 
     // Create two directories /foo and /foo/bar
 
-    dir_res = ram_fs_create_dir(rfs, STR("/foo"));
+    dir_res = ram_fs_create_dir(rfs, STR("/foo"), false);
     assert(!dir_res.is_error);
     struct ram_fs_node *foo_dir = result_ram_fs_node_checked(dir_res);
     assert(foo_dir->type == RAM_FS_TYPE_DIR);
     assert(str_is_equal(foo_dir->name, STR("foo")));
 
-    dir_res = ram_fs_create_dir(rfs, STR("/foo/bar"));
+    dir_res = ram_fs_create_dir(rfs, STR("/foo/bar"), false);
     assert(!dir_res.is_error);
     struct ram_fs_node *bar_dir = result_ram_fs_node_checked(dir_res);
     assert(bar_dir->type == RAM_FS_TYPE_DIR);
@@ -602,7 +614,7 @@ static void test_ram_fs_create_dir(struct arena arn)
     assert(foo_dir->first == bar_dir);
 
     // Create another directory in /foo next to /foo/bar
-    dir_res = ram_fs_create_dir(rfs, STR("/foo/baz"));
+    dir_res = ram_fs_create_dir(rfs, STR("/foo/baz"), false);
     assert(!dir_res.is_error);
     struct ram_fs_node *baz_dir = result_ram_fs_node_checked(dir_res);
     assert(baz_dir->type == RAM_FS_TYPE_DIR);
@@ -611,19 +623,27 @@ static void test_ram_fs_create_dir(struct arena arn)
     assert(bar_dir->next == baz_dir);
 
     // Can't create the same directory again
-    dir_res = ram_fs_create_dir(rfs, STR("/foo/bar"));
+    dir_res = ram_fs_create_dir(rfs, STR("/foo/bar"), false);
     assert(dir_res.is_error);
     assert(dir_res.code == EEXIST);
 
     // Can't create root directory
-    dir_res = ram_fs_create_dir(rfs, STR("/"));
+    dir_res = ram_fs_create_dir(rfs, STR("/"), false);
     assert(dir_res.is_error);
     assert(dir_res.code == EEXIST);
 
     // Can't create directory without parent directory
-    dir_res = ram_fs_create_dir(rfs, STR("/this-doesn't-exist/bar/"));
+    dir_res = ram_fs_create_dir(rfs, STR("/this-doesn't-exist/bar/"), false);
     assert(dir_res.is_error);
     assert(dir_res.code == ENOENT);
+
+    // Recursive directory creation works
+    dir_res = ram_fs_create_dir(rfs, STR("/this-doesn't-exist/beep/boop/"), true);
+    assert(!dir_res.is_error);
+    struct ram_fs_node *boop_dir = result_ram_fs_node_checked(dir_res);
+    assert(boop_dir->type == RAM_FS_TYPE_DIR);
+    print_dbg(STR("boop_dir->name: %s\n"), boop_dir->name);
+    assert(str_is_equal(boop_dir->name, STR("boop")));
 }
 
 static void test_ram_fs_create_file(struct arena arn)
@@ -634,26 +654,26 @@ static void test_ram_fs_create_file(struct arena arn)
     struct result_ram_fs_node file_res;
 
     // Create a parent directory /foo for our files
-    dir_res = ram_fs_create_dir(rfs, STR("/foo"));
+    dir_res = ram_fs_create_dir(rfs, STR("/foo"), false);
     assert(!dir_res.is_error);
     struct ram_fs_node *foo_dir = result_ram_fs_node_checked(dir_res);
     assert(foo_dir->type == RAM_FS_TYPE_DIR);
     assert(str_is_equal(foo_dir->name, STR("foo")));
 
     // Create a file /foo/bar.txt and verify its correctness
-    file_res = ram_fs_create_file(rfs, STR("/foo/bar.txt"));
+    file_res = ram_fs_create_file(rfs, STR("/foo/bar.txt"), false);
     assert(!file_res.is_error);
     struct ram_fs_node *bar_file = result_ram_fs_node_checked(file_res);
     assert(bar_file->type == RAM_FS_TYPE_FILE);
     assert(str_is_equal(bar_file->name, STR("bar.txt")));
 
     // Attempt to create the same file again
-    file_res = ram_fs_create_file(rfs, STR("/foo/bar.txt"));
+    file_res = ram_fs_create_file(rfs, STR("/foo/bar.txt"), false);
     assert(file_res.is_error);
     assert(file_res.code == EEXIST);
 
     // Create another file in the same directory and make sure the links are correct
-    file_res = ram_fs_create_file(rfs, STR("/foo/baz.txt"));
+    file_res = ram_fs_create_file(rfs, STR("/foo/baz.txt"), false);
     assert(!file_res.is_error);
     struct ram_fs_node *baz_file = result_ram_fs_node_checked(file_res);
     assert(baz_file->type == RAM_FS_TYPE_FILE);
@@ -664,18 +684,30 @@ static void test_ram_fs_create_file(struct arena arn)
     assert(baz_file->next == NULL);
 
     // Attempt to create a file in a non-existent parent directory
-    file_res = ram_fs_create_file(rfs, STR("/nonexistent/dir/file.txt"));
+    file_res = ram_fs_create_file(rfs, STR("/nonexistent/dir/file.txt"), false);
     assert(file_res.is_error);
     assert(file_res.code == ENOENT);
 
+    // Recursive file creation works
+    file_res = ram_fs_create_file(rfs, STR("/nonexistent/dir/file.txt"), true);
+    assert(!file_res.is_error);
+    struct ram_fs_node *rec_file = result_ram_fs_node_checked(file_res);
+    assert(rec_file->type == RAM_FS_TYPE_FILE);
+    assert(str_is_equal(rec_file->name, STR("file.txt")));
+
     // Attempt to create a file inside another file
-    file_res = ram_fs_create_file(rfs, STR("/foo/bar.txt/subfile"));
+    file_res = ram_fs_create_file(rfs, STR("/foo/bar.txt/subfile"), false);
+    assert(file_res.is_error);
+    assert(file_res.code == ENOTDIR);
+
+    // Recursive file creation doesn't work if the parent is a file
+    file_res = ram_fs_create_file(rfs, STR("/foo/bar.txt/subfile"), true);
     assert(file_res.is_error);
     assert(file_res.code == ENOTDIR);
 
     // Attempt to create a file with a trailing '/'. We accept this as a valid call as calling the
     // function `ram_fs_create_file` clearly expresses the intent of creating a file.
-    file_res = ram_fs_create_file(rfs, STR("/foo/trailing_slash/"));
+    file_res = ram_fs_create_file(rfs, STR("/foo/trailing_slash/"), false);
     assert(!file_res.is_error);
 }
 
@@ -883,10 +915,10 @@ static void test_ram_fs_e2e(struct arena arn)
     struct result_sz res_sz;
 
     // Create a directory /foo and a file /foo/bar.txt
-    res = ram_fs_create_dir(rfs, STR("/foo"));
+    res = ram_fs_create_dir(rfs, STR("/foo"), false);
     assert(!res.is_error);
 
-    res = ram_fs_create_file(rfs, STR("/foo/bar.txt"));
+    res = ram_fs_create_file(rfs, STR("/foo/bar.txt"), false);
     assert(!res.is_error);
     struct ram_fs_node *bar_file = result_ram_fs_node_checked(res);
 
