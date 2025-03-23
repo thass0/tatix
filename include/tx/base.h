@@ -103,6 +103,9 @@ typedef double f64;
 #define static_assert(x) _static_assert(x, __LINE__)
 #define _static_assert(x, line) __static_assert(x, line)
 #define __static_assert(x, line) typedef __unused char __static_assert_##line[(x) ? 1 : -1]
+#define ADD_OVERFLOW(a, b) __builtin_add_overflow_p(a, b, (__typeof__((a) + (b)))0)
+#define SUB_OVERFLOW(a, b) __builtin_sub_overflow_p(a, b, (__typeof__((a) - (b)))0)
+#define MUL_OVERFLOW(a, b) __builtin_mul_overflow_p(a, b, (__typeof__((a) * (b)))0)
 
 ////////////////////////////////////////////////////////////////////////////////
 // Variadic functions                                                         //
