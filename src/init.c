@@ -1,4 +1,5 @@
 #include <config.h>
+#include <tx/archive.h>
 #include <tx/arena.h>
 #include <tx/assert.h>
 #include <tx/base.h>
@@ -11,6 +12,13 @@
 #include <tx/kvalloc.h>
 #include <tx/paging.h>
 #include <tx/print.h>
+#include <tx/ramfs.h>
+
+extern char _init_proc_start[];
+extern char _init_proc_end[];
+
+extern char _rootfs_archive_start[];
+extern char _rootfs_archive_end[];
 
 __section(".entry.data") __aligned(0x1000) static struct pt pml4; // Single PML4 table
 __section(".entry.data") __aligned(0x1000) static struct pt pdpt; // Single PDP table, this will have two entries
@@ -114,9 +122,6 @@ void pt_pool_free(void *pool_ptr, void *ptr, sz size)
     pool_free(pool, ptr);
 }
 
-extern char _init_proc_start[];
-extern char _init_proc_end[];
-
 __naked __noreturn void trapret(void)
 {
     __asm__ volatile("mov %rsp, %rdi");
@@ -181,18 +186,36 @@ void proc_init(void)
     __asm__ volatile("ret");
 }
 
+void ram_fs_selftest(void)
+{
+    sz test_arn_size = 5 * BIT(20);
+    void *test_arn_mem = kvalloc_alloc(test_arn_size, alignof(void *));
+    assert(test_arn_mem);
+    struct arena test_arn = arena_new(bytes_new(test_arn_mem, test_arn_size));
+    ram_fs_run_tests(test_arn);
+}
+
+void print_hello_txt(struct ram_fs *rfs)
+{
+    assert(rfs);
+
+    struct result_ram_fs_node node_res = ram_fs_open(rfs, STR("/hello.txt"));
+    assert(!node_res.is_error);
+    struct ram_fs_node *node = result_ram_fs_node_checked(node_res);
+    struct str_buf sbuf = str_buf_from_kvalloc(500);
+    struct result_sz read_res = ram_fs_read(node, &sbuf, 0);
+    assert(!read_res.is_error);
+
+    print_str(str_from_buf(sbuf));
+}
+
 __noreturn void kernel_init(void)
 {
     gdt_init();
     com_init(COM1_PORT);
     interrupt_init();
 
-    print_str(STR(" ______   ______    ______   __    __  __\n"
-                  "/\\__  _\\ /\\  __ \\  /\\__  _\\ /\\ \\  /\\_\\_\\_\\\n"
-                  "\\/_/\\ \\/ \\ \\  __ \\ \\/_/\\ \\/ \\ \\ \\ \\/_/\\_\\/_\n"
-                  "   \\ \\_\\  \\ \\_\\ \\_\\   \\ \\_\\  \\ \\_\\  /\\_\\/\\_\\\n"
-                  "    \\/_/   \\/_/\\/_/    \\/_/   \\/_/  \\/_/\\/_/\n"));
-
+    // Set up fixed memory regions for paging init.
     assert(KERN_DYN_PADDR > KERN_BASE_PADDR && KERN_DYN_PADDR - KERN_BASE_PADDR == KERN_DYN_VADDR - KERN_BASE_VADDR);
     sz code_len = KERN_DYN_PADDR - KERN_BASE_PADDR;
     struct addr_mapping code_addrs;
@@ -206,7 +229,26 @@ __noreturn void kernel_init(void)
 
     struct vaddr_range dyn = paging_init(code_addrs, dyn_addrs);
 
-    kvalloc_init(bytes_new((void *)dyn.base, dyn.len));
+    // Initialize the kernel virtual memory allocator.
+    struct result res = kvalloc_init(bytes_new((void *)dyn.base, dyn.len));
+    assert(!res.is_error);
+
+    ram_fs_selftest();
+
+    // Initialize the RAM file system.
+    struct alloc rfs_alloc;
+    rfs_alloc.a_ptr = NULL;
+    rfs_alloc.alloc = kvalloc_alloc_wrapper;
+    rfs_alloc.free = kvalloc_free_wrapper;
+    struct ram_fs *rfs = ram_fs_new(rfs_alloc);
+    assert(rfs);
+
+    // Extract rootfs archive into the RAM fs.
+    struct bytes rootfs_archive = bytes_new(_rootfs_archive_start, _rootfs_archive_end - _rootfs_archive_start);
+    res = archive_extract(rootfs_archive, rfs);
+    assert(!res.is_error);
+
+    print_hello_txt(rfs);
 
     proc_init();
 

@@ -959,5 +959,5 @@ void ram_fs_run_tests(struct arena arn)
     test_ram_fs_read(arn);
     test_ram_fs_write(arn);
     test_ram_fs_e2e(arn);
-    print_str(STR("RAM FS TESTS PASSED!!!\n"));
+    print_dbg(STR("RAM fs selftest passed\n"));
 }

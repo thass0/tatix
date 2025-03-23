@@ -71,3 +71,13 @@ void kvalloc_free(void *ptr, sz n_bytes)
     sz real_size = ALIGN_UP(n_bytes, PAGE_SIZE);
     buddy_free(global_kvalloc.virt_alloc, ptr, real_size);
 }
+
+void *kvalloc_alloc_wrapper(void *a __unused, sz size, sz align)
+{
+    return kvalloc_alloc(size, align);
+}
+
+void kvalloc_free_wrapper(void *a __unused, void *ptr, sz size)
+{
+    kvalloc_free(ptr, size);
+}
