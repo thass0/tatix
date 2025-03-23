@@ -28,6 +28,10 @@ SRCS := $(wildcard $(SRC_DIR)/*)
 OBJS := $(patsubst $(SRC_DIR)/%, $(BUILD_DIR)/%.o, $(SRCS))
 DEPS := $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.d, $(filter %.c, $(SRCS)))
 
+ROOTFS_DIR := rootfs/
+ROOTFS_OBJ := $(BUILD_DIR)/rootfs.o
+ROOTFS_ARCHIVE := $(BUILD_DIR)/rootfs.img
+
 BOOTLOADER_SRCS := $(wildcard $(BOOTLOADER_DIR)/*)
 BOOTLOADER_OBJS := $(patsubst $(BOOTLOADER_DIR)/%, $(BUILD_DIR)/%.o, $(BOOTLOADER_SRCS))
 
@@ -59,7 +63,7 @@ $(BUILD_DIR)/%.c.o: $(BOOTLOADER_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
 
 # Compile kernel
 
-$(KERNEL_ELF): $(OBJS) | $(BUILD_DIR) $(LINKER_CONFIG) kernel.ld
+$(KERNEL_ELF): $(OBJS) $(ROOTFS_OBJ) | $(BUILD_DIR) $(LINKER_CONFIG) kernel.ld
 	ld -L$(dir $(LINKER_CONFIG)) $(DEBUG_FLAGS) -T kernel.ld -o $@ $^
 
 # To recompile if headers change:
@@ -70,6 +74,14 @@ $(BUILD_DIR)/%.c.o: $(SRC_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
 
 $(BUILD_DIR)/%.s.o: $(SRC_DIR)/%.s | $(BUILD_DIR)
 	$(NASM) $< -o $@
+
+# This will create an archive of the rootfs and place it into the .rootfs_archive section of a normal object.
+# The linker will come looking for this later and put the section into the kernel ELF (see kernel.ld).
+$(ROOTFS_OBJ): $(ROOTFS_ARCHIVE) | $(BUILD_DIR)
+	objcopy -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rootfs_archive,alloc,load,readonly,data,contents $< $@
+
+$(ROOTFS_ARCHIVE): $(ROOTFS_DIR) | $(BUILD_DIR)
+	./archive.py enc $< $@
 
 # Misc
 

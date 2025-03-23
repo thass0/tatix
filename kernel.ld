@@ -44,9 +44,18 @@ SECTIONS
 
     .init_proc :
     {
+        /* Symbol for the C side to find that data */
         _init_proc_start = .;
         *(.init_proc*);
         _init_proc_end = .;
+    } :extra_seg
+
+    .rootfs_archive :
+    {
+        /* Symbol for the C side to find that data */
+        _rootfs_archive_start = .;
+        *(.rootfs_archive*);
+        _rootfs_archive_end = .;
     } :extra_seg
 
     /DISCARD/ :
