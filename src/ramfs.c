@@ -278,22 +278,26 @@ struct ram_fs *ram_fs_new(struct alloc alloc)
     struct ram_fs *rfs;
 
     rfs = alloc_alloc(alloc, sizeof(*rfs), alignof(*rfs));
-    assert(rfs);
+    if (!rfs)
+        return NULL;
 
     sz node_mem_size = RAM_FS_MAX_NODES_NUM * sizeof(struct ram_fs_node);
     void *node_mem = alloc_alloc(alloc, node_mem_size, alignof(struct ram_fs_node));
-    assert(node_mem);
+    if (!node_mem)
+        return NULL;
     rfs->node_alloc = pool_new(bytes_new(node_mem, node_mem_size), sizeof(struct ram_fs_node));
 
     sz scratch_mem_size = 4 * PATH_NAME_MAX_LEN;
     void *scratch_mem = alloc_alloc(alloc, scratch_mem_size, alignof(void *));
-    assert(scratch_mem);
+    if (!scratch_mem)
+        return NULL;
     rfs->scratch = arena_new(bytes_new(scratch_mem, scratch_mem_size));
 
     rfs->data_alloc = alloc;
 
     // The root must exists from the beginning as `ram_fs_create_common` needs it but can't create it itself.
     struct ram_fs_node *root_dir = pool_alloc(&rfs->node_alloc);
+    assert(root_dir); // We just created the pool so there's surely enough memory.
     root_dir->first = NULL;
     root_dir->next = NULL;
     root_dir->type = RAM_FS_TYPE_DIR;
