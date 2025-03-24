@@ -42,11 +42,32 @@ struct ram_fs {
     struct ram_fs_node *root;
 };
 
+// Create a new RAM fs instance. `alloc` will be the primary source of memory used to store
+// nodes and data. Returns `NULL` if it failed to set up the RAM fs instance.
 struct ram_fs *ram_fs_new(struct alloc alloc);
+
+// Create an empty directory in the `rfs` file system instance. `dirname` is the path to the new directory.
+// If `recursive` is `true`, missing parent directories will be created automatically. Returns the node
+// of the new directory or an error.
 struct result_ram_fs_node ram_fs_create_dir(struct ram_fs *rfs, struct str dirname, bool recursive);
+
+// Create an empty file in the `rfs` file system instance. `filename` is the path to the new file.
+// If `recursive` is `true`, missing parent directories will be created automatically. Returns the node
+// of the new file or an error. This node can directly be used to write to or read from the file, without
+// the need to open it again.
 struct result_ram_fs_node ram_fs_create_file(struct ram_fs *rfs, struct str filename, bool recursive);
+
+// Open the file under the path `filename` in the `rfs` file system instance. Returns the node of
+// the file or an error.
 struct result_ram_fs_node ram_fs_open(struct ram_fs *rfs, struct str filename);
+
+// Read from the file behind `rfs_node`. Data is read into `sbuf` starting at `offset` until `sbuf`
+// is full or the end of the file is reached. Returns the number of bytes read or an error.
 struct result_sz ram_fs_read(struct ram_fs_node *rfs_node, struct str_buf *sbuf, sz offset);
+
+// Write to the file behind `rfs_node`. Data is written into the file from `str` starting at `offset`.
+// Existing data at `offset` will be overwritten. If `offset` is equal to the length of the file, the
+// data from `str` will be appended. Returns the number of bytes written or an error.
 struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct str str, sz offset);
 
 void ram_fs_run_tests(struct arena arn);
