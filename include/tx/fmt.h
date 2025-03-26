@@ -129,7 +129,9 @@ static inline struct result vfmt(struct str_buf *buf, struct str fmt, va_list ar
         }
 
         if (expect == NOTHING) {
-            append_char(fmt.dat[i], buf);
+            res = append_char(fmt.dat[i], buf);
+            if (res.is_error)
+                return res;
             i++;
             continue;
         }
