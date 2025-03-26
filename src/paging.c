@@ -405,3 +405,25 @@ struct result vas_memcpy(struct vas vas, struct vma vma, struct bytes src)
 
     return result_ok();
 }
+
+struct result vas_memset(struct vas vas, struct vma vma, byte value)
+{
+    assert(vma.len > 0);
+    assert(vma.base <= PTR_MAX - vma.len);
+
+    vaddr_t vaddr_end = vma.base + vma.len;
+    vaddr_t vaddr_page_end = ALIGN_UP(vaddr_end, PAGE_SIZE);
+
+    print_dbg(STR("Setting VMA: base=0x%lx len=0x%lx value=%hhu\n"), vma.base, vma.len, value);
+
+    for (vaddr_t vaddr = vma.base; vaddr < vaddr_page_end; vaddr += PAGE_SIZE) {
+        // See `vas_memcpy` for an explanation of the pointer laundering.
+        struct result_paddr_t paddr = pt_walk(vas.pt, vaddr);
+        if (unlikely(paddr.is_error))
+            return result_error(EINVAL);
+        void *dest = (void *)phys_to_virt(result_paddr_t_checked(paddr));
+        memset(bytes_new(dest, MIN(vaddr_end - vaddr, PAGE_SIZE)), value);
+    }
+
+    return result_ok();
+}

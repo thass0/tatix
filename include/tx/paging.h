@@ -104,5 +104,6 @@ struct vma vma_new(vaddr_t base, sz len);
 struct result vas_map(struct vas vas, struct vma vma, int flags);
 struct result vas_unmap(struct vas vas, struct vma vma);
 struct result vas_memcpy(struct vas vas, struct vma vma, struct bytes src);
+struct result vas_memset(struct vas vas, struct vma vma, byte value);
 
 #endif // __TX_PAGING_H__
