@@ -33,7 +33,7 @@ static inline void memset(struct bytes bytes, byte value)
 
 static inline void memcpy(struct bytes dest, struct bytes src)
 {
-    sz len = (dest.len < src.len) ? dest.len : src.len;
+    sz len = MIN(dest.len, src.len);
     for (sz i = 0; i < len; i++)
         dest.dat[i] = src.dat[i];
 }
