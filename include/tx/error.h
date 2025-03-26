@@ -46,5 +46,6 @@
     }
 
 struct_result(sz, sz)
+struct_result(ptr, ptr)
 
 #endif // __TX_ERROR_H__
