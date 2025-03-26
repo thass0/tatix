@@ -332,12 +332,17 @@ struct vas vas_new(struct page_table pt, struct alloc alloc)
 struct result vas_map(struct vas vas, struct vma vma, int flags)
 {
     assert(vma.len > 0);
-    assert(IS_ALIGNED(vma.len, PAGE_SIZE));
     assert(vma.base <= PTR_MAX - vma.len);
-    vaddr_t vaddr_end = vma.base + vma.len;
+    vaddr_t vaddr_page_end = ALIGN_UP(vma.base + vma.len, PAGE_SIZE);
     struct result res = result_ok();
     print_dbg(STR("Mapping VMA: base=0x%lx len=0x%lx\n"), vma.base, vma.len);
-    for (vaddr_t vaddr = vma.base; vaddr < vaddr_end; vaddr += PAGE_SIZE) {
+    for (vaddr_t vaddr = vma.base; vaddr < vaddr_page_end; vaddr += PAGE_SIZE) {
+        struct result_paddr_t paddr_exist_res = pt_walk(vas.pt, vaddr);
+        if (!paddr_exist_res.is_error) {
+            print_dbg(STR("Skipping existing mapping: 0x%lx ---> 0x%lx\n"), vaddr,
+                      result_paddr_t_checked(paddr_exist_res));
+            continue;
+        }
         paddr_t paddr = virt_to_phys((vaddr_t)alloc_alloc(vas.alloc, PAGE_SIZE, PAGE_SIZE));
         if (unlikely(!paddr))
             return result_error(ENOMEM);
@@ -352,12 +357,11 @@ struct result vas_map(struct vas vas, struct vma vma, int flags)
 struct result vas_unmap(struct vas vas, struct vma vma)
 {
     assert(vma.len > 0);
-    assert(IS_ALIGNED(vma.len, PAGE_SIZE));
     assert(vma.base <= PTR_MAX - vma.len);
-    vaddr_t vaddr_end = vma.base + vma.len;
+    vaddr_t vaddr_page_end = ALIGN_UP(vma.base + vma.len, PAGE_SIZE);
     struct result res = result_ok();
     print_dbg(STR("Unmapping VMA: base=0x%lx len=0x%lx\n"), vma.base, vma.len);
-    for (vaddr_t vaddr = vma.base; vaddr < vaddr_end; vaddr += PAGE_SIZE) {
+    for (vaddr_t vaddr = vma.base; vaddr < vaddr_page_end; vaddr += PAGE_SIZE) {
         struct result_paddr_t paddr = pt_walk(vas.pt, vaddr);
         if (unlikely(paddr.is_error))
             return result_error(paddr.code);
@@ -373,16 +377,18 @@ struct result vas_unmap(struct vas vas, struct vma vma)
 struct result vas_memcpy(struct vas vas, struct vma vma, struct bytes src)
 {
     assert(vma.len > 0);
-    assert(IS_ALIGNED(vma.len, PAGE_SIZE));
     assert(vma.base <= PTR_MAX - vma.len);
     assert(src.len <= vma.len);
 
     vaddr_t vaddr_end = vma.base + vma.len;
+    vaddr_t vaddr_page_end = ALIGN_UP(vaddr_end, PAGE_SIZE);
+
     sz offset = 0;
     print_dbg(STR("Copying to VMA: base=0x%lx len=0x%lx src.dat=0x%lx src.len=%ld\n"), vma.base, vma.len, src.dat,
               src.len);
 
-    for (vaddr_t vaddr = vma.base; vaddr < vaddr_end && offset < src.len; vaddr += PAGE_SIZE, offset += PAGE_SIZE) {
+    for (vaddr_t vaddr = vma.base; vaddr < vaddr_page_end && offset < src.len;
+         vaddr += PAGE_SIZE, offset += PAGE_SIZE) {
         // There is some pointer laundering going on here. First, we walk the page table of the VAS (which is
         // not necessarily the active page table) to find the physical address of the current virtual address.
         // This virtual address could be from the virtual memory region used by the process, not the kernel. But
@@ -393,8 +399,8 @@ struct result vas_memcpy(struct vas vas, struct vma vma, struct bytes src)
         if (unlikely(paddr.is_error))
             return result_error(EINVAL);
         void *dest = (void *)phys_to_virt(result_paddr_t_checked(paddr));
-        memcpy(bytes_new(dest, PAGE_SIZE),
-               bytes_new(src.dat + offset, src.len - offset >= PAGE_SIZE ? PAGE_SIZE : src.len - offset));
+        memcpy(bytes_new(dest, MIN(vaddr_end - vaddr, PAGE_SIZE)),
+               bytes_new(src.dat + offset, MIN(src.len - offset, PAGE_SIZE)));
     }
 
     return result_ok();
