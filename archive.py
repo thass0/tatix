@@ -26,8 +26,8 @@ def djb2(data: bytes):
     # http://www.cse.yorku.ca/~oz/hash.html
     hash_value = 5381
     for ch in data:
-        hash_value = ((hash_value << 5) + hash_value) + ch # hash * 33 + c
-    return hash_value & 0xFFFFFFFFFFFFFFFF
+        hash_value = (((hash_value << 5) + hash_value) + ch) & 0xffffffffffffffff # hash * 33 + c
+    return hash_value
 
 HEADER_SIZE = 24
 INDEX_SIZE = 36
