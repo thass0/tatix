@@ -14,6 +14,8 @@ u64 djb2_hash(struct str str)
 
 struct result archive_extract(struct bytes archive, struct ram_fs *rfs)
 {
+    assert(rfs);
+
     if (archive.len < sizeof(struct ar_header))
         return result_error(EINVAL);
 
@@ -33,7 +35,7 @@ struct result archive_extract(struct bytes archive, struct ram_fs *rfs)
     for (i64 i = 0; i < header->index_length; i++) {
         if (ADD_OVERFLOW((sz)archive.dat, index_offset))
             return result_error(EINVAL);
-        if (index_offset > archive.len)
+        if (index_offset >= archive.len)
             return result_error(EINVAL);
         struct ar_index_ent *index_ent = (struct ar_index_ent *)(archive.dat + index_offset);
 
