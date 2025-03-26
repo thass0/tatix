@@ -12,6 +12,7 @@
 #include <tx/kvalloc.h>
 #include <tx/paging.h>
 #include <tx/print.h>
+#include <tx/proc.h>
 #include <tx/ramfs.h>
 
 extern char _init_proc_start[];
@@ -19,13 +20,6 @@ extern char _init_proc_end[];
 
 extern char _rootfs_archive_start[];
 extern char _rootfs_archive_end[];
-
-__section(".entry.data") __aligned(0x1000) static struct pt pml4; // Single PML4 table
-__section(".entry.data") __aligned(0x1000) static struct pt pdpt; // Single PDP table, this will have two entries
-__section(".entry.data") __aligned(0x1000) static struct pt pd_id; // PD table for identity mapping
-__section(".entry.data") __aligned(0x1000) static struct pt pt_id[8]; // PT pages for identity mapping (16 MB)
-__section(".entry.data") __aligned(0x1000) static struct pt pd_vmem; // PD table for virtual mapping
-__section(".entry.data") __aligned(0x1000) static struct pt pt_vmem[8]; // PT pages for virtual mapping (16 MB)
 
 #define INIT_KERNEL_STACK_SIZE 0x4000
 static byte init_kernel_stack[INIT_KERNEL_STACK_SIZE] __used;
@@ -37,6 +31,17 @@ __noreturn __naked void _kernel_init(void)
     __asm__ volatile("movl $init_kernel_stack + " TOSTRING(INIT_KERNEL_STACK_SIZE) " - 1, %esp\n"
                      "call kernel_init\n");
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// .entry section                                                            //
+///////////////////////////////////////////////////////////////////////////////
+
+__section(".entry.data") __aligned(0x1000) static struct pt pml4; // Single PML4 table
+__section(".entry.data") __aligned(0x1000) static struct pt pdpt; // Single PDP table, this will have two entries
+__section(".entry.data") __aligned(0x1000) static struct pt pd_id; // PD table for identity mapping
+__section(".entry.data") __aligned(0x1000) static struct pt pt_id[8]; // PT pages for identity mapping (16 MB)
+__section(".entry.data") __aligned(0x1000) static struct pt pd_vmem; // PD table for virtual mapping
+__section(".entry.data") __aligned(0x1000) static struct pt pt_vmem[8]; // PT pages for virtual mapping (16 MB)
 
 __section(".entry.text") __noreturn void _start(void)
 {
@@ -66,125 +71,9 @@ __section(".entry.text") __noreturn void _start(void)
     _kernel_init();
 }
 
-union __aligned(0x8000) kernel_stack {
-    struct proc *proc;
-    byte stack[0x8000];
-};
-
-typedef u32 pid_t;
-
-struct context {
-    u64 rax;
-};
-
-struct proc {
-    struct vas vas;
-    union kernel_stack *kstack;
-    struct trap_frame *trap_frame;
-    struct context *context;
-    pid_t pid;
-};
-
-#define MAX_PID 1024
-static struct proc proc_list[MAX_PID];
-static pid_t proc_list_len;
-
-struct proc *proc_alloc_pid(void)
-{
-    struct proc *proc = NULL;
-
-    if (proc_list_len == MAX_PID)
-        return NULL;
-
-    proc = &proc_list[proc_list_len];
-    proc->pid = proc_list_len;
-    proc_list_len++;
-    return proc;
-}
-
-// Wrapper around pool allocation so the pool allocator can be used with `struct alloc` from paging.
-void *pt_pool_alloc(void *pool_ptr, sz size, sz align)
-{
-    assert(pool_ptr);
-    struct pool *pool = pool_ptr;
-    assert(align == PAGE_SIZE);
-    assert(size == PAGE_SIZE);
-    assert(pool->size == size);
-    return pool_alloc(pool);
-}
-
-void pt_pool_free(void *pool_ptr, void *ptr, sz size)
-{
-    assert(pool_ptr);
-    struct pool *pool = pool_ptr;
-    assert(size == PAGE_SIZE);
-    assert(pool->size == size);
-    pool_free(pool, ptr);
-}
-
-__naked __noreturn void trapret(void)
-{
-    __asm__ volatile("mov %rsp, %rdi");
-    __asm__ volatile("push %0" : : "r"((ptr)isr_return));
-    __asm__ volatile("jmp handle_interrupt");
-}
-
-void proc_init(void)
-{
-    struct proc *proc = proc_alloc_pid();
-    assert(proc); // TODO: If all PIDs are used, we should try to purge unused processes
-
-    union kernel_stack *kern_stack =
-        kvalloc_alloc(sizeof(union kernel_stack), PAGE_SIZE); // TODO: Maybe need bigger alignment?
-    kern_stack->proc = proc;
-    proc->kstack = kern_stack;
-    struct task_state *ts = tss_get_global();
-    ptr rsp = (u64)kern_stack + sizeof(union kernel_stack) - 8;
-    ts->rsp0 = rsp;
-    print_dbg(STR("Kernel stack: 0x%lx\n"), rsp);
-
-    rsp -= sizeof(*proc->trap_frame);
-    proc->trap_frame = (struct trap_frame *)rsp;
-
-    proc->trap_frame->r11 = 0xdeadbeef;
-    proc->trap_frame->vector = 0x80;
-
-    // Set up the context that we'll execute from
-    rsp -= sizeof(ptr *);
-    *(ptr *)rsp = (ptr)trapret;
-
-    struct pool *data_pool;
-    sz data_alloc_size = 0x20000;
-    void *data_alloc_mem = kvalloc_alloc(data_alloc_size, PAGE_SIZE);
-    assert(data_alloc_mem);
-    data_pool = kvalloc_alloc(sizeof(*data_pool), alignof(*data_pool));
-    assert(data_pool);
-    *data_pool = pool_new(bytes_new(data_alloc_mem, data_alloc_size), PAGE_SIZE);
-    struct alloc data_alloc = alloc_new(data_pool, pt_pool_alloc, pt_pool_free);
-
-    // TODO: When switching processes, a pointer to the process-specific part of the page table should
-    // be copied to the `struct proc`. We can save memory on the page tables this way becasue the kernel
-    // is only mapped once.
-    proc->vas = vas_new(current_page_table(), data_alloc);
-
-    struct vma user_code = vma_new(0x100000, 0x16000);
-    assert(!vas_map(proc->vas, user_code, PT_FLAG_P | PT_FLAG_RW | PT_FLAG_US).is_error);
-    assert(!vas_memcpy(proc->vas, user_code, bytes_new(_init_proc_start, _init_proc_end - _init_proc_start)).is_error);
-    proc->trap_frame->rip = user_code.base;
-
-    proc->trap_frame->cs = segment_selector(SEG_IDX_USER_CODE, SEG_DESC_DPL_USER);
-    proc->trap_frame->ss = segment_selector(SEG_IDX_USER_DATA, SEG_DESC_DPL_USER); // TODO: Probably not needed
-    struct vma user_stack = vma_new(0x200000, 0x2000);
-    assert(!vas_map(proc->vas, user_stack, PT_FLAG_P | PT_FLAG_RW | PT_FLAG_US).is_error);
-    proc->trap_frame->rsp = user_stack.base + user_stack.len - 1;
-    proc->trap_frame->rbp = 0;
-
-    print_dbg(STR("*** Set up initial process\n"));
-
-    // Switch stacks and return. The return value is taken from the top of the new stack.
-    __asm__ volatile("mov %0, %%rsp" : : "r"(rsp) : "memory");
-    __asm__ volatile("ret");
-}
+///////////////////////////////////////////////////////////////////////////////
+// Kernel initialization                                                     //
+///////////////////////////////////////////////////////////////////////////////
 
 void ram_fs_selftest(void)
 {
@@ -207,6 +96,30 @@ void print_hello_txt(struct ram_fs *rfs)
     assert(!read_res.is_error);
 
     print_str(str_from_buf(sbuf));
+}
+
+void proc_init(struct ram_fs *rfs)
+{
+    assert(rfs);
+
+    struct result_ram_fs_node node_res = ram_fs_open(rfs, STR("/init"));
+    assert(!node_res.is_error);
+    struct ram_fs_node *node = result_ram_fs_node_checked(node_res);
+    struct str_buf sbuf = str_buf_from_kvalloc(0x2000);
+    struct result_sz read_res = ram_fs_read(node, &sbuf, 0);
+    assert(!read_res.is_error);
+
+    struct bytes elf = bytes_new(sbuf.dat, sbuf.len);
+    struct proc *proc = proc_create(elf);
+    assert(proc);
+    print_str(STR("Successfully created a process!!!\n"));
+
+    struct task_state *ts = tss_get_global();
+    assert(ts);
+    ts->rsp0 = (u64)proc->kstack + sizeof(union kernel_stack) - 8;
+
+    __asm__ volatile("mov %0, %%rsp" : : "r"(proc->context->rsp) : "memory");
+    __asm__ volatile("ret");
 }
 
 __noreturn void kernel_init(void)
@@ -250,7 +163,7 @@ __noreturn void kernel_init(void)
 
     print_hello_txt(rfs);
 
-    proc_init();
+    proc_init(rfs);
 
     hlt();
 }
