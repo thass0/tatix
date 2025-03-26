@@ -1,6 +1,7 @@
 #include <config.h>
 #include <tx/asm.h>
 #include <tx/base.h>
+#include <tx/elf64.h>
 #include <tx/fmt.h>
 #include <tx/stringdef.h>
 
@@ -94,60 +95,6 @@ static inline int disk_read(byte *dst, sz count, sz byte_offset, sz sector_offse
     return 0;
 }
 
-#define EI_NIDENT 16
-
-struct elf64_hdr {
-    unsigned char ident[EI_NIDENT];
-    u16 type;
-    u16 machine;
-    u16 version;
-    ptr entry;
-    u64 phdr_tab_offset;
-    u64 shdr_tab_offset;
-    u32 flags;
-    u16 header_size;
-    u16 phdr_size;
-    u16 phdr_count;
-    u16 shdr_size;
-    u16 shdr_count;
-    u16 str_tab_idx;
-};
-
-struct elf64_phdr {
-    u32 type;
-    u32 flags;
-    u64 offset;
-    u64 vaddr;
-    ptr paddr;
-    u64 file_size;
-    u64 mem_size;
-    u64 align;
-};
-
-#define PT_LOAD 1
-#define ET_EXEC 2
-#define EM_X86_64 62
-
-int elf_verify(struct elf64_hdr *elf)
-{
-    if (!(elf->ident[0] == 0x7f && elf->ident[1] == 'E' && elf->ident[2] == 'L' && elf->ident[3] == 'F'))
-        return -1;
-
-    if (elf->header_size != sizeof(struct elf64_hdr))
-        return -1;
-
-    if (elf->phdr_size != sizeof(struct elf64_phdr))
-        return -1;
-
-    if (elf->type != ET_EXEC)
-        return -1;
-
-    if (elf->machine != EM_X86_64)
-        return -1;
-
-    return 0;
-}
-
 typedef void (*entry_func_t)(void);
 
 void load_kernel(void)
@@ -164,7 +111,7 @@ void load_kernel(void)
     elf = (struct elf64_hdr *)elf_buf;
     disk_read((byte *)elf, sizeof(struct elf64_hdr), 0, BOOT_SECTOR_COUNT);
 
-    if (elf_verify(elf) < 0) {
+    if (!elf64_is_valid(elf)) {
         _print_str(STR("Failed to verify ELF\n"));
         return;
     }
