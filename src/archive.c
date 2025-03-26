@@ -3,8 +3,12 @@
 u64 djb2_hash(struct str str)
 {
     u64 hash = 5381;
-    for (sz i = 0; i < str.len; i++)
-        hash = ((hash << 5) + hash) + str.dat[i];
+    for (sz i = 0; i < str.len; i++) {
+        // NOTE: `struct str` stores an array of `char`s. We need to cast it to `u8` to avoid
+        // sign extension when the `char` is negative.
+        // TODO: Remove the cast once RAM fs uses a `u8` byte buffer.
+        hash = ((hash << 5) + hash) + (u8)str.dat[i];
+    }
     return hash;
 }
 
