@@ -30,11 +30,6 @@ static struct addr_mapping kernel_code_addrs;
 static sz kernel_dyn_offset;
 static struct addr_mapping kernel_dyn_addrs;
 
-static inline bool in_range(ptr p, ptr base, sz len)
-{
-    return p >= base && p < base + len;
-}
-
 // NOTE: Multiple virtual addresses can point to the same physical address. This function returns the
 // virtual address (in high memory) that's used by the kernel to access the physical address. There may
 // be processes that use a different virtual address to access the same physical page.
@@ -42,9 +37,9 @@ static vaddr_t phys_to_virt(paddr_t paddr)
 {
     if (!paddr)
         return 0; // To not have to check for NULL before calling this function.
-    if (in_range(paddr, kernel_dyn_addrs.pbase, kernel_dyn_addrs.len))
+    if (IN_RANGE(paddr, kernel_dyn_addrs.pbase, kernel_dyn_addrs.len))
         return paddr + kernel_dyn_offset;
-    else if (in_range(paddr, kernel_code_addrs.pbase, kernel_code_addrs.len))
+    else if (IN_RANGE(paddr, kernel_code_addrs.pbase, kernel_code_addrs.len))
         return paddr + kernel_code_offset;
     print_dbg(STR("paddr=0x%lx\n"), paddr);
     crash("Invalid address");
@@ -54,9 +49,9 @@ static paddr_t virt_to_phys(vaddr_t vaddr)
 {
     if (!vaddr)
         return 0; // To not have to check for NULL before calling this function.
-    if (in_range(vaddr, kernel_dyn_addrs.vbase, kernel_dyn_addrs.len))
+    if (IN_RANGE(vaddr, kernel_dyn_addrs.vbase, kernel_dyn_addrs.len))
         return vaddr - kernel_dyn_offset;
-    else if (in_range(vaddr, kernel_code_addrs.vbase, kernel_code_addrs.len))
+    else if (IN_RANGE(vaddr, kernel_code_addrs.vbase, kernel_code_addrs.len))
         return vaddr - kernel_code_offset;
     print_dbg(STR("vaddr=0x%lx\n"), vaddr);
     crash("Invalid address");
