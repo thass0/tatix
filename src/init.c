@@ -102,7 +102,7 @@ void proc_init(struct ram_fs *rfs)
 {
     assert(rfs);
 
-    struct result_ram_fs_node node_res = ram_fs_open(rfs, STR("/init"));
+    struct result_ram_fs_node node_res = ram_fs_open(rfs, STR("/bin/init"));
     assert(!node_res.is_error);
     struct ram_fs_node *node = result_ram_fs_node_checked(node_res);
     struct str_buf sbuf = str_buf_from_kvalloc(0x2000);
