@@ -3,6 +3,7 @@
 #include <tx/error.h>
 #include <tx/fmt.h>
 #include <tx/ramfs.h>
+#include <tx/vfs.h>
 
 ///////////////////////////////////////////////////////////////////////////////
 // Paths                                                                     //
@@ -412,6 +413,20 @@ struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct str str, sz o
     rfs_node->data.len = MAX(rfs_node->data.len, offset + write_len);
 
     return result_sz_ok(write_len);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// VFS interface                                                             //
+///////////////////////////////////////////////////////////////////////////////
+
+static struct super_block_ops rfs_sb_ops;
+static struct vnode_ops rfs_vnode_ops;
+static struct dentry_ops rfs_dentry_ops;
+
+struct result ram_fs_vfs_mount(struct ram_fs *rfs)
+{
+    struct super_block *sb = vfs_init_sb(rfs, &rfs_sb_ops, &rfs_vnode_ops);
+    struct result res = vfs_mount(sb, STR("/"), root_node);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

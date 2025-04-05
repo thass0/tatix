@@ -39,17 +39,20 @@
 
 struct super_block;
 struct vnode;
+struct vnode_ops;
 struct dentry;
 struct file;
 
 ///////////////////////////////////////////////////////////////////////////////
-// Super block                                                               //
+// Super block structure(s)                                                  //
 ///////////////////////////////////////////////////////////////////////////////
 
 struct super_block {
     struct pool vnode_alloc;
     void *private_data;
     struct super_block_ops *ops;
+    struct vnode_ops *vnode_ops;
+    struct dentry *mount_point;
 };
 
 typedef struct vnode *(*super_block_alloc_op)(struct super_block *sb);
@@ -61,10 +64,11 @@ struct super_block_ops {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// Vnode                                                                     //
+// Vnode structure(s)                                                        //
 ///////////////////////////////////////////////////////////////////////////////
 
 struct vnode {
+    i32 refcount;
     struct super_block *sb; // Super block owning this vnode.
     struct {
         sz file_size_bytes;
@@ -75,7 +79,8 @@ struct vnode {
 
 typedef struct vnode *(*vnode_create_file_op)(struct vnode *parent, struct dentry *filename);
 typedef struct vnode *(*vnode_create_dir_op)(struct vnode *parent, struct dentry *filename);
-typedef struct dentry *(*vnode_lookup_dentry_op)(struct vnode *parent, struct str filename);
+// Requires the super block pointer for looking up the root (as, in that case, `parent` is `NULL`).
+typedef struct dentry *(*vnode_lookup_dentry_op)(struct super_block *sb, struct vnode *parent, struct str filename);
 
 struct vnode_ops {
     vnode_create_file_op create_file;
@@ -85,7 +90,7 @@ struct vnode_ops {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// Dentry                                                                    //
+// Dentry structure(s)                                                       //
 ///////////////////////////////////////////////////////////////////////////////
 
 // NOTE: The terms "filename" or "component" are used to refer to a single component
@@ -99,17 +104,8 @@ struct dentry_filename {
     char dat[VFS_PATH_MAX_LEN];
 };
 
-struct dcache {
-    struct pool dentry_alloc;
-    // TODO: Replace with hash map:
-    sz dentry_ptrs_len; // Length of list of pointers to dentrys.
-    struct dentry **dentry_ptrs; // List of pointers to all dentrys in the cache.
-};
-
-void dcache_insert(struct dcache *dcache, struct dentry *dentry);
-struct dentry *dcache_lookup(struct dcache *dcache, struct str filename);
-
 struct dentry {
+    i32 refcount;
     struct dcache *cache; // Cache of dentrys containing this one
     struct super_block *sb; // Super block owning the vnode of this dentry.
     struct dentry_filename filename; // Name of the component.
@@ -119,15 +115,13 @@ struct dentry {
 };
 
 typedef bool (*dentry_compare_op)(struct dentry *a, struct dentry *b);
-typedef struct dentry *(*dentry_alloc_op)(struct dcache *dcache);
 
 struct dentry_ops {
     dentry_compare_op compare;
-    dentry_alloc_op alloc;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// File                                                                      //
+// File structure(s)                                                         //
 ///////////////////////////////////////////////////////////////////////////////
 
 struct file {
@@ -149,5 +143,25 @@ struct file_ops {
     file_open_op open;
     file_close_op close;
 };
+
+// Mounting means that after mounting, looking up the mount directory will
+// return the root of the mounted filesystem
+
+///////////////////////////////////////////////////////////////////////////////
+// VFS functions                                                             //
+///////////////////////////////////////////////////////////////////////////////
+
+// Allocate a new super block for a filesystem with private data `data`. Uses the default
+// operations if `ops` is `NULL`. Returns `NULL` in case of an error.
+struct super_block *vfs_init_sb(void *data, struct super_block_ops *ops, struct vnode_ops *node_ops);
+
+// Mount the super_block at a given dentry.
+struct result vfs_mount(struct super_block *sb);
+
+// These use the global dcache.
+void vfs_dcache_insert(struct dentry *dentry);
+struct dentry *vfs_dcache_lookup(struct str filename);
+// Each `dentry` can have different ops, depending on the underlying filesystem.
+struct dentry *vfs_dcache_alloc(struct dentry_ops *ops);
 
 #endif // __TX_VFS_H__
