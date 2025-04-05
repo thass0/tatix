@@ -1,5 +1,13 @@
 %include "config.s"
 
+    ;; NOTE: This bootloader uses 1 GB huge pages, which only works on
+    ;; relatively new hardware. E.g., an Intel Core i3-3110m from 2012
+    ;; that I tested this on doesn't support huge pages.
+    ;;
+    ;; NOTE: This is an MBR sector, but there is no partition table
+    ;; included at the end of it. This might sometimes lead to issues
+    ;; if other software expects a partition table with one active entry.
+
     section .bootloader
     global start_real_mode
 

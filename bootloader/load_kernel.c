@@ -5,6 +5,12 @@
 #include <tx/fmt.h>
 #include <tx/stringdef.h>
 
+// NOTE: This loader uses ATA disks and expects the kernel image and
+// bootloader to be on such a disk. This works when using the QEMU
+// parameter -drive file=IMAGE_FILE.bin,format=raw,index=0,media=disk
+// but it will not work in many practical cases, such as when booting
+// from a USB stick.
+
 #define ATA_IO_PORT_BASE 0x1f0
 #define ATA_OFFSET_SECTOR_COUNT 2
 #define ATA_OFFSET_LBA_LOW 3
