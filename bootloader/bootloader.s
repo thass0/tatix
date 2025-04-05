@@ -17,6 +17,14 @@ start_real_mode:
 	mov fs, ax
 	mov gs, ax
 
+    mov ax, 0                ; Can't write to DS directly
+    mov ds, ax               ; Set DS to 0
+
+    ; Set video mode (text mode 80x25, 16 colors)
+    mov ah, 0x00             ; BIOS function: set video mode
+    mov al, 0x03             ; Mode 3 = 80x25 text mode
+    int 0x10                 ; Call BIOS video interrupt
+
 	;; Put the stack right before this code
 	mov bp, start_real_mode
 	mov sp, bp
@@ -33,7 +41,7 @@ start_real_mode:
 	;; Code from: https://wiki.osdev.org/A20_Line
 
 	not ax ; ax = 0xffff
-        mov ds, ax
+    mov ds, ax
 
 	mov di, 0x0500
 	mov si, 0x0510
@@ -79,23 +87,23 @@ A20_LINE_UNSET equ 0
 
 	;; We can use BIOS routines here to load the kernel
 	mov si, disk_address_packet
-        mov ah, 0x42
-        mov dl, 0x80 ; Driver number 0x80 for C drive
-        int 0x13
+    mov ah, 0x42
+    mov dl, 0x80 ; Driver number 0x80 for C drive
+    int 0x13
 
-        jc end16
+    jc end16
 
-        jmp load_gdt
+    jmp load_gdt
 
-        ;; Data for disk read
-        align 4
+    ;; Data for disk read
+    align 4
 disk_address_packet:
-        db 0x10                 ; Size of packet
-        db 0                    ; Reserved, always 0
+    db 0x10                 ; Size of packet
+    db 0                    ; Reserved, always 0
 dap_sectors_num:
-        dw (BOOT_SECTOR_COUNT - 1) ; Read all remaining sectors in the bootloader
-        dd (BOOT_LOAD_ADDR + SECTOR_SIZE) ; Put them in memory right after this sector
-        dq 1 ; Disk block to start at (skip boot sector in block 0)
+    dw (BOOT_SECTOR_COUNT - 1) ; Read all remaining sectors in the bootloader
+    dd (BOOT_LOAD_ADDR + SECTOR_SIZE) ; Put them in memory right after this sector
+    dq 1 ; Disk block to start at (skip boot sector in block 0)
 
 	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	;; Load 32-bit GDT and switch to 32-bit protected mode                      ;;
@@ -105,14 +113,14 @@ load_gdt:
 	lgdt [gdt32_pseudo_descriptor]
 
 	;; Setting cr0.PE (bit 0) enables protected mode
-        mov eax, cr0
-        or eax, 1
-        mov cr0, eax
+    mov eax, cr0
+    or eax, 1
+    mov cr0, eax
 
-        ;; The far jump into the code segment from the new GDT flushes
-        ;; the CPU pipeline removing any 16-bit decoded instructions
-        ;; and updates the cs register with the new code segment.
-        jmp BOOT_GDT_CODE_DESC:start_prot_mode
+    ;; The far jump into the code segment from the new GDT flushes
+    ;; the CPU pipeline removing any 16-bit decoded instructions
+    ;; and updates the cs register with the new code segment.
+    jmp BOOT_GDT_CODE_DESC:start_prot_mode
 
 print16:
 	mov dx, COM1_PORT
@@ -137,55 +145,77 @@ start_prot_mode:
 	mov ecx, PROT_MODE_MSG_LEN
 	call print32
 
-        ;; Old segments are now meaningless
-        mov ax, BOOT_GDT_DATA_DESC
-        mov ds, ax
-        mov ss, ax
-        mov es, ax
-        mov fs, ax
-        mov gs, ax
+    ;; Old segments are now meaningless
+    mov ax, BOOT_GDT_DATA_DESC
+    mov ds, ax
+    mov ss, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
 
-        ;; Build 2-level page table using 1GB pages and map the first four GB of memory
+    mov word [0xb8000], 'A' | (0x0f << 8)
 
-        ;; We need two pages in total. Zero-initializing them is safe
-        mov ecx, PAGE_SIZE * 2
-        mov edi, BOOT_PAGE_TAB_ADDR
-        xor eax, eax
-        rep stosb
+    ;; Constants
+    ENTRIES_PER_TABLE equ 512           ; 512 entries per page table
+    ENTRY_SIZE equ 8                    ; Each entry is 8 bytes in long mode
 
-        ;; Bits 0 and 1 enable the present flag and read/write flag, respectively.
-        mov dword [BOOT_PAGE_TAB_ADDR], 11b | (BOOT_PAGE_TAB_ADDR + PAGE_SIZE)
-        ;; Bit 7 in the PDPT entries enables 1GB pages.
-        mov dword [BOOT_PAGE_TAB_ADDR + PAGE_SIZE + 0x00], 11b | (1 << 7) | (0 << 30)
-        mov dword [BOOT_PAGE_TAB_ADDR + PAGE_SIZE + 0x08], 11b | (1 << 7) | (1 << 30)
-        mov dword [BOOT_PAGE_TAB_ADDR + PAGE_SIZE + 0x10], 11b | (1 << 7) | (2 << 30)
-        mov dword [BOOT_PAGE_TAB_ADDR + PAGE_SIZE + 0x18], 11b | (1 << 7) | (3 << 30)
+    ;; Page table flags
+    FLAG_PRESENT equ 1 << 0             ; Page is present
+    FLAG_WRITE equ 1 << 1               ; Page is writable
+    FLAG_HUGE equ 1 << 7                ; Huge page (2MB at PD level)
 
-        mov edi, BOOT_PAGE_TAB_ADDR
-        mov cr3, edi ; MMU finds the PML4 table in cr3
+;; Build 4-level page table for long mode using 2MB pages
+setup_page_tables:
+    ;; We need three pages: PML4, PDPT, and PD
+    mov ecx, PAGE_SIZE * 3
+    mov edi, BOOT_PAGE_TAB_ADDR
+    xor eax, eax
+    rep stosb                       ; Zero out all page table memory
 
-        ;; Enable Physical Address Extension (PAE)
-        mov eax, cr4
-        or eax, 1 << 5
-        mov cr4, eax
+    ;; Set up PML4 table - first entry points to PDPT
+    mov dword [BOOT_PAGE_TAB_ADDR], (BOOT_PAGE_TAB_ADDR + PAGE_SIZE) | FLAG_PRESENT | FLAG_WRITE
 
-        ;; The EFER (Extended Feature Enable Register) MSR (Model-Specific Register) contains fields
-        ;; related to IA-32e mode operation. Bit 8 if this MSR is the LME (long mode enable) flag
-        ;; that enables IA-32e operation.
-        mov ecx, 0xc0000080
-        rdmsr
-        or eax, 1 << 8
-        wrmsr
+    ;; Set up PDPT - first entry points to PD
+    mov dword [BOOT_PAGE_TAB_ADDR + PAGE_SIZE], (BOOT_PAGE_TAB_ADDR + (PAGE_SIZE * 2)) | FLAG_PRESENT | FLAG_WRITE
 
-        ;; Enable paging (PG flag in cr0, bit 31)
-        mov eax, cr0
-        or eax, 1 << 31
-        mov cr0, eax
+    ;; Set up PD with 2MB pages - map first 1GB of physical memory
+    ;; Each entry maps 2MB of physical memory
+    mov edi, BOOT_PAGE_TAB_ADDR + (PAGE_SIZE * 2)
+    mov eax, 0 | FLAG_PRESENT | FLAG_WRITE | FLAG_HUGE  ; First 2MB with flags
+    mov ecx, 512                                        ; 512 entries = 1GB
 
-        ;; New GDT has the 64-bit segment flag set
-        lgdt [gdt64_pseudo_descriptor]
+.map_pd_entry:
+    mov [edi], eax                  ; Store lower 32 bits of entry
+    mov dword [edi+4], 0            ; Upper 32 bits are zero
+    add edi, 8                      ; Move to next entry (8 bytes each)
+    add eax, 0x200000               ; Next 2MB physical address
+    loop .map_pd_entry
 
-        jmp BOOT_GDT_CODE_DESC:start_long_mode
+    mov edi, BOOT_PAGE_TAB_ADDR
+    mov cr3, edi ; MMU finds the PML4 table in cr3
+
+    ;; Enable Physical Address Extension (PAE)
+    mov eax, cr4
+    or eax, 1 << 5
+    mov cr4, eax
+
+    ;; The EFER (Extended Feature Enable Register) MSR (Model-Specific Register) contains fields
+    ;; related to IA-32e mode operation. Bit 8 if this MSR is the LME (long mode enable) flag
+    ;; that enables IA-32e operation.
+    mov ecx, 0xc0000080
+    rdmsr
+    or eax, 1 << 8
+    wrmsr
+
+    ;; Enable paging (PG flag in cr0, bit 31)
+    mov eax, cr0
+    or eax, 1 << 31
+    mov cr0, eax
+
+    ;; New GDT has the 64-bit segment flag set
+    lgdt [gdt64_pseudo_descriptor]
+
+    jmp BOOT_GDT_CODE_DESC:start_long_mode
 
 print32:
 	mov dx, COM1_PORT
@@ -195,33 +225,33 @@ print32:
 	loop .loop
 	ret
 end32:
-        hlt
-        jmp end32
+    hlt
+    jmp end32
 
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        ;; Enter the kernel in 64-bit mode                                          ;;
-        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    ;; Enter the kernel in 64-bit mode                                          ;;
+    ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-        [bits 64]
+    [bits 64]
 
 start_long_mode:
 	mov esi, long_mode_msg
 	mov ecx, LONG_MODE_MSG_LEN
 	call print32
 
-        extern load_kernel
-        call load_kernel
+    extern load_kernel
+    call load_kernel
 
 end64:
         hlt
         jmp end64
 
 COM1_PORT equ 0x3f8
-real_mode_msg: db "Entered real mode", 0xd
+real_mode_msg: db "R", 0xd
 REAL_MODE_MSG_LEN equ $ - real_mode_msg
-prot_mode_msg: db  "Entered protected mode", 0xd
+prot_mode_msg: db  "P", 0xd
 PROT_MODE_MSG_LEN equ $ - prot_mode_msg
-long_mode_msg: db "Entered long mode      ", 0xa
+long_mode_msg: db "L", 0xa
 LONG_MODE_MSG_LEN equ $ - long_mode_msg
 
 	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -333,3 +363,21 @@ gdt64_end:
 gdt64_pseudo_descriptor:
 	dw gdt64_end - gdt64_start - 1
 	dd gdt64_start
+
+	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	;; Parition table                                                           ;;
+	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+    ; The partition table starts at offset 446 from the beginning of the MBR.
+times 446 - ($ - $$) db 0
+
+    ; This is dummy data to get BIOS to boot my MBR.
+    db 0x80                  ; Boot indicator (0x80 = bootable, 0x00 = non-bootable)
+    db 0x01, 0x01, 0x00      ; CHS address of first absolute sector
+    db 0x83                  ; Partition type (0x83 = Linux)
+    db 0xFE, 0xFF, 0xFF      ; CHS address of last absolute sector
+    dd 0x00000800            ; LBA of first absolute sector
+    dd 0x00010000            ; Number of sectors in partition (64K)
+
+    ; Fill the rest with zeros (linker does the boot signature at the last two bytes).
+times 510 - ($ - $$) db 0
