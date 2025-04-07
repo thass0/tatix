@@ -5,7 +5,6 @@
 #include <tx/fmt.h>
 #include <tx/isr.h>
 #include <tx/pic.h>
-#include <tx/syscall.h>
 
 __naked void isr_stub_common(void)
 {
@@ -112,8 +111,6 @@ ISR_STUB(45)
 ISR_STUB(46)
 ISR_STUB(47)
 
-ISR_STUB(128)
-
 void fmt_cpu_state(struct trap_frame *cpu_state, struct str_buf *buf)
 {
     fmt(buf,
@@ -140,11 +137,11 @@ void handle_interrupt(struct trap_frame *cpu_state)
         hlt();
     } else if (cpu_state->vector < IRQ_VECTORS_END) {
         print_dbg(STR("Caught an IRQ: vector=%lu error_code=%lu\n"), cpu_state->vector, cpu_state->error_code);
-    } else if (cpu_state->vector == IRQ_SYSCALL) {
+    } else {
         fmt_cpu_state(cpu_state, &buf);
-        print_dbg(STR("Caught a system call: vector=%lx\n"), cpu_state->vector);
+        print_dbg(STR("Error: caught unexpected interrupt:\n"));
         print_dbg(str_from_buf(buf));
-        handle_syscall(cpu_state);
+        hlt();
     }
 
     print_dbg(STR("*** Interrupt handler end\n"));

@@ -86,6 +86,4 @@ void handle_interrupt(struct trap_frame *cpu_state);
 #define IRQ_VECTORS_END 48
 #define NUM_IRQ_VECTORS (IRQ_VECTORS_END - IRQ_VECTORS_BEG)
 
-#define IRQ_SYSCALL 0x80
-
 #endif // __TX_ISR_H__

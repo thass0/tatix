@@ -32,7 +32,7 @@ static struct addr_mapping kernel_dyn_addrs;
 
 // NOTE: Multiple virtual addresses can point to the same physical address. This function returns the
 // virtual address (in high memory) that's used by the kernel to access the physical address. There may
-// be processes that use a different virtual address to access the same physical page.
+// be mappings that use a different virtual address to access the same physical page.
 static vaddr_t phys_to_virt(paddr_t paddr)
 {
     if (!paddr)
@@ -391,7 +391,7 @@ struct result vas_memcpy(struct vas vas, struct vma vma, struct bytes src)
          vaddr += PAGE_SIZE, offset += PAGE_SIZE) {
         // There is some pointer laundering going on here. First, we walk the page table of the VAS (which is
         // not necessarily the active page table) to find the physical address of the current virtual address.
-        // This virtual address could be from the virtual memory region used by the process, not the kernel. But
+        // This virtual address could be from a different virtual memory area than the default kernel area. But
         // the physical address will be accessible from some kernel virtual address (because this is true for all
         // physical pages we allocate). Thus, by passing the physical address to `phys_to_virt`, we get a kernel
         // virtual address that can be used to write to the requested page in the VMA.

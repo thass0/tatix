@@ -12,11 +12,7 @@
 #include <tx/kvalloc.h>
 #include <tx/paging.h>
 #include <tx/print.h>
-#include <tx/proc.h>
 #include <tx/ramfs.h>
-
-extern char _init_proc_start[];
-extern char _init_proc_end[];
 
 extern char _rootfs_archive_start[];
 extern char _rootfs_archive_end[];
@@ -98,30 +94,6 @@ void print_hello_txt(struct ram_fs *rfs)
     print_str(str_from_buf(sbuf));
 }
 
-void proc_init(struct ram_fs *rfs)
-{
-    assert(rfs);
-
-    struct result_ram_fs_node node_res = ram_fs_open(rfs, STR("/bin/init"));
-    assert(!node_res.is_error);
-    struct ram_fs_node *node = result_ram_fs_node_checked(node_res);
-    struct str_buf sbuf = str_buf_from_kvalloc(0x2000);
-    struct result_sz read_res = ram_fs_read(node, &sbuf, 0);
-    assert(!read_res.is_error);
-
-    struct bytes elf = bytes_new(sbuf.dat, sbuf.len);
-    struct proc *proc = proc_create(elf);
-    assert(proc);
-    print_str(STR("Successfully created a process!!!\n"));
-
-    struct task_state *ts = tss_get_global();
-    assert(ts);
-    ts->rsp0 = (u64)proc->kstack + sizeof(union kernel_stack) - 8;
-
-    __asm__ volatile("mov %0, %%rsp" : : "r"(proc->context->rsp) : "memory");
-    __asm__ volatile("ret");
-}
-
 __noreturn void kernel_init(void)
 {
     gdt_init();
@@ -162,8 +134,6 @@ __noreturn void kernel_init(void)
     assert(!res.is_error);
 
     print_hello_txt(rfs);
-
-    proc_init(rfs);
 
     hlt();
 }

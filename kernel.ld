@@ -8,7 +8,7 @@ PHDRS
     text_seg PT_LOAD FLAGS(5); /* r-x */
     rodata_seg PT_LOAD FLAGS(4); /* r-- */
     data_seg PT_LOAD FLAGS(6); /* rw- */
-    extra_seg PT_LOAD FLAGS(4); /* r-- */
+    archive_seg PT_LOAD FLAGS(4); /* r-- */
 }
 
 SECTIONS
@@ -42,21 +42,13 @@ SECTIONS
             *(COMMON);
     } :data_seg
 
-    .init_proc :
-    {
-        /* Symbol for the C side to find that data */
-        _init_proc_start = .;
-        *(.init_proc*);
-        _init_proc_end = .;
-    } :extra_seg
-
     .rootfs_archive :
     {
         /* Symbol for the C side to find that data */
         _rootfs_archive_start = .;
         *(.rootfs_archive*);
         _rootfs_archive_end = .;
-    } :extra_seg
+    } :archive_seg
 
     /DISCARD/ :
     {
