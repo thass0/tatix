@@ -32,7 +32,7 @@ struct ram_fs_node {
     struct ram_fs *fs;
 };
 
-struct_result(ram_fs_node, struct ram_fs_node *)
+struct_result(ram_fs_node, struct ram_fs_node *);
 
 struct ram_fs {
     // TODO: A flexible file system would require the node_alloc and string_alloc to grow dynamically.

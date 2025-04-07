@@ -30,7 +30,7 @@ struct page_table {
 typedef ptr vaddr_t;
 typedef ptr paddr_t;
 
-struct_result(paddr_t, paddr_t)
+struct_result(paddr_t, paddr_t);
 
 struct vas {
     struct page_table pt;

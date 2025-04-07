@@ -39,13 +39,9 @@
         return r;                                                                          \
     }                                                                                      \
                                                                                            \
-    static inline struct result_##name result_##name##_from_error(struct result res)       \
-    {                                                                                      \
-        assert(res.is_error);                                                              \
-        return result_##name##_error(res.code);                                            \
-    }
+    typedef char REQUIRE_SEMICOLON_AFTER_MACRO_##name
 
-struct_result(sz, sz)
-struct_result(ptr, ptr)
+struct_result(sz, sz);
+struct_result(ptr, ptr);
 
 #endif // __TX_ERROR_H__

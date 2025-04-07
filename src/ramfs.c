@@ -21,7 +21,7 @@ struct path_name {
     bool is_absolute;
 };
 
-struct_result(path_name, struct path_name)
+struct_result(path_name, struct path_name);
 
 // Parse a path name into a `struct path_name`. Uses `arn` to allocate memory for the fields in
 // the returned `struct path_name`. Returns an error if the path is invalid or too long.
