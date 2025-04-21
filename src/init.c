@@ -6,6 +6,7 @@
 #include <tx/buddy.h>
 #include <tx/bytes.h>
 #include <tx/com.h>
+#include <tx/e1000.h>
 #include <tx/gdt.h>
 #include <tx/idt.h>
 #include <tx/isr.h>
@@ -134,6 +135,8 @@ __noreturn void kernel_init(void)
     assert(!res.is_error);
 
     print_hello_txt(rfs);
+
+    e1000_init();
 
     hlt();
 }
