@@ -45,15 +45,16 @@ struct vma {
     sz len;
 };
 
-// Specifies a linear mapping between a contiguous region of virtual and of physical memory.
-struct addr_mapping {
-    vaddr_t vbase;
-    paddr_t pbase;
-    sz len;
+enum addr_mapping_type {
+    ADDR_MAPPING_TYPE_CANONICAL,
+    ADDR_MAPPING_TYPE_ALIAS,
 };
 
-struct vaddr_range {
-    vaddr_t base;
+// Specifies a linear mapping between a contiguous region of virtual and of physical memory.
+struct addr_mapping {
+    enum addr_mapping_type type;
+    vaddr_t vbase;
+    paddr_t pbase;
     sz len;
 };
 
@@ -79,7 +80,7 @@ struct vaddr_range {
 // for page table pages. Not all of the `dyn_addrs.len` bytes will be used for page table pages,
 // so not all of them need to be mapped before calling this function.
 // Returns a contiguous region of virtual addresses that can be dynamically allocated by the kernel.
-struct vaddr_range paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn_addrs);
+struct vma paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn_addrs);
 
 // Return kernel virtual address to currently used page table
 struct page_table current_page_table(void);

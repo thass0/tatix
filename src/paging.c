@@ -1,4 +1,5 @@
 #include <config.h>
+#include <tx/assert.h>
 #include <tx/fmt.h>
 #include <tx/paging.h>
 #include <tx/pool.h>
@@ -8,10 +9,6 @@
 // dereference. Care should be taken when dealing with physical addresses and with
 // virtual addresses outside of kernel memory.
 
-///////////////////////////////////////////////////////////////////////////////
-// Initialization and virt-phys translations                                 //
-///////////////////////////////////////////////////////////////////////////////
-
 // TODO(sync): Protect global variables.
 
 // Allocator used to allocate page table pages. It returns virtual memory addresses.
@@ -20,15 +17,78 @@ static struct pool global_pt_page_alloc;
 // Root of global page table. Initialized by `paging_init`.
 static struct page_table global_page_table;
 
-// The below values for address translation are initialized by `paging_init`.
-// The offsets must be added to a physical address to get the corresponding virtual address.
-// This way of translating between physical and virtual addresses abuses the fact that we are
-// currently using linear mappings between virtual and physical addresses for kernel memory.
-// The offsets may be negative.
-static sz kernel_code_offset;
-static struct addr_mapping kernel_code_addrs;
-static sz kernel_dyn_offset;
-static struct addr_mapping kernel_dyn_addrs;
+///////////////////////////////////////////////////////////////////////////////
+// Virt-phys mappings                                                        //
+///////////////////////////////////////////////////////////////////////////////
+
+#define NUM_ADDR_MAPPINGS 32
+static struct addr_mapping global_addr_mappings[NUM_ADDR_MAPPINGS];
+static bool global_addr_mappings_used[NUM_ADDR_MAPPINGS];
+
+static inline bool intervals_overlap(sz a1, sz b1, sz a2, sz b2)
+{
+    return a1 < b2 && a2 < b1;
+}
+
+static struct addr_mapping *add_addr_mapping(enum addr_mapping_type type, vaddr_t vbase, paddr_t pbase, sz len)
+{
+    sz n_canonical = 0;
+    sz n_alias = 0;
+
+    // Make sure there are no conflicts.
+    for (i32 i = 0; i < NUM_ADDR_MAPPINGS; i++) {
+        if (global_addr_mappings_used[i]) {
+            struct addr_mapping *mapping = &global_addr_mappings[i];
+            // Two different virtual addresses are allowed to point to the same physical address, but there cannot be
+            // two different virt-to-phys mappings for the same virtual address. This means that we don't accept
+            // overlapping virtual address regions for any kind of address mapping.
+            assert(!intervals_overlap(vbase, vbase + len, mapping->vbase, mapping->vbase + mapping->len));
+
+            // For physical addresses, we just count how many overlapping canonical and alias mappings
+            // there are. See below for how these are used.
+            if (intervals_overlap(pbase, pbase + len, mapping->pbase, mapping->pbase + mapping->len)) {
+                switch (mapping->type) {
+                case ADDR_MAPPING_TYPE_CANONICAL:
+                    n_canonical++;
+                    break;
+                case ADDR_MAPPING_TYPE_ALIAS:
+                    n_alias++;
+                    break;
+                default:
+                    crash("Invalid mapping type");
+                }
+            }
+        }
+    }
+
+    // Paging allows multiple different virtual addresses to point to the same physical address. This means that
+    // by default there is no unique mapping from a given physical address to a corresponding virtual address. We
+    // address this by introducing two kinds of mappings: canonical mappings and alias mappings.
+    //
+    // Canonical mappings must be unique. There can only be one canonical mapping for any physical address. But if
+    // there is a canonical mapping for a physical address, an arbitrary number of alias mappings for the same physical
+    // address may also exist. In such a case, a physical address is translated to its virtual address by looking it
+    // up in the canonical mapping.
+    //
+    // If there is no canonical mapping, there can only by one alias mapping for any physical address to ensure
+    // uniqueness. In this case, a physical address is translated to its virtual address by looking it up in this
+    // unique alias mapping.
+    assert(n_canonical == 1 || (n_canonical == 0 && n_alias == 1) || (n_canonical == 0 && n_alias == 0));
+
+    // We now know the new mapping doesn't introduce any conflics. So let's create it!
+    for (i32 i = 0; i < NUM_ADDR_MAPPINGS; i++) {
+        if (!global_addr_mappings_used[i]) {
+            global_addr_mappings[i].type = type;
+            global_addr_mappings[i].vbase = vbase;
+            global_addr_mappings[i].pbase = pbase;
+            global_addr_mappings[i].len = len;
+            global_addr_mappings_used[i] = true;
+            return &global_addr_mappings[i];
+        }
+    }
+
+    crash("Ran out of free address mappings\n");
+}
 
 // NOTE: Multiple virtual addresses can point to the same physical address. This function returns the
 // virtual address (in high memory) that's used by the kernel to access the physical address. There may
@@ -37,11 +97,37 @@ static vaddr_t phys_to_virt(paddr_t paddr)
 {
     if (!paddr)
         return 0; // To not have to check for NULL before calling this function.
-    if (IN_RANGE(paddr, kernel_dyn_addrs.pbase, kernel_dyn_addrs.len))
-        return paddr + kernel_dyn_offset;
-    else if (IN_RANGE(paddr, kernel_code_addrs.pbase, kernel_code_addrs.len))
-        return paddr + kernel_code_offset;
-    print_dbg(STR("paddr=0x%lx\n"), paddr);
+
+    struct addr_mapping *canonical = NULL;
+    struct addr_mapping *alias = NULL;
+    sz n_canonical = 0;
+    sz n_alias = 0;
+
+    for (i32 i = 0; i < NUM_ADDR_MAPPINGS; i++) {
+        if (global_addr_mappings_used[i]) {
+            struct addr_mapping *mapping = &global_addr_mappings[i];
+            if (IN_RANGE(paddr, mapping->pbase, mapping->len)) {
+                if (mapping->type == ADDR_MAPPING_TYPE_CANONICAL) {
+                    canonical = mapping;
+                    n_canonical++;
+                } else {
+                    alias = mapping;
+                    n_alias++;
+                }
+            }
+        }
+    }
+
+    // Just check this invariant for safety.
+    assert(n_canonical == 1 || (n_canonical == 0 && n_alias == 1) || (n_canonical == 0 && n_alias == 0));
+
+    if (canonical)
+        return canonical->vbase + (paddr - canonical->pbase); // Use the unique canonical mapping.
+    else if (alias)
+        return alias->vbase +
+               (paddr - alias->pbase); // When there is no canonical mapping, the alias must be unique so we can use it.
+
+    print_dbg(STR("Failed to translate paddr=0x%lx to a virtual address\n"), paddr);
     crash("Invalid address");
 }
 
@@ -49,15 +135,35 @@ static paddr_t virt_to_phys(vaddr_t vaddr)
 {
     if (!vaddr)
         return 0; // To not have to check for NULL before calling this function.
-    if (IN_RANGE(vaddr, kernel_dyn_addrs.vbase, kernel_dyn_addrs.len))
-        return vaddr - kernel_dyn_offset;
-    else if (IN_RANGE(vaddr, kernel_code_addrs.vbase, kernel_code_addrs.len))
-        return vaddr - kernel_code_offset;
-    print_dbg(STR("vaddr=0x%lx\n"), vaddr);
+
+    struct addr_mapping *candidate = NULL;
+    sz n_candidates = 0;
+
+    for (i32 i = 0; i < NUM_ADDR_MAPPINGS; i++) {
+        if (global_addr_mappings_used[i]) {
+            struct addr_mapping *mapping = &global_addr_mappings[i];
+            if (IN_RANGE(vaddr, mapping->vbase, mapping->len)) {
+                candidate = mapping;
+                n_candidates++;
+            }
+        }
+    }
+
+    // Just check this invariant for safety.
+    assert(n_candidates <= 1);
+
+    if (candidate)
+        return candidate->pbase + (vaddr - candidate->vbase);
+
+    print_dbg(STR("Failed to translate vaddr=0x%lx to a physical address\n"), vaddr);
     crash("Invalid address");
 }
 
-struct vaddr_range paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn_addrs)
+///////////////////////////////////////////////////////////////////////////////
+// Initialization                                                            //
+///////////////////////////////////////////////////////////////////////////////
+
+struct vma paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn_addrs)
 {
     assert(PAGE_SIZE == 0x1000);
 
@@ -83,13 +189,8 @@ struct vaddr_range paging_init(struct addr_mapping code_addrs, struct addr_mappi
     // The translation constants must be set of before calling `pt_map` for the first time because
     // `pt_map` internally uses address translation.
 
-    // Code and data address translation constants
-    kernel_code_offset = code_addrs.vbase - code_addrs.pbase;
-    kernel_code_addrs = code_addrs;
-
-    // Dynamic memory address translation constants
-    kernel_dyn_offset = dyn_addrs.vbase - dyn_addrs.pbase;
-    kernel_dyn_addrs = dyn_addrs;
+    add_addr_mapping(ADDR_MAPPING_TYPE_CANONICAL, code_addrs.vbase, code_addrs.pbase, code_addrs.len);
+    add_addr_mapping(ADDR_MAPPING_TYPE_CANONICAL, dyn_addrs.vbase, dyn_addrs.pbase, dyn_addrs.len);
 
     // Code and data
     for (sz offset = 0; offset < code_addrs.len; offset += PAGE_SIZE)
@@ -103,7 +204,7 @@ struct vaddr_range paging_init(struct addr_mapping code_addrs, struct addr_mappi
 
     write_cr3(virt_to_phys((vaddr_t)global_page_table.pml4));
 
-    struct vaddr_range ret;
+    struct vma ret;
     ret.base = dyn_addrs.vbase + pt_bytes;
     ret.len = dyn_addrs.len - pt_bytes;
     return ret;
@@ -308,6 +409,8 @@ struct result pt_fmt(struct page_table page_table, struct str_buf *buf, i16 dept
     assert(depth <= 3);
     return _pt_fmt(page_table.pml4, buf, 0, depth, 0);
 }
+
+// TODO: Add facilities to allocate contiguous mappings with addr_mappings.
 
 ////////////////////////////////////////////////////////////////////////////////
 // Managing VMAs (virtual memory areas)                                       //
