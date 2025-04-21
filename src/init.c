@@ -113,10 +113,10 @@ __noreturn void kernel_init(void)
     dyn_addrs.pbase = KERN_DYN_PADDR;
     dyn_addrs.len = KERN_DYN_LEN;
 
-    struct vma dyn = paging_init(code_addrs, dyn_addrs);
+    struct bytes dyn = paging_init(code_addrs, dyn_addrs);
 
     // Initialize the kernel virtual memory allocator.
-    struct result res = kvalloc_init(bytes_new((void *)dyn.base, dyn.len));
+    struct result res = kvalloc_init(dyn);
     assert(!res.is_error);
 
     ram_fs_selftest();
