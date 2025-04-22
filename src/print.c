@@ -47,6 +47,7 @@ struct result __print_dbg(struct str basename, sz line, struct str funcname, str
     } else {
         print_str(STR("ERROR: print_dbg failed to format debug message, source code location is: "));
         print_str(str_from_buf(buf));
+        print_str(STR("\n"));
         return res;
     }
     res = print_str(str_from_buf(buf));
