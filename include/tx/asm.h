@@ -15,6 +15,11 @@ static inline void outb(u16 port, u8 val)
     __asm__ volatile("outb %b0, %w1" : : "a"(val), "Nd"(port) : "memory");
 }
 
+static inline void outw(u16 port, u16 val)
+{
+    __asm__ volatile("outw %w0, %w1" : : "a"(val), "Nd"(port) : "memory");
+}
+
 static inline void outl(u16 port, u32 val)
 {
     __asm__ volatile("outl %0, %w1" : : "a"(val), "Nd"(port) : "memory");

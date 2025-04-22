@@ -69,6 +69,7 @@ static inline struct result result_ok(void)
 #define EIO 5
 #define ENOMEM 12
 #define EEXIST 17
+#define ENODEV 19
 #define ENOTDIR 20
 #define EINVAL 22
 #define ENAMETOOLONG 36

@@ -43,5 +43,8 @@
 
 struct_result(sz, sz);
 struct_result(ptr, ptr);
+struct_result(u32, u32);
+struct_result(u16, u16);
+struct_result(u8, u8);
 
 #endif // __TX_ERROR_H__
