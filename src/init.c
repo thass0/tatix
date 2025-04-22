@@ -6,12 +6,12 @@
 #include <tx/buddy.h>
 #include <tx/bytes.h>
 #include <tx/com.h>
-#include <tx/e1000.h>
 #include <tx/gdt.h>
 #include <tx/idt.h>
 #include <tx/isr.h>
 #include <tx/kvalloc.h>
 #include <tx/paging.h>
+#include <tx/pci.h>
 #include <tx/print.h>
 #include <tx/ramfs.h>
 
@@ -136,7 +136,8 @@ __noreturn void kernel_init(void)
 
     print_hello_txt(rfs);
 
-    e1000_init();
+    res = pci_probe();
+    assert(!res.is_error);
 
     hlt();
 }

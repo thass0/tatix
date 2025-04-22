@@ -42,6 +42,14 @@ SECTIONS
             *(COMMON);
     } :data_seg
 
+    . = ALIGN(8); /* This assumes that `struct pci_device_driver` is aligned to an 8-byte boundary. */
+    .pci_device_driver_list :
+    {
+        _pci_device_driver_list_start = .;
+        KEEP(*(SORT_BY_NAME(.pci_device_driver_*)));
+        _pci_device_driver_list_end = .;
+    } :data_seg
+
     .rootfs_archive :
     {
         /* Symbol for the C side to find that data */
