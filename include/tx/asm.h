@@ -91,4 +91,48 @@ static inline u64 read_cr3(void)
     return cr3;
 }
 
+static inline u64 mmio_read64(u64 addr)
+{
+    u64 val;
+    __asm__ volatile("mfence; movq (%1), %0" : "=r"(val) : "r"(addr) : "memory");
+    return val;
+}
+static inline void mmio_write64(u64 addr, u64 val)
+{
+    __asm__ volatile("movq %1, (%0); mfence" : : "r"(addr), "r"(val) : "memory");
+}
+
+static inline u32 mmio_read32(u64 addr)
+{
+    u32 val;
+    __asm__ volatile("mfence; movl (%1), %0" : "=r"(val) : "r"(addr) : "memory");
+    return val;
+}
+static inline void mmio_write32(u64 addr, u32 val)
+{
+    __asm__ volatile("movl %1, (%0); mfence" : : "r"(addr), "r"(val) : "memory");
+}
+
+static inline u16 mmio_read16(u64 addr)
+{
+    u16 val;
+    __asm__ volatile("mfence; movw (%1), %0" : "=r"(val) : "r"(addr) : "memory");
+    return val;
+}
+static inline void mmio_write16(u64 addr, u16 val)
+{
+    __asm__ volatile("movw %1, (%0); mfence" : : "r"(addr), "r"(val) : "memory");
+}
+
+static inline u8 mmio_read8(u64 addr)
+{
+    u8 val;
+    __asm__ volatile("mfence; movb (%1), %0" : "=r"(val) : "r"(addr) : "memory");
+    return val;
+}
+static inline void mmio_write8(u64 addr, u8 val)
+{
+    __asm__ volatile("movb %1, (%0); mfence" : : "r"(addr), "r"(val) : "memory");
+}
+
 #endif // __TXT_ASM_H__
