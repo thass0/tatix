@@ -9,6 +9,8 @@
 #define PT_FLAG_P BIT(0)
 #define PT_FLAG_RW BIT(1)
 #define PT_FLAG_US BIT(2)
+#define PT_FLAG_PWT BIT(3)
+#define PT_FLAG_PCD BIT(4)
 
 #define PML4_BIT_BASE 39LU
 #define PDPT_BIT_BASE 30LU
@@ -62,9 +64,28 @@ enum addr_mapping_type {
     ADDR_MAPPING_TYPE_ALIAS,
 };
 
+// These are the default memory types with respect to cache control. In a page table entry, the PWT and
+// PCD bits control which memory type is used to access the memory pointed to by the page table entry.
+// The PAT can also contribute to the memory type although, by default, it doesn't have any effect.
+//
+// See Section 49 and Tables 12-11 and 12-12 from the IA-32 Software Developers Manual Volume 3.
+//
+// NOTE: Modern x86_64 processors also have Memory Type Range Registers (MTRRs) for associating memory types with
+// ranges of physical memory. The operating system is free, though, to modify the memory map only with page-level
+// cacheability attributes (see Section 12.11).
+enum addr_mapping_memory_type {
+    ADDR_MAPPING_MEMORY_DEFAULT = 0, // By default, the PWT and PCD bits are the same as for WB.
+    ADDR_MAPPING_MEMORY_WRITE_BACK = 0, // "WB"
+    ADDR_MAPPING_MEMORY_WRITE_THROUGH, // "WT"
+    ADDR_MAPPING_MEMORY_UNCACHEABLE, // "UC-"
+    ADDR_MAPPING_MEMORY_STRONG_UNCACHEABLE, // "UC"
+};
+
 // Specifies a linear mapping between a contiguous region of virtual and of physical memory.
 struct addr_mapping {
     enum addr_mapping_type type;
+    enum addr_mapping_memory_type mem_type;
+    u16 perms; // This just stores the `P_FLAG_*` values corresponding to the requested permissions.
     vaddr_t vbase;
     paddr_t pbase;
     sz len;

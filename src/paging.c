@@ -1,3 +1,4 @@
+#include <tx/asm.h>
 #include <tx/assert.h>
 #include <tx/fmt.h>
 #include <tx/paging.h>
@@ -167,14 +168,30 @@ static paddr_t virt_to_phys(vaddr_t vaddr)
 // Creating mappings and walking page tables                                 //
 ///////////////////////////////////////////////////////////////////////////////
 
+static inline u16 mem_type_flags(enum addr_mapping_memory_type mt)
+{
+    // See Tables 12-11 and 12-12 of the IA-32 Software Developers Manual Volume 3.
+    switch (mt) {
+    case ADDR_MAPPING_MEMORY_WRITE_BACK:
+        return 0;
+    case ADDR_MAPPING_MEMORY_WRITE_THROUGH:
+        return PT_FLAG_PWT;
+    case ADDR_MAPPING_MEMORY_UNCACHEABLE:
+        return PT_FLAG_PCD;
+    case ADDR_MAPPING_MEMORY_STRONG_UNCACHEABLE:
+        return PT_FLAG_PCD | PT_FLAG_PWT;
+    }
+    crash("Invalid memory type\n");
+}
+
 static inline paddr_t paddr_from_pte(struct pte pte)
 {
     return pte.bits & ~(BIT(11) - 1);
 }
 
-static inline struct pte pte_from_paddr(paddr_t ptr, int flags)
+static inline struct pte pte_from_paddr(paddr_t ptr, u16 perms, enum addr_mapping_memory_type mem_type)
 {
-    return (struct pte){ (ptr & ~(BIT(11) - 1)) | flags };
+    return (struct pte){ (ptr & ~(BIT(11) - 1)) | perms | mem_type_flags(mem_type) | PT_FLAG_P };
 }
 
 static void pt_insert(struct pt *pt, sz idx, struct pte pte)
@@ -198,7 +215,7 @@ static struct pt *pt_get(struct pt *pt, sz idx)
     return NULL;
 }
 
-static struct pt *pt_get_or_alloc(struct pt *pt, sz idx, int flags)
+static struct pt *pt_get_or_alloc(struct pt *pt, sz idx, u16 perms)
 {
     struct pt *ret;
 
@@ -210,13 +227,13 @@ static struct pt *pt_get_or_alloc(struct pt *pt, sz idx, int flags)
             return NULL;
         paddr_t paddr_ret = virt_to_phys((vaddr_t)ret);
         print_dbg(STR("Allocated page table page: vaddr=0x%lx paddr=0x%lx\n"), ret, paddr_ret);
-        pt_insert(pt, idx, pte_from_paddr(paddr_ret, flags));
+        pt_insert(pt, idx, pte_from_paddr(paddr_ret, perms, ADDR_MAPPING_MEMORY_DEFAULT));
     } else {
         struct pte pte = pt->entries[idx]; // Safe because `pt_get` succeeded.
         // Update the existing PTE if the new flags are _more_ permissive than before.
-        if ((flags & PT_FLAG_US) && !(pte.bits & PT_FLAG_US))
+        if ((perms & PT_FLAG_US) && !(pte.bits & PT_FLAG_US))
             pte.bits |= PT_FLAG_US;
-        if ((flags & PT_FLAG_RW) && !(pte.bits & PT_FLAG_RW))
+        if ((perms & PT_FLAG_RW) && !(pte.bits & PT_FLAG_RW))
             pte.bits |= PT_FLAG_RW;
         pt_insert(pt, idx, pte);
     }
@@ -224,20 +241,24 @@ static struct pt *pt_get_or_alloc(struct pt *pt, sz idx, int flags)
     return ret;
 }
 
-static struct result pt_map(struct page_table page_table, vaddr_t vaddr, paddr_t paddr, int flags)
+static struct result pt_map(struct page_table page_table, vaddr_t vaddr, paddr_t paddr, u16 perms,
+                            enum addr_mapping_memory_type mem_type)
 {
-    struct pt *pdpt = pt_get_or_alloc(page_table.pml4, PT_IDX(vaddr, PML4_BIT_BASE), flags);
+    struct pt *pdpt = pt_get_or_alloc(page_table.pml4, PT_IDX(vaddr, PML4_BIT_BASE), perms);
     if (!pdpt)
         return result_error(ENOMEM);
-    struct pt *pd = pt_get_or_alloc(pdpt, PT_IDX(vaddr, PDPT_BIT_BASE), flags);
+    struct pt *pd = pt_get_or_alloc(pdpt, PT_IDX(vaddr, PDPT_BIT_BASE), perms);
     if (!pd)
         return result_error(ENOMEM);
-    struct pt *pt = pt_get_or_alloc(pd, PT_IDX(vaddr, PD_BIT_BASE), flags);
+    struct pt *pt = pt_get_or_alloc(pd, PT_IDX(vaddr, PD_BIT_BASE), perms);
     if (!pd)
         return result_error(ENOMEM);
     sz pt_idx = PT_IDX(vaddr, PT_BIT_BASE);
     assert(0 <= pt_idx && pt_idx < countof(pt->entries));
-    pt->entries[pt_idx] = pte_from_paddr(paddr, flags);
+    // NOTE: The reason we handle the memory type separate from the flags is that the flags are applied to
+    // all page table pages along the way while the memory type is only applied to the final mapping. So the
+    // flags are more like permissions.
+    pt->entries[pt_idx] = pte_from_paddr(paddr, perms, mem_type);
     return result_ok();
 }
 
@@ -348,6 +369,13 @@ __unused static struct result pt_fmt(struct page_table page_table, struct str_bu
 // Outward-facing interface                                                  //
 ///////////////////////////////////////////////////////////////////////////////
 
+static bool cpu_has_pat(void)
+{
+    u32 eax, ebx, ecx, edx;
+    cpuid(1, 0, &eax, &ebx, &ecx, &edx);
+    return (edx & BIT(16)) != 0;
+}
+
 struct bytes paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn_addrs)
 {
     assert(PAGE_SIZE == 0x1000);
@@ -367,6 +395,8 @@ struct bytes paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn
     print_dbg(STR("Paging with n_pages=%ld n_pts=%ld n_pds=%ld n_pdpts=%ld n_pml4s=%ld pt_bytes=0x%lx\n"), n_pages,
               n_pts, n_pds, n_pdpts, n_pml4s, pt_bytes);
 
+    assert(cpu_has_pat()); // The cacheability controls implementation depends on this feature.
+
     global_pt_page_alloc = pool_new(bytes_new((void *)dyn_addrs.vbase, pt_bytes), PAGE_SIZE);
     global_page_table.pml4 = pool_alloc(&global_pt_page_alloc);
     assert(global_page_table.pml4);
@@ -381,12 +411,14 @@ struct bytes paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn
 
     // Code and data
     for (sz offset = 0; offset < code_addrs.len; offset += PAGE_SIZE)
-        assert(!pt_map(global_page_table, code_addrs.vbase + offset, code_addrs.pbase + offset, PT_FLAG_P | PT_FLAG_RW)
+        assert(!pt_map(global_page_table, code_addrs.vbase + offset, code_addrs.pbase + offset, PT_FLAG_RW,
+                       ADDR_MAPPING_MEMORY_DEFAULT)
                     .is_error);
 
     // Dynamic memory
     for (sz offset = 0; offset < dyn_addrs.len; offset += PAGE_SIZE)
-        assert(!pt_map(global_page_table, dyn_addrs.vbase + offset, dyn_addrs.pbase + offset, PT_FLAG_P | PT_FLAG_RW)
+        assert(!pt_map(global_page_table, dyn_addrs.vbase + offset, dyn_addrs.pbase + offset, PT_FLAG_RW,
+                       ADDR_MAPPING_MEMORY_DEFAULT)
                     .is_error);
 
     write_cr3(virt_to_phys((vaddr_t)global_page_table.pml4));
@@ -406,7 +438,7 @@ struct result paging_map_region(struct addr_mapping addrs)
         return res;
 
     for (sz offset = 0; offset < addrs.len; offset += PAGE_SIZE) {
-        res = pt_map(global_page_table, addrs.vbase + offset, addrs.pbase + offset, PT_FLAG_P | PT_FLAG_RW);
+        res = pt_map(global_page_table, addrs.vbase + offset, addrs.pbase + offset, addrs.perms, addrs.mem_type);
         if (res.is_error) {
             // Call unmap on all pages in case any of them have been mapped. Nothing bad will happen
             // if we call unmap on a page that has never been mapped.

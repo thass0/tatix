@@ -10,6 +10,16 @@
         __builtin_unreachable();     \
     } while (0)
 
+static inline void cpuid(u32 leaf /* eax */, u32 subleaf /* ecx */, u32 *eax, u32 *ebx, u32 *ecx, u32 *edx)
+{
+    u32 a, b, c, d;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(leaf), "c"(subleaf));
+    *eax = a;
+    *ebx = b;
+    *ecx = c;
+    *edx = d;
+}
+
 static inline void outb(u16 port, u8 val)
 {
     __asm__ volatile("outb %b0, %w1" : : "a"(val), "Nd"(port) : "memory");
