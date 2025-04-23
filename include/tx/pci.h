@@ -193,7 +193,7 @@ struct result pci_probe(void);
 #define PCI_REGISTER_DRIVER(_name, _n_ids, _ids, _probe)                                                           \
     __used __section(                                                                                              \
         ".pci_device_driver_list_" STRINGIFY(_name)) static struct pci_device_driver pci_device_driver_##_name = { \
-        .name = STR(STRINGIFY(_name)),                                                                             \
+        .name = STR_STATIC(STRINGIFY(_name)),                                                                      \
         .n_ids = _n_ids,                                                                                           \
         .ids = _ids,                                                                                               \
         .probe = _probe,                                                                                           \

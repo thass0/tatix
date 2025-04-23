@@ -25,6 +25,11 @@ struct str_buf {
         .dat = (s), .len = lengthof(s) \
     }
 
+// NOTE: Compound literals (as used in `STR()`) can't be used as initializers for static variables (well, compilers
+// are generally fine with it, but they complain). The issue is that a compound literals are not considered constant
+// expressions. So use this any time using `STR()` gives you warnings.
+#define STR_STATIC(s) { .dat = (s), .len = lengthof(s) }
+
 #define STR_IS_NULL(s) ((s).dat == NULL)
 
 static inline struct str_buf str_buf_new(char *dat, sz len, sz cap)
