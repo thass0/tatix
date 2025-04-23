@@ -134,7 +134,6 @@ struct pci_device {
     struct pci_bar bars[PCI_MAX_BARS];
 
     struct pci_device_driver *driver;
-    void *driver_data;
 };
 
 struct pci_device_id {
