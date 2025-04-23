@@ -101,8 +101,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 enum pci_bar_type {
-    PCI_BAR_TYPE_MEM64,
-    PCI_BAR_TYPE_MEM32,
+    PCI_BAR_TYPE_MEM,
     PCI_BAR_TYPE_IO,
 };
 

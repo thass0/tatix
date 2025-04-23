@@ -203,7 +203,7 @@ static struct result pci_get_resource_info(u8 bus, u8 device, u8 func, struct pc
             // NOTE: We check memory space BAR types 0 (32 bits) and 2 (64 bits) here. In old PCI versions,
             // type 1 was used for a 16-bit wide base register, but this type has since been reserved.
             if ((raw_bars[i] & PCI_MASK_BAR_MEM_TYPE) == 0) {
-                (*bars)[i].type = PCI_BAR_TYPE_MEM32;
+                (*bars)[i].type = PCI_BAR_TYPE_MEM;
                 (*bars)[i].base = raw_bars[i] & PCI_MASK_BAR_MEM_ADDR;
                 (*bars)[i].flags = (raw_bars[i] & PCI_MASK_BAR_MEM_PREFETCHABLE) ? PCI_BAR_FLAG_PREFETCHABLE : 0;
 
@@ -217,7 +217,7 @@ static struct result pci_get_resource_info(u8 bus, u8 device, u8 func, struct pc
                 if (i + 1 == PCI_MAX_BARS)
                     return result_error(EINVAL); // This is a 64-bit entry. It requires that there is another BAR.
 
-                (*bars)[i].type = PCI_BAR_TYPE_MEM64;
+                (*bars)[i].type = PCI_BAR_TYPE_MEM;
                 (*bars)[i].base = (u64)(raw_bars[i] & PCI_MASK_BAR_MEM_ADDR) + ((u64)raw_bars[i + 1] << 32);
                 (*bars)[i].flags = (raw_bars[i] & PCI_MASK_BAR_MEM_PREFETCHABLE) ? PCI_BAR_FLAG_PREFETCHABLE : 0;
 
