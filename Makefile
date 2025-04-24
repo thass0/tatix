@@ -98,7 +98,10 @@ $(BUILD_DIR):
 	mkdir $@
 
 boot: $(DISK_IMAGE)
-	qemu-system-x86_64 -m 1G -cpu max -display none -serial stdio -no-reboot -drive file=$<,format=raw,index=0,media=disk $(QEMU_DEBUG_FLAGS)
+	@rm -f .packets.pcap
+	qemu-system-x86_64 -m 1G -cpu max -display none -serial stdio -no-reboot -drive file=$<,format=raw,index=0,media=disk \
+		-netdev user,id=net0 -device e1000,netdev=net0 -object filter-dump,id=dump0,netdev=net0,file=.packets.pcap \
+		$(QEMU_DEBUG_FLAGS)
 
 fmt:
 	clang-format -i --style=file $(SRCS) $(wildcard include/*.h)

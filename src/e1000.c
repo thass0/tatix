@@ -25,6 +25,15 @@
 #define E1000_OFFSET_TDH 0x3810
 #define E1000_OFFSET_TDT 0x3818
 
+#define E1000_TX_DESC_SIZE 16
+
+#define E1000_TX_DESC_STATUS_DD BIT(0)
+
+#define E1000_TX_DESC_CMD_EOP BIT(0)
+#define E1000_TX_DESC_CMD_IFCS BIT(1)
+#define E1000_TX_DESC_CMD_RS BIT(3)
+#define E1000_TX_DESC_CMD_RPS BIT(4)
+
 #define E1000_VENDOR_ID 0x8086
 #define E1000_DEVICE_ID 0x100E
 
@@ -34,26 +43,27 @@ static struct pci_device_id supported_ids[E1000_NUM_SUPPORTED_IDS] = {
     { E1000_VENDOR_ID, E1000_DEVICE_ID },
 };
 
-struct e1000_device {
-    u64 mmio_base;
-    u64 mmio_len;
-    bool eeprom_normal_access;
-    u8 mac_addr[6];
-    struct addr_mapping tx_queue;
-    sz tx_tail;
-};
-
-struct __aligned(16) e1000_legacy_tx_desc {
+struct __aligned(E1000_TX_DESC_SIZE) e1000_legacy_tx_desc {
     u64 base_addr;
     u16 length;
     u8 cso;
-    u8 cmd; // Bit 5 (DEXT) of this field must be 0 to disable the extended format.
+    u8 cmd; // Bit 5 (DEXT) of this field must be 0 to disable the extended format and enable the legacy format.
     u8 status; // Upper four bits are reserved to 0.
     u8 css;
     u16 special;
 } __packed;
 
-static_assert(sizeof(struct e1000_legacy_tx_desc) == 16);
+static_assert(sizeof(struct e1000_legacy_tx_desc) == E1000_TX_DESC_SIZE);
+
+struct e1000_device {
+    u64 mmio_base;
+    u64 mmio_len;
+    bool eeprom_normal_access;
+    u8 mac_addr[6];
+    struct e1000_legacy_tx_desc *tx_queue;
+    sz tx_queue_n_desc;
+    sz tx_tail;
+};
 
 static struct result e1000_init_mmio(struct e1000_device *dev, enum addr_mapping_memory_type mem_type)
 {
@@ -147,34 +157,36 @@ static struct result e1000_init_tx(struct e1000_device *dev)
 {
     // Reference: Section 14.5
 
-    assert(alignof(struct e1000_legacy_tx_desc) == 16);
-    sz tx_mem_size = 32 * sizeof(struct e1000_legacy_tx_desc);
-    ptr tx_mem = dev->mmio_base + dev->mmio_len;
+    static_assert(alignof(struct e1000_legacy_tx_desc) == E1000_TX_DESC_SIZE);
+    sz tx_queue_n_desc = 32;
+    sz tx_mem_size = tx_queue_n_desc * sizeof(struct e1000_legacy_tx_desc);
 
-    // The TX queue is identity mapped in memory right after the identity mapping for the 8254x MMIO region.
-    struct addr_mapping tx_queue;
-    tx_queue.type = ADDR_MAPPING_TYPE_CANONICAL;
-    tx_queue.mem_type = ADDR_MAPPING_MEMORY_STRONG_UNCACHEABLE;
-    tx_queue.perms = PT_FLAG_RW;
-    tx_queue.vbase = dev->mmio_base + dev->mmio_len;
-    tx_queue.pbase = tx_queue.vbase;
-    tx_queue.len = tx_mem_size;
+    struct e1000_legacy_tx_desc *tx_queue = kvalloc_alloc(tx_mem_size, alignof(*tx_queue));
+    if (!tx_queue)
+        return result_error(ENOMEM);
 
-    struct result res = paging_map_region(tx_queue);
-    if (res.is_error)
-        return res;
-
-    memset(bytes_new((void *)tx_mem, tx_mem_size), 0);
+    // Initialize all the descriptors to zero except for the DD bit in the status field. This field
+    // must be set to so that the transmit function knows that the descriptors can all be used.
+    memset(bytes_new(tx_queue, tx_mem_size), 0);
+    for (sz i = 0; i < tx_queue_n_desc; i++)
+        tx_queue[i].status |= E1000_TX_DESC_STATUS_DD;
 
     dev->tx_queue = tx_queue;
+    dev->tx_queue_n_desc = tx_queue_n_desc;
     dev->tx_tail = 0;
 
-    assert(IS_ALIGNED((ptr)tx_mem, 16));
-    assert(IS_ALIGNED(tx_mem_size, 128));
+    static_assert(8 * E1000_TX_DESC_SIZE == 128);
+    assert(IS_ALIGNED(tx_mem_size, 8 * E1000_TX_DESC_SIZE));
     assert(tx_mem_size <= U32_MAX);
 
-    mmio_write32(dev->mmio_base + E1000_OFFSET_TDBAL, (u64)tx_mem & 0xffffffff);
-    mmio_write32(dev->mmio_base + E1000_OFFSET_TDBAH, ((u64)tx_mem >> 32) & 0xffffffff);
+    // The 8254x needs a physical address because it will use it for DMA.
+    struct result_paddr_t paddr_tx_queue_res = virt_to_phys((vaddr_t)tx_queue);
+    if (paddr_tx_queue_res.is_error)
+        return result_error(paddr_tx_queue_res.code);
+    paddr_t paddr_tx_queue = result_paddr_t_checked(paddr_tx_queue_res);
+
+    mmio_write32(dev->mmio_base + E1000_OFFSET_TDBAL, (u64)paddr_tx_queue & 0xffffffff);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_TDBAH, ((u64)paddr_tx_queue >> 32) & 0xffffffff);
     mmio_write32(dev->mmio_base + E1000_OFFSET_TDLEN, tx_mem_size);
 
     mmio_write64(dev->mmio_base + E1000_OFFSET_TDH, 0);
@@ -193,11 +205,52 @@ static struct result e1000_init_tx(struct e1000_device *dev)
     return result_ok();
 }
 
+static inline sz e1000_advance_tx_tail(struct e1000_device *dev)
+{
+    sz orig_tail = dev->tx_tail;
+    dev->tx_tail = (dev->tx_tail + 1) % dev->tx_queue_n_desc;
+    assert(dev->tx_tail <= U16_MAX);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_TDT, dev->tx_tail);
+    return orig_tail;
+}
+
+static struct result e1000_tx_poll(struct e1000_device *dev, struct bytes pkt)
+{
+    struct e1000_legacy_tx_desc *tx_desc = &dev->tx_queue[dev->tx_tail];
+
+    // If there is space in the queue, the tail points to a descriptor with the DD flag set, because the 8254x
+    // is done with processing this descriptor. Otherwise, the queue is full and we have to wait.
+    if (!(tx_desc->status & E1000_TX_DESC_STATUS_DD))
+        return result_error(ENOBUFS);
+
+    if (pkt.len > U16_MAX)
+        return result_error(EINVAL);
+
+    // The 8254x needs a physical address because it will use the base address for DMA.
+    struct result_paddr_t paddr_base_res = virt_to_phys((vaddr_t)pkt.dat);
+    if (paddr_base_res.is_error)
+        return result_error(paddr_base_res.code);
+    paddr_t paddr_base = result_paddr_t_checked(paddr_base_res);
+
+    memset(bytes_new(tx_desc, sizeof(*tx_desc)), 0);
+    tx_desc->base_addr = (u64)paddr_base;
+    tx_desc->length = (u16)pkt.len;
+    tx_desc->cmd |= E1000_TX_DESC_CMD_EOP | E1000_TX_DESC_CMD_RS;
+
+    sz orig_tail = e1000_advance_tx_tail(dev);
+
+    // NOTE: This only works when CMD.RS is set.
+    while (!(dev->tx_queue[orig_tail].status & E1000_TX_DESC_STATUS_DD))
+        ; // TODO: Sleep here
+
+    print_dbg(STR("Transmitted packet: addr=0x%lx, len=%ld\n"), pkt.dat, pkt.len);
+
+    return result_ok();
+}
+
 static struct result e1000_probe(struct pci_device *pci)
 {
     assert(pci);
-
-    print_dbg(STR("Hello, I'm the e1000 driver!\n"));
 
     struct e1000_device *dev = kvalloc_alloc(sizeof(struct e1000_device), alignof(struct e1000_device));
     if (!dev)
@@ -223,7 +276,20 @@ static struct result e1000_probe(struct pci_device *pci)
     res = e1000_init_tx(dev);
     assert(!res.is_error);
 
+    // Transmit a test packet.
+    sz pkt_size = 40;
+    u32 *pkt = kvalloc_alloc(pkt_size, alignof(*pkt));
+    assert(pkt);
+    for (i32 i = 0; i < pkt_size / 4; i++)
+        pkt[i] = 0xefbeadde;
+
+    res = e1000_tx_poll(dev, bytes_new(pkt, pkt_size));
+    assert(!res.is_error);
+
+    kvalloc_free(pkt, pkt_size);
+
     return result_ok();
 }
 
-PCI_REGISTER_DRIVER(e1000, E1000_NUM_SUPPORTED_IDS, supported_ids, e1000_probe);
+PCI_REGISTER_DRIVER(e1000, E1000_NUM_SUPPORTED_IDS, supported_ids,
+                    PCI_DEVICE_DRIVER_CAP_DMA | PCI_DEVICE_DRIVER_CAP_MEM, e1000_probe);

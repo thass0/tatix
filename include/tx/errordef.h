@@ -73,5 +73,6 @@ static inline struct result result_ok(void)
 #define ENOTDIR 20
 #define EINVAL 22
 #define ENAMETOOLONG 36
+#define ENOBUFS 105
 
 #endif // __TX_ERRORDEF_H__
