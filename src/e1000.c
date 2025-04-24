@@ -9,8 +9,9 @@
 #include <tx/print.h>
 
 // The 8254x PCI/PCI-X Family of Gigabit Ethernet Controllers Software Developer’s Manual (2009 version) was used as a
-// source for this driver References to sections are with respect to this document. It could be found here at the time
-// of writing: https://www.intel.com/content/dam/doc/manual/pci-pci-x-family-gbe-controllers-software-dev-manual.pdf
+// source for this driver References to sections are with respect to this document. A copy of the manual used can be
+// found in the manuals/ directory. It could also be found here at the time of writing:
+// https://www.intel.com/content/dam/doc/manual/pci-pci-x-family-gbe-controllers-software-dev-manual.pdf
 
 #define E1000_OFFSET_EECD 0x10
 #define E1000_OFFSET_EERD 0x14
