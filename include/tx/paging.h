@@ -45,6 +45,7 @@ struct page_table {
 typedef ptr vaddr_t;
 typedef ptr paddr_t;
 
+struct_result(vaddr_t, vaddr_t);
 struct_result(paddr_t, paddr_t);
 
 // Paging allows multiple different virtual addresses to point to the same physical address. This means that
@@ -100,5 +101,10 @@ struct bytes paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn
 
 struct result paging_map_region(struct addr_mapping addrs);
 struct result paging_unmap_region(struct addr_mapping addrs);
+
+// Translate between physical and virtual addresses. The translations are based on the address mappings
+// that were created by calls to `paging_init` and/or `paging_map_region` and `paging_unmap_region`.
+struct result_paddr_t virt_to_phys(vaddr_t vaddr);
+struct result_vaddr_t phys_to_virt(paddr_t paddr);
 
 #endif // __TX_PAGING_H__

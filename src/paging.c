@@ -98,10 +98,10 @@ static struct result remove_addr_mapping(struct addr_mapping mapping)
 // NOTE: Multiple virtual addresses can point to the same physical address. This function returns the
 // virtual address (in high memory) that's used by the kernel to access the physical address. There may
 // be mappings that use a different virtual address to access the same physical page.
-static vaddr_t phys_to_virt(paddr_t paddr)
+struct result_vaddr_t phys_to_virt(paddr_t paddr)
 {
     if (!paddr)
-        return 0; // To not have to check for NULL before calling this function.
+        return result_vaddr_t_ok(0); // To not have to check for NULL before calling this function.
 
     struct addr_mapping *canonical = NULL;
     struct addr_mapping *alias = NULL;
@@ -127,19 +127,19 @@ static vaddr_t phys_to_virt(paddr_t paddr)
     assert(n_canonical == 1 || (n_canonical == 0 && n_alias == 1) || (n_canonical == 0 && n_alias == 0));
 
     if (canonical)
-        return canonical->vbase + (paddr - canonical->pbase); // Use the unique canonical mapping.
+        return result_vaddr_t_ok(canonical->vbase + (paddr - canonical->pbase)); // Use the unique canonical mapping.
     else if (alias)
-        return alias->vbase +
-               (paddr - alias->pbase); // When there is no canonical mapping, the alias must be unique so we can use it.
+        return result_vaddr_t_ok(
+            alias->vbase +
+            (paddr - alias->pbase)); // When there is no canonical mapping, the alias must be unique so we can use it.
 
-    print_dbg(STR("Failed to translate paddr=0x%lx to a virtual address\n"), paddr);
-    crash("Invalid address");
+    return result_vaddr_t_error(EINVAL);
 }
 
-static paddr_t virt_to_phys(vaddr_t vaddr)
+struct result_paddr_t virt_to_phys(vaddr_t vaddr)
 {
     if (!vaddr)
-        return 0; // To not have to check for NULL before calling this function.
+        return result_paddr_t_ok(0); // To not have to check for NULL before calling this function.
 
     struct addr_mapping *candidate = NULL;
     sz n_candidates = 0;
@@ -158,10 +158,9 @@ static paddr_t virt_to_phys(vaddr_t vaddr)
     assert(n_candidates <= 1);
 
     if (candidate)
-        return candidate->pbase + (vaddr - candidate->vbase);
+        return result_paddr_t_ok(candidate->pbase + (vaddr - candidate->vbase));
 
-    print_dbg(STR("Failed to translate vaddr=0x%lx to a physical address\n"), vaddr);
-    crash("Invalid address");
+    return result_paddr_t_error(EINVAL);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -210,7 +209,7 @@ static struct pt *pt_get(struct pt *pt, sz idx)
 
     if (pt->entries[idx].bits & PT_FLAG_P) {
         paddr_t paddr = paddr_from_pte(pt->entries[idx]);
-        return (struct pt *)phys_to_virt(paddr);
+        return (struct pt *)result_vaddr_t_checked(phys_to_virt(paddr));
     }
     return NULL;
 }
@@ -225,7 +224,7 @@ static struct pt *pt_get_or_alloc(struct pt *pt, sz idx, u16 perms)
         ret = pool_alloc(&global_pt_page_alloc);
         if (!ret)
             return NULL;
-        paddr_t paddr_ret = virt_to_phys((vaddr_t)ret);
+        paddr_t paddr_ret = result_paddr_t_checked(virt_to_phys((vaddr_t)ret));
         print_dbg(STR("Allocated page table page: vaddr=0x%lx paddr=0x%lx\n"), ret, paddr_ret);
         pt_insert(pt, idx, pte_from_paddr(paddr_ret, perms, ADDR_MAPPING_MEMORY_DEFAULT));
     } else {
@@ -405,7 +404,11 @@ struct bytes paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn
     // `pt_map` internally uses address translation.
 
     code_addrs.type = ADDR_MAPPING_TYPE_CANONICAL;
+    code_addrs.mem_type = ADDR_MAPPING_MEMORY_DEFAULT;
+    code_addrs.perms = PT_FLAG_RW;
     dyn_addrs.type = ADDR_MAPPING_TYPE_CANONICAL;
+    dyn_addrs.mem_type = ADDR_MAPPING_MEMORY_DEFAULT;
+    dyn_addrs.perms = PT_FLAG_RW;
     assert(!add_addr_mapping(code_addrs).is_error);
     assert(!add_addr_mapping(dyn_addrs).is_error);
 
@@ -421,7 +424,7 @@ struct bytes paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn
                        ADDR_MAPPING_MEMORY_DEFAULT)
                     .is_error);
 
-    write_cr3(virt_to_phys((vaddr_t)global_page_table.pml4));
+    write_cr3(result_paddr_t_checked(virt_to_phys((vaddr_t)global_page_table.pml4)));
 
     struct bytes ret;
     ret.dat = (byte *)dyn_addrs.vbase + pt_bytes;
