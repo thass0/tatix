@@ -242,6 +242,37 @@ static struct result pci_get_resource_info(u8 bus, u8 device, u8 func, struct pc
     return result_ok();
 }
 
+static struct result pci_set_driver_capabilities(struct pci_device *dev, u16 capabilities)
+{
+    assert(dev);
+
+    struct result_u16 cmd_res = pci_config_read16(dev->bus, dev->device, dev->func, PCI_OFFSET_COMMAND);
+    if (cmd_res.is_error)
+        return result_error(cmd_res.code);
+
+    u16 cmd = result_u16_checked(cmd_res);
+    if (capabilities & PCI_DEVICE_DRIVER_CAP_IO)
+        cmd |= PCI_REGISTER_COMMAND_IO_SPACE;
+    else
+        cmd &= ~PCI_REGISTER_COMMAND_IO_SPACE;
+    if (capabilities & PCI_DEVICE_DRIVER_CAP_MEM)
+        cmd |= PCI_REGISTER_COMMAND_MEM_SPACE;
+    else
+        cmd &= ~PCI_REGISTER_COMMAND_MEM_SPACE;
+    if (capabilities & PCI_DEVICE_DRIVER_CAP_DMA)
+        cmd |= PCI_REGISTER_COMMAND_BUS_MASTER;
+    else
+        cmd &= ~PCI_REGISTER_COMMAND_BUS_MASTER;
+    if (capabilities & PCI_DEVICE_DRIVER_CAP_INTERRUPT)
+        cmd &= ~PCI_REGISTER_COMMAND_INTERRUPT_DISABLE;
+    else
+        cmd |= PCI_REGISTER_COMMAND_INTERRUPT_DISABLE;
+
+    pci_config_write16(dev->bus, dev->device, dev->func, PCI_OFFSET_COMMAND, cmd);
+
+    return result_ok();
+}
+
 struct result pci_probe(void)
 {
     sz mem_size = 16 * sizeof(struct pci_device);
@@ -329,9 +360,16 @@ struct result pci_probe(void)
 
         if (drv) {
             print_dbg(STR("Probing driver %s [%hx:%hx]\n"), drv->name, dev->vendor_id, dev->device_id);
+
+            struct result res = pci_set_driver_capabilities(dev, drv->capabilities);
+            if (res.is_error) {
+                kvalloc_free(mem, mem_size);
+                return res;
+            }
+
             assert(drv->probe);
             dev->driver = drv;
-            struct result res = drv->probe(dev);
+            res = drv->probe(dev);
             if (res.is_error) {
                 kvalloc_free(mem, mem_size);
                 return res;

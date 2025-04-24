@@ -84,6 +84,8 @@
 // Fields in the command register
 #define PCI_REGISTER_COMMAND_IO_SPACE BIT(0)
 #define PCI_REGISTER_COMMAND_MEM_SPACE BIT(1)
+#define PCI_REGISTER_COMMAND_BUS_MASTER BIT(2)
+#define PCI_REGISTER_COMMAND_INTERRUPT_DISABLE BIT(10)
 
 // These limits are defined by the PCI specification.
 #define PCI_NUM_FUNCTIONS 8
@@ -95,6 +97,12 @@
 #define PCI_MASK_BAR_MEM_PREFETCHABLE BIT(3)
 #define PCI_MASK_BAR_MEM_ADDR 0xfffffff0
 #define PCI_MASK_BAR_IO_ADDR 0xfffffffc
+
+// Capabilities that PCI device drivers can request to have enabled before their probing function is called.
+#define PCI_DEVICE_DRIVER_CAP_DMA PCI_REGISTER_COMMAND_BUS_MASTER
+#define PCI_DEVICE_DRIVER_CAP_MEM PCI_REGISTER_COMMAND_MEM_SPACE
+#define PCI_DEVICE_DRIVER_CAP_IO PCI_REGISTER_COMMAND_IO_SPACE
+#define PCI_DEVICE_DRIVER_CAP_INTERRUPT PCI_REGISTER_COMMAND_INTERRUPT_DISABLE
 
 ///////////////////////////////////////////////////////////////////////////////
 // Structures and types                                                      //
@@ -148,6 +156,7 @@ struct __aligned(8) pci_device_driver {
     struct str name;
     sz n_ids;
     struct pci_device_id *ids;
+    u16 capabilities;
     pci_device_driver_probe_func_t probe;
 } __packed;
 
@@ -190,12 +199,13 @@ struct result pci_probe(void);
 // The `PCI_REGISTER_DRIVER` macro inserts a pointer to a `struct pci_device_driver` into a static table
 // of device drivers known to the PCI subsystem.
 
-#define PCI_REGISTER_DRIVER(_name, _n_ids, _ids, _probe)                                                           \
+#define PCI_REGISTER_DRIVER(_name, _n_ids, _ids, _capabilities, _probe)                                            \
     __used __section(                                                                                              \
         ".pci_device_driver_list_" STRINGIFY(_name)) static struct pci_device_driver pci_device_driver_##_name = { \
         .name = STR_STATIC(STRINGIFY(_name)),                                                                      \
         .n_ids = _n_ids,                                                                                           \
         .ids = _ids,                                                                                               \
+        .capabilities = _capabilities,                                                                             \
         .probe = _probe,                                                                                           \
     }
 
