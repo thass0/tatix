@@ -13,6 +13,7 @@
 // found in the manuals/ directory. It could also be found here at the time of writing:
 // https://www.intel.com/content/dam/doc/manual/pci-pci-x-family-gbe-controllers-software-dev-manual.pdf
 
+#define E1000_OFFSET_CTRL 0x0
 #define E1000_OFFSET_EECD 0x10
 #define E1000_OFFSET_EERD 0x14
 
@@ -108,6 +109,18 @@ static void e1000_read_mac_addr(struct e1000_device *dev)
     dev->mac_addr[5] = tmp >> 8;
 }
 
+static void e1000_init_device(struct e1000_device *dev)
+{
+    assert(dev);
+
+    // Reference: Section 14.3
+    u32 ctrl = mmio_read32(dev->mmio_base + E1000_OFFSET_CTRL);
+    ctrl &= ~BIT(3); // Clear CTRL.LRST
+    ctrl &= ~BIT(7); // Clear CTRL.ILOS
+    ctrl &= ~BIT(31); // Clear CTRL.PHY_RST
+    mmio_write32(dev->mmio_base + E1000_OFFSET_CTRL, ctrl);
+}
+
 static struct result e1000_probe(struct pci_device *pci)
 {
     assert(pci);
@@ -132,6 +145,8 @@ static struct result e1000_probe(struct pci_device *pci)
     print_dbg(STR("EEPROM access mechanism: %s\n"), dev->eeprom_normal_access ? STR("Normal") : STR("Alternate"));
     print_dbg(STR("MAC: %hhx:%hhx:%hhx:%hhx:%hhx:%hhx\n"), dev->mac_addr[0], dev->mac_addr[1], dev->mac_addr[2],
               dev->mac_addr[3], dev->mac_addr[4], dev->mac_addr[5]);
+
+    e1000_init_device(dev);
 
     return result_ok();
 }
