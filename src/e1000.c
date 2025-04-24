@@ -205,6 +205,13 @@ static struct result e1000_init_tx(struct e1000_device *dev)
     return result_ok();
 }
 
+static void e1000_set_link_up(struct e1000_device *dev)
+{
+    u32 ctrl = mmio_read32(dev->mmio_base + E1000_OFFSET_CTRL);
+    ctrl |= BIT(6); // CTRL.SLU
+    mmio_write32(dev->mmio_base + E1000_OFFSET_CTRL, ctrl);
+}
+
 static inline sz e1000_advance_tx_tail(struct e1000_device *dev)
 {
     sz orig_tail = dev->tx_tail;
@@ -237,11 +244,7 @@ static struct result e1000_tx_poll(struct e1000_device *dev, struct bytes pkt)
     tx_desc->length = (u16)pkt.len;
     tx_desc->cmd |= E1000_TX_DESC_CMD_EOP | E1000_TX_DESC_CMD_RS;
 
-    sz orig_tail = e1000_advance_tx_tail(dev);
-
-    // NOTE: This only works when CMD.RS is set.
-    while (!(dev->tx_queue[orig_tail].status & E1000_TX_DESC_STATUS_DD))
-        ; // TODO: Sleep here
+    e1000_advance_tx_tail(dev);
 
     print_dbg(STR("Transmitted packet: addr=0x%lx, len=%ld\n"), pkt.dat, pkt.len);
 
@@ -275,6 +278,9 @@ static struct result e1000_probe(struct pci_device *pci)
 
     res = e1000_init_tx(dev);
     assert(!res.is_error);
+
+    // TODO: Before calling this function, set up rx
+    // e1000_set_link_up(dev);
 
     // Transmit a test packet.
     sz pkt_size = 40;
