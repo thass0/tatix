@@ -13,9 +13,17 @@
 // found in the manuals/ directory. It could also be found here at the time of writing:
 // https://www.intel.com/content/dam/doc/manual/pci-pci-x-family-gbe-controllers-software-dev-manual.pdf
 
+// Reference: Table 13-2. Ethernet Controller Register Summary.
 #define E1000_OFFSET_CTRL 0x0
 #define E1000_OFFSET_EECD 0x10
 #define E1000_OFFSET_EERD 0x14
+#define E1000_OFFSET_TCTL 0x400
+#define E1000_OFFSET_TIPG 0x410
+#define E1000_OFFSET_TDBAL 0x3800
+#define E1000_OFFSET_TDBAH 0x3804
+#define E1000_OFFSET_TDLEN 0x3808
+#define E1000_OFFSET_TDH 0x3810
+#define E1000_OFFSET_TDT 0x3818
 
 #define E1000_VENDOR_ID 0x8086
 #define E1000_DEVICE_ID 0x100E
@@ -31,7 +39,21 @@ struct e1000_device {
     u64 mmio_len;
     bool eeprom_normal_access;
     u8 mac_addr[6];
+    struct addr_mapping tx_queue;
+    sz tx_tail;
 };
+
+struct __aligned(16) e1000_legacy_tx_desc {
+    u64 base_addr;
+    u16 length;
+    u8 cso;
+    u8 cmd; // Bit 5 (DEXT) of this field must be 0 to disable the extended format.
+    u8 status; // Upper four bits are reserved to 0.
+    u8 css;
+    u16 special;
+} __packed;
+
+static_assert(sizeof(struct e1000_legacy_tx_desc) == 16);
 
 static struct result e1000_init_mmio(struct e1000_device *dev, enum addr_mapping_memory_type mem_type)
 {
@@ -121,6 +143,56 @@ static void e1000_init_device(struct e1000_device *dev)
     mmio_write32(dev->mmio_base + E1000_OFFSET_CTRL, ctrl);
 }
 
+static struct result e1000_init_tx(struct e1000_device *dev)
+{
+    // Reference: Section 14.5
+
+    assert(alignof(struct e1000_legacy_tx_desc) == 16);
+    sz tx_mem_size = 32 * sizeof(struct e1000_legacy_tx_desc);
+    ptr tx_mem = dev->mmio_base + dev->mmio_len;
+
+    // The TX queue is identity mapped in memory right after the identity mapping for the 8254x MMIO region.
+    struct addr_mapping tx_queue;
+    tx_queue.type = ADDR_MAPPING_TYPE_CANONICAL;
+    tx_queue.mem_type = ADDR_MAPPING_MEMORY_STRONG_UNCACHEABLE;
+    tx_queue.perms = PT_FLAG_RW;
+    tx_queue.vbase = dev->mmio_base + dev->mmio_len;
+    tx_queue.pbase = tx_queue.vbase;
+    tx_queue.len = tx_mem_size;
+
+    struct result res = paging_map_region(tx_queue);
+    if (res.is_error)
+        return res;
+
+    memset(bytes_new((void *)tx_mem, tx_mem_size), 0);
+
+    dev->tx_queue = tx_queue;
+    dev->tx_tail = 0;
+
+    assert(IS_ALIGNED((ptr)tx_mem, 16));
+    assert(IS_ALIGNED(tx_mem_size, 128));
+    assert(tx_mem_size <= U32_MAX);
+
+    mmio_write32(dev->mmio_base + E1000_OFFSET_TDBAL, (u64)tx_mem & 0xffffffff);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_TDBAH, ((u64)tx_mem >> 32) & 0xffffffff);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_TDLEN, tx_mem_size);
+
+    mmio_write64(dev->mmio_base + E1000_OFFSET_TDH, 0);
+    mmio_write64(dev->mmio_base + E1000_OFFSET_TDT, 0);
+
+    u32 tctl = mmio_read32(dev->mmio_base + E1000_OFFSET_TCTL);
+    // Set bits Transmit Enable (1) and Pad Short Packets (3). Set Collision Threshold (11:4) to the recommended value
+    // of 0xf. Set Collision Distance (21:12) to the recommended value of 0x40 for for full-duplex operation.
+    tctl |= BIT(1) | BIT(3) | (0xf << 4) | (0x40 << 12);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_TCTL, tctl);
+
+    // These are the recommended values for the IPGT, IPGR1 and IPGR2 fields in the TIPG register for IEEE802.3.
+    // Refer to table 13-77.
+    mmio_write32(dev->mmio_base + E1000_OFFSET_TIPG, 10 | (8 << 10) | (6 << 20));
+
+    return result_ok();
+}
+
 static struct result e1000_probe(struct pci_device *pci)
 {
     assert(pci);
@@ -147,6 +219,9 @@ static struct result e1000_probe(struct pci_device *pci)
               dev->mac_addr[3], dev->mac_addr[4], dev->mac_addr[5]);
 
     e1000_init_device(dev);
+
+    res = e1000_init_tx(dev);
+    assert(!res.is_error);
 
     return result_ok();
 }
