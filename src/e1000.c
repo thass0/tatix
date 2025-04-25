@@ -17,6 +17,12 @@
 #define E1000_OFFSET_CTRL 0x0
 #define E1000_OFFSET_EECD 0x10
 #define E1000_OFFSET_EERD 0x14
+#define E1000_OFFSET_RCTL 0x100
+#define E1000_OFFSET_RDBAL 0x2800
+#define E1000_OFFSET_RDBAH 0x2804
+#define E1000_OFFSET_RDLEN 0x2808
+#define E1000_OFFSET_RDH 0x2810
+#define E1000_OFFSET_RDT 0x2818
 #define E1000_OFFSET_TCTL 0x400
 #define E1000_OFFSET_TIPG 0x410
 #define E1000_OFFSET_TDBAL 0x3800
@@ -24,6 +30,8 @@
 #define E1000_OFFSET_TDLEN 0x3808
 #define E1000_OFFSET_TDH 0x3810
 #define E1000_OFFSET_TDT 0x3818
+#define E1000_OFFSET_RAL0 0x5400
+#define E1000_OFFSET_RAH0 0x5404
 
 #define E1000_TX_DESC_SIZE 16
 
@@ -33,6 +41,11 @@
 #define E1000_TX_DESC_CMD_IFCS BIT(1)
 #define E1000_TX_DESC_CMD_RS BIT(3)
 #define E1000_TX_DESC_CMD_RPS BIT(4)
+
+#define E1000_RX_DESC_SIZE 16
+
+// Maximum ethernet frame size is 1500B so this should work
+#define E1000_RX_BUF_SIZE 2048
 
 #define E1000_VENDOR_ID 0x8086
 #define E1000_DEVICE_ID 0x100E
@@ -54,15 +67,35 @@ struct __aligned(E1000_TX_DESC_SIZE) e1000_legacy_tx_desc {
 } __packed;
 
 static_assert(sizeof(struct e1000_legacy_tx_desc) == E1000_TX_DESC_SIZE);
+static_assert(alignof(struct e1000_legacy_tx_desc) == E1000_TX_DESC_SIZE);
+
+struct __aligned(E1000_RX_DESC_SIZE) e1000_rx_desc {
+    u64 base_addr;
+    u16 length;
+    u16 checksum;
+    u8 status;
+    u8 error;
+    u16 special;
+} __packed;
+
+static_assert(sizeof(struct e1000_rx_desc) == E1000_RX_DESC_SIZE);
+static_assert(alignof(struct e1000_rx_desc) == E1000_RX_DESC_SIZE);
 
 struct e1000_device {
     u64 mmio_base;
     u64 mmio_len;
+
     bool eeprom_normal_access;
     u8 mac_addr[6];
+
     struct e1000_legacy_tx_desc *tx_queue;
     sz tx_queue_n_desc;
     sz tx_tail;
+
+    struct e1000_rx_desc *rx_queue;
+    sz rx_queue_n_desc;
+    sz rx_tail;
+    u8 (*rx_buffers)[E1000_RX_BUF_SIZE];
 };
 
 static struct result e1000_init_mmio(struct e1000_device *dev, enum addr_mapping_memory_type mem_type)
@@ -157,7 +190,6 @@ static struct result e1000_init_tx(struct e1000_device *dev)
 {
     // Reference: Section 14.5
 
-    static_assert(alignof(struct e1000_legacy_tx_desc) == E1000_TX_DESC_SIZE);
     sz tx_queue_n_desc = 32;
     sz tx_mem_size = tx_queue_n_desc * sizeof(struct e1000_legacy_tx_desc);
 
@@ -171,22 +203,20 @@ static struct result e1000_init_tx(struct e1000_device *dev)
     for (sz i = 0; i < tx_queue_n_desc; i++)
         tx_queue[i].status |= E1000_TX_DESC_STATUS_DD;
 
-    dev->tx_queue = tx_queue;
-    dev->tx_queue_n_desc = tx_queue_n_desc;
-    dev->tx_tail = 0;
-
-    static_assert(8 * E1000_TX_DESC_SIZE == 128);
-    assert(IS_ALIGNED(tx_mem_size, 8 * E1000_TX_DESC_SIZE));
-    assert(tx_mem_size <= U32_MAX);
-
     // The 8254x needs a physical address because it will use it for DMA.
     struct result_paddr_t paddr_tx_queue_res = virt_to_phys((vaddr_t)tx_queue);
-    if (paddr_tx_queue_res.is_error)
+    if (paddr_tx_queue_res.is_error) {
+        kvalloc_free(tx_queue, tx_mem_size);
         return result_error(paddr_tx_queue_res.code);
+    }
     paddr_t paddr_tx_queue = result_paddr_t_checked(paddr_tx_queue_res);
 
+    assert(IS_ALIGNED(paddr_tx_queue, 16));
     mmio_write32(dev->mmio_base + E1000_OFFSET_TDBAL, (u64)paddr_tx_queue & 0xffffffff);
     mmio_write32(dev->mmio_base + E1000_OFFSET_TDBAH, ((u64)paddr_tx_queue >> 32) & 0xffffffff);
+
+    assert(IS_ALIGNED(tx_mem_size, 128));
+    assert(tx_mem_size <= U32_MAX);
     mmio_write32(dev->mmio_base + E1000_OFFSET_TDLEN, tx_mem_size);
 
     mmio_write64(dev->mmio_base + E1000_OFFSET_TDH, 0);
@@ -201,6 +231,84 @@ static struct result e1000_init_tx(struct e1000_device *dev)
     // These are the recommended values for the IPGT, IPGR1 and IPGR2 fields in the TIPG register for IEEE802.3.
     // Refer to table 13-77.
     mmio_write32(dev->mmio_base + E1000_OFFSET_TIPG, 10 | (8 << 10) | (6 << 20));
+
+    dev->tx_queue = tx_queue;
+    dev->tx_queue_n_desc = tx_queue_n_desc;
+    dev->tx_tail = 0;
+
+    return result_ok();
+}
+
+static struct result e1000_init_rx(struct e1000_device *dev)
+{
+    // Reference: Section 14.4
+
+    sz rx_queue_n_desc = 128;
+    sz rx_mem_size = rx_queue_n_desc * sizeof(struct e1000_rx_desc);
+
+    struct e1000_rx_desc *rx_queue = kvalloc_alloc(rx_mem_size, alignof(*rx_queue));
+    if (!rx_queue)
+        return result_error(ENOMEM);
+
+    // Align on a cache line:
+    u8(*rx_buffers)[E1000_RX_BUF_SIZE] = kvalloc_alloc(rx_queue_n_desc * sizeof(*rx_buffers), 64);
+    static_assert(sizeof(*rx_buffers) == E1000_RX_BUF_SIZE);
+    if (!rx_buffers) {
+        kvalloc_free(rx_queue, rx_mem_size);
+        return result_error(ENOMEM);
+    }
+
+    memset(bytes_new(rx_queue, rx_mem_size), 0);
+    memset(bytes_new(rx_buffers, rx_queue_n_desc * sizeof(*rx_buffers)), 0);
+
+    // The 8254x needs a physical addresses because it will use them for DMA.
+    struct result_paddr_t paddr_rx_queue_res = virt_to_phys((vaddr_t)rx_queue);
+    struct result_paddr_t paddr_rx_buffers_res = virt_to_phys((vaddr_t)rx_buffers);
+    if (paddr_rx_queue_res.is_error) {
+        kvalloc_free(rx_queue, rx_mem_size);
+        kvalloc_free(rx_buffers, rx_queue_n_desc * sizeof(*rx_buffers));
+        return result_error(paddr_rx_queue_res.code);
+    }
+    if (paddr_rx_buffers_res.is_error) {
+        kvalloc_free(rx_queue, rx_mem_size);
+        kvalloc_free(rx_buffers, rx_queue_n_desc * sizeof(*rx_buffers));
+        return result_error(paddr_rx_buffers_res.code);
+    }
+    paddr_t paddr_rx_queue = result_paddr_t_checked(paddr_rx_queue_res);
+    paddr_t paddr_rx_buffers = result_paddr_t_checked(paddr_rx_buffers_res);
+
+    // Initialize all descriptors to point to the right buffers.
+    for (sz i = 0; i < rx_queue_n_desc; i++)
+        rx_queue[i].base_addr = paddr_rx_buffers + i * sizeof(*rx_buffers);
+
+    assert(IS_ALIGNED(paddr_rx_queue, 16));
+    mmio_write32(dev->mmio_base + E1000_OFFSET_RDBAL, (u64)paddr_rx_queue & 0xffffffff);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_RDBAH, ((u64)paddr_rx_queue >> 32) & 0xffffffff);
+
+    assert(IS_ALIGNED(rx_mem_size, 128));
+    assert(rx_mem_size <= U32_MAX);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_RDLEN, rx_mem_size);
+
+    // This indicates that all descriptors are available for the hardware to store packets.
+    mmio_write64(dev->mmio_base + E1000_OFFSET_RDH, 0);
+    mmio_write64(dev->mmio_base + E1000_OFFSET_RDT, 0);
+
+    // Set RAL0/RAH0 to the MAC address of the controller so that it accepts packets addressed to it.
+    // NOTE: Don't need to set up the Multicast Array Table (MTA) as only one RAL/RAH entry is used.
+    mmio_write32(dev->mmio_base + E1000_OFFSET_RAL0,
+                 (dev->mac_addr[3] << 24) | (dev->mac_addr[2] << 16) | (dev->mac_addr[1] << 8) | dev->mac_addr[0]);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_RAH0, BIT(31) | (dev->mac_addr[5] << 8) | dev->mac_addr[4]);
+
+    u32 rctl = mmio_read32(dev->mmio_base + E1000_OFFSET_RCTL);
+    rctl |= BIT(1); // Enable receive.
+    rctl &= ~(BIT(17) | BIT(16) | BIT(25)); // Buffer size of 2048B (the default).
+    rctl &= ~(BIT(5) | BIT(6) | BIT(7)); // Disable long packets and loopback.
+    mmio_write32(dev->mmio_base + E1000_OFFSET_RCTL, rctl);
+
+    dev->rx_queue = rx_queue;
+    dev->rx_queue_n_desc = rx_queue_n_desc;
+    dev->rx_buffers = rx_buffers;
+    dev->rx_tail = 0;
 
     return result_ok();
 }
@@ -278,9 +386,12 @@ static struct result e1000_probe(struct pci_device *pci)
 
     res = e1000_init_tx(dev);
     assert(!res.is_error);
+    res = e1000_init_rx(dev);
+    assert(!res.is_error);
 
-    // TODO: Before calling this function, set up rx
-    // e1000_set_link_up(dev);
+    e1000_set_link_up(dev);
+
+    print_dbg(STR("Link is up!\n"));
 
     // Transmit a test packet.
     sz pkt_size = 40;
