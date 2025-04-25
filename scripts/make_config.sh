@@ -1,4 +1,4 @@
-#!/bin/env sh
+#!/usr/bin/env bash
 
 usage() {
     echo "usage: $0 [-f FORMAT] [-o OUTPUT-FILE] CONFIG-FILE" >&2

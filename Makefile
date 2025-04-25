@@ -81,18 +81,18 @@ $(ROOTFS_OBJ): $(ROOTFS_ARCHIVE) | $(BUILD_DIR)
 	objcopy -I binary -O elf64-x86-64 -B i386 --rename-section .data=.rootfs_archive,alloc,load,readonly,data,contents $< $@
 
 $(ROOTFS_ARCHIVE): $(ROOTFS_DIR) | $(BUILD_DIR)
-	./archive.py enc $< $@
+	./scripts/archive.py enc $< $@
 
 # Misc
 
 $(LINKER_CONFIG): $(CONFIG)
-	./make_config.sh -f linker -o $@ $<
+	./scripts/make_config.sh -f linker -o $@ $<
 
 $(NASM_CONFIG): $(CONFIG)
-	./make_config.sh -f nasm -o $@ $<
+	./scripts/make_config.sh -f nasm -o $@ $<
 
 $(HEADER_CONFIG): $(CONFIG)
-	./make_config.sh -f header -o $@ $<
+	./scripts/make_config.sh -f header -o $@ $<
 
 $(BUILD_DIR):
 	mkdir $@
@@ -100,7 +100,8 @@ $(BUILD_DIR):
 boot: $(DISK_IMAGE)
 	@rm -f .packets.pcap
 	qemu-system-x86_64 -m 1G -cpu max -display none -serial stdio -no-reboot -drive file=$<,format=raw,index=0,media=disk \
-		-netdev user,id=net0 -device e1000,netdev=net0 -object filter-dump,id=dump0,netdev=net0,file=.packets.pcap \
+	    -netdev tap,id=net0,ifname=vm0,script=no,downscript=no -device e1000,netdev=net0,mac=52:54:00:12:34:56 \
+		-object filter-dump,id=dump0,netdev=net0,file=.packets.pcap \
 		$(QEMU_DEBUG_FLAGS)
 
 fmt:
