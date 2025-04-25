@@ -44,6 +44,9 @@
 
 #define E1000_RX_DESC_SIZE 16
 
+#define E1000_RX_DESC_STATUS_DD BIT(0)
+#define E1000_RX_DESC_STATUS_EOP BIT(1)
+
 // Maximum ethernet frame size is 1500B so this should work
 #define E1000_RX_BUF_SIZE 2048
 
@@ -95,7 +98,7 @@ struct e1000_device {
     struct e1000_rx_desc *rx_queue;
     sz rx_queue_n_desc;
     sz rx_tail;
-    u8 (*rx_buffers)[E1000_RX_BUF_SIZE];
+    byte (*rx_buffers)[E1000_RX_BUF_SIZE];
 };
 
 static struct result e1000_init_mmio(struct e1000_device *dev, enum addr_mapping_memory_type mem_type)
@@ -251,7 +254,7 @@ static struct result e1000_init_rx(struct e1000_device *dev)
         return result_error(ENOMEM);
 
     // Align on a cache line:
-    u8(*rx_buffers)[E1000_RX_BUF_SIZE] = kvalloc_alloc(rx_queue_n_desc * sizeof(*rx_buffers), 64);
+    byte(*rx_buffers)[E1000_RX_BUF_SIZE] = kvalloc_alloc(rx_queue_n_desc * sizeof(*rx_buffers), 64);
     static_assert(sizeof(*rx_buffers) == E1000_RX_BUF_SIZE);
     if (!rx_buffers) {
         kvalloc_free(rx_queue, rx_mem_size);
@@ -291,7 +294,7 @@ static struct result e1000_init_rx(struct e1000_device *dev)
 
     // This indicates that all descriptors are available for the hardware to store packets.
     mmio_write64(dev->mmio_base + E1000_OFFSET_RDH, 0);
-    mmio_write64(dev->mmio_base + E1000_OFFSET_RDT, 0);
+    mmio_write64(dev->mmio_base + E1000_OFFSET_RDT, rx_queue_n_desc - 1);
 
     // Set RAL0/RAH0 to the MAC address of the controller so that it accepts packets addressed to it.
     // NOTE: Don't need to set up the Multicast Array Table (MTA) as only one RAL/RAH entry is used.
@@ -333,13 +336,13 @@ static struct result e1000_tx_poll(struct e1000_device *dev, struct bytes pkt)
 {
     struct e1000_legacy_tx_desc *tx_desc = &dev->tx_queue[dev->tx_tail];
 
+    if (pkt.len > U16_MAX)
+        return result_error(EINVAL);
+
     // If there is space in the queue, the tail points to a descriptor with the DD flag set, because the 8254x
     // is done with processing this descriptor. Otherwise, the queue is full and we have to wait.
     if (!(tx_desc->status & E1000_TX_DESC_STATUS_DD))
         return result_error(ENOBUFS);
-
-    if (pkt.len > U16_MAX)
-        return result_error(EINVAL);
 
     // The 8254x needs a physical address because it will use the base address for DMA.
     struct result_paddr_t paddr_base_res = virt_to_phys((vaddr_t)pkt.dat);
@@ -355,6 +358,61 @@ static struct result e1000_tx_poll(struct e1000_device *dev, struct bytes pkt)
     e1000_advance_tx_tail(dev);
 
     print_dbg(STR("Transmitted packet: addr=0x%lx, len=%ld\n"), pkt.dat, pkt.len);
+
+    return result_ok();
+}
+
+static inline sz e1000_advance_rx_tail(struct e1000_device *dev)
+{
+    sz orig_tail = dev->rx_tail;
+    dev->rx_tail = (dev->rx_tail + 1) % dev->rx_queue_n_desc;
+    assert(dev->rx_tail <= U16_MAX);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_RDT, dev->rx_tail);
+    return orig_tail;
+}
+
+static struct result e1000_rx_poll(struct e1000_device *dev, struct bytes_buf *buf)
+{
+    assert(buf);
+
+    struct e1000_rx_desc *rx_desc = &dev->rx_queue[dev->rx_tail];
+
+    if (buf->cap - buf->len < E1000_RX_BUF_SIZE)
+        return result_error(EINVAL);
+
+    // The tail points to the first descriptor that has not been processed by software yet. There is nothing for
+    // us to do if the hardware hasn't set the Descriptor Done (DD) bit on this descriptor.
+    if (!(rx_desc->status & E1000_RX_DESC_STATUS_DD))
+        return result_error(EAGAIN);
+
+    // Large packets are disabled and the buffer size should be big enough so that the entire packet could
+    // be stored in the buffer. So the End Of Packet (EOP) bit should always be set.
+    assert(rx_desc->status & E1000_RX_DESC_STATUS_EOP);
+
+    // The `error` field is only valid when the DD and EOP bits are set.
+    if (rx_desc->error)
+        return result_error(EIO);
+
+    // The descriptor stores a physical address because it is used by the 8254x for DMA. We need to translate
+    // this physical address back to a virtual address before we can access it.
+    struct result_vaddr_t rx_buf_vaddr_res = phys_to_virt((paddr_t)rx_desc->base_addr);
+    if (rx_buf_vaddr_res.is_error)
+        return result_error(rx_buf_vaddr_res.code);
+    vaddr_t rx_buf_vaddr = result_vaddr_t_checked(rx_buf_vaddr_res);
+
+    assert(rx_desc->length <= E1000_RX_BUF_SIZE);
+    struct bytes rx_buf = bytes_new((void *)rx_buf_vaddr, rx_desc->length);
+
+    bytes_buf_memcpy(buf, rx_buf);
+    memset(rx_buf, 0);
+
+    // Notice that `rx_desc->base_addr` remains unchanged because the same buffer can now be reused.
+    rx_desc->length = 0;
+    rx_desc->status = 0;
+
+    sz orig_tail = e1000_advance_rx_tail(dev);
+
+    print_dbg(STR("Received packet: idx=%ld, len=0x%lx\n"), orig_tail, rx_buf.len);
 
     return result_ok();
 }
@@ -404,6 +462,21 @@ static struct result e1000_probe(struct pci_device *pci)
     assert(!res.is_error);
 
     kvalloc_free(pkt, pkt_size);
+
+    u8 *buf_mem = kvalloc_alloc(E1000_RX_BUF_SIZE, 64);
+    assert(buf_mem);
+    struct bytes_buf buf = bytes_buf_new(buf_mem, 0, E1000_RX_BUF_SIZE);
+    memset(bytes_from_buf(buf), 0);
+
+    print_dbg(STR("Polling rx ...\n"));
+    while ((res = e1000_rx_poll(dev, &buf)).code == EAGAIN)
+        ;
+    print_dbg(STR("Done polling!!!\n"));
+    assert(!res.is_error);
+    struct str dat;
+    dat.dat = (char *)buf.dat;
+    dat.len = buf.len;
+    print_dbg(STR("Received:\n%s\n"), dat);
 
     return result_ok();
 }

@@ -67,6 +67,7 @@ static inline struct result result_ok(void)
 
 #define ENOENT 2
 #define EIO 5
+#define EAGAIN 11
 #define ENOMEM 12
 #define EEXIST 17
 #define ENODEV 19
