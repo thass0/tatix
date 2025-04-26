@@ -7,7 +7,6 @@
 #define __TX_ERRORDEF_H__
 
 #include <tx/base.h>
-#include <tx/bytes.h>
 
 // Many languages now feature results and options as ways of returning a value
 // that indicates either a success and a valid return value, or an error along

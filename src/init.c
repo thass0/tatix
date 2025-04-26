@@ -4,7 +4,7 @@
 #include <tx/assert.h>
 #include <tx/base.h>
 #include <tx/buddy.h>
-#include <tx/bytes.h>
+#include <tx/byte.h>
 #include <tx/com.h>
 #include <tx/gdt.h>
 #include <tx/idt.h>
@@ -77,7 +77,7 @@ void ram_fs_selftest(void)
     sz test_arn_size = 5 * BIT(20);
     void *test_arn_mem = kvalloc_alloc(test_arn_size, alignof(void *));
     assert(test_arn_mem);
-    struct arena test_arn = arena_new(bytes_new(test_arn_mem, test_arn_size));
+    struct arena test_arn = arena_new(byte_array_new(test_arn_mem, test_arn_size));
     ram_fs_run_tests(test_arn);
 }
 
@@ -119,7 +119,7 @@ __noreturn void kernel_init(void)
     dyn_addrs.pbase = KERN_DYN_PADDR;
     dyn_addrs.len = KERN_DYN_LEN;
 
-    struct bytes dyn = paging_init(code_addrs, dyn_addrs);
+    struct byte_array dyn = paging_init(code_addrs, dyn_addrs);
 
     // Initialize the kernel virtual memory allocator.
     struct result res = kvalloc_init(dyn);
@@ -136,7 +136,7 @@ __noreturn void kernel_init(void)
     assert(rfs);
 
     // Extract rootfs archive into the RAM fs.
-    struct bytes rootfs_archive = bytes_new(_rootfs_archive_start, _rootfs_archive_end - _rootfs_archive_start);
+    struct byte_view rootfs_archive = byte_view_new(_rootfs_archive_start, _rootfs_archive_end - _rootfs_archive_start);
     res = archive_extract(rootfs_archive, rfs);
     assert(!res.is_error);
 

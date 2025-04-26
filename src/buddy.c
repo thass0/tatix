@@ -49,22 +49,22 @@ static inline sz length_of_order(sz ord)
     return ((sz)1LL) << ord;
 }
 
-struct buddy *buddy_init(struct bytes area, struct arena *arn)
+struct buddy *buddy_init(struct byte_array ba, struct arena *arn)
 {
-    assert(area.len > 0);
-    assert(area.dat);
+    assert(ba.len > 0);
+    assert(ba.dat);
     assert(arn);
 
-    sz padding = -(uptr)area.dat & (PAGE_SIZE - 1);
-    sz avail = area.len - padding;
+    sz padding = -(uptr)ba.dat & (PAGE_SIZE - 1);
+    sz avail = ba.len - padding;
     assert(avail > 0);
     // The maximum length that we can use is the biggest power of two that's not greater than `avail`.
     sz n_pages = max_power_of_two_leq(avail) / PAGE_SIZE;
-    byte *base = area.dat + padding;
+    byte *base = ba.dat + padding;
     sz bitmap_len = ((n_pages + BYTE_WIDTH) - 1) / BYTE_WIDTH;
 
     struct buddy *buddy = arena_alloc(arn, sizeof(*buddy));
-    buddy->bitmap = bytes_from_arena(bitmap_len, arn);
+    buddy->bitmap = byte_array_from_arena(bitmap_len, arn);
 
     for (sz i = 0; i < N_FREE_LISTS; i++)
         dlist_init_empty(&buddy->avail[i].link);

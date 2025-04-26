@@ -3,13 +3,13 @@
 
 #include <tx/base.h>
 #include <tx/buddy.h>
-#include <tx/bytes.h>
+#include <tx/byte.h>
 #include <tx/error.h>
 #include <tx/stringdef.h>
 
 // Initialize kvalloc. `vaddrs` is the range of virtual addresses that kvalloc will
 // manage. All addresses in this range must be accessible.
-struct result kvalloc_init(struct bytes vaddrs);
+struct result kvalloc_init(struct byte_array vaddrs);
 
 // Allocate `n_bytes` bytes with an alignment of at least `align` bytes.
 // kvalloc must be initialized before calling this function for the first time.

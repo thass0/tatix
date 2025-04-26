@@ -1,4 +1,5 @@
 #include <tx/arena.h>
+#include <tx/byte.h>
 #include <tx/error.h>
 #include <tx/kvalloc.h>
 #include <tx/list.h>
@@ -185,7 +186,7 @@ static struct result pci_get_resource_info(u8 bus, u8 device, u8 func, struct pc
         return result_error(bar5_res.code);
     raw_bars[5] = result_u32_checked(bar5_res);
 
-    memset(bytes_new(bars, sizeof(*bars)), 0);
+    byte_array_set(byte_array_new(bars, sizeof(*bars)), 0);
 
     for (i32 i = 0; i < PCI_MAX_BARS; i++) {
         if ((raw_bars[i] & PCI_MASK_BAR_TYPE) == 1) {
@@ -279,7 +280,7 @@ struct result pci_probe(void)
     void *mem = kvalloc_alloc(sizeof(struct pci_device) * 16, alignof(struct pci_device));
     if (!mem)
         return result_error(ENOMEM);
-    struct arena arn = arena_new(bytes_new(mem, mem_size));
+    struct arena arn = arena_new(byte_array_new(mem, mem_size));
 
     struct dlist device_list;
     dlist_init_empty(&device_list);

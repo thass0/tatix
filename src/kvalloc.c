@@ -33,11 +33,11 @@ static byte virt_alloc_backing_mem[VIRT_ALLOC_BACKING_MEM_SIZE];
 static struct kvalloc global_kvalloc;
 static bool global_kvalloc_is_initiallized = false;
 
-struct result kvalloc_init(struct bytes vaddrs)
+struct result kvalloc_init(struct byte_array vaddrs)
 {
     assert(!global_kvalloc_is_initiallized);
 
-    struct arena arn = arena_new(bytes_new(virt_alloc_backing_mem, VIRT_ALLOC_BACKING_MEM_SIZE));
+    struct arena arn = arena_new(byte_array_new(virt_alloc_backing_mem, VIRT_ALLOC_BACKING_MEM_SIZE));
     global_kvalloc.virt_alloc = buddy_init(vaddrs, &arn);
 
     global_kvalloc_is_initiallized = true;

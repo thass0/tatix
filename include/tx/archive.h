@@ -2,7 +2,7 @@
 #define __TX_ARCHIVE_H__
 
 #include <tx/base.h>
-#include <tx/bytes.h>
+#include <tx/byte.h>
 #include <tx/error.h>
 #include <tx/ramfs.h>
 
@@ -32,6 +32,6 @@ struct ar_index_ent {
 // };
 
 // Extracts the archive `archive` into the given FS.
-struct result archive_extract(struct bytes archive, struct ram_fs *rfs);
+struct result archive_extract(struct byte_view archive, struct ram_fs *rfs);
 
 #endif // __TX_ARCHIVE_H__

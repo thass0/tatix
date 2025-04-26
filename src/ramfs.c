@@ -285,13 +285,13 @@ struct ram_fs *ram_fs_new(struct alloc alloc)
     void *node_mem = alloc_alloc(alloc, node_mem_size, alignof(struct ram_fs_node));
     if (!node_mem)
         return NULL;
-    rfs->node_alloc = pool_new(bytes_new(node_mem, node_mem_size), sizeof(struct ram_fs_node));
+    rfs->node_alloc = pool_new(byte_array_new(node_mem, node_mem_size), sizeof(struct ram_fs_node));
 
     sz scratch_mem_size = 4 * PATH_NAME_MAX_LEN;
     void *scratch_mem = alloc_alloc(alloc, scratch_mem_size, alignof(void *));
     if (!scratch_mem)
         return NULL;
-    rfs->scratch = arena_new(bytes_new(scratch_mem, scratch_mem_size));
+    rfs->scratch = arena_new(byte_array_new(scratch_mem, scratch_mem_size));
 
     rfs->data_alloc = alloc;
 
@@ -408,7 +408,9 @@ struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct str str, sz o
     // better safe than sorry.
     assert(rfs_node->data.cap >= offset);
     assert(write_len <= rfs_node->data.cap - offset);
-    memcpy(bytes_new((byte *)rfs_node->data.dat + offset, write_len), bytes_from_str(str));
+    struct byte_buf bb = byte_buf_new(rfs_node->data.dat + offset, 0, write_len);
+    byte_buf_append(&bb, byte_view_from_str(str));
+    assert(bb.len == write_len);
     rfs_node->data.len = MAX(rfs_node->data.len, offset + write_len);
 
     return result_sz_ok(write_len);
@@ -422,7 +424,7 @@ struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct str str, sz o
 
 static struct alloc test_helper_create_alloc(struct arena *arn)
 {
-    struct buddy *rfs_data_alloc = buddy_init(bytes_from_arena(RAM_FS_TEST_SIZE, arn), arn);
+    struct buddy *rfs_data_alloc = buddy_init(byte_array_from_arena(RAM_FS_TEST_SIZE, arn), arn);
     return alloc_new(rfs_data_alloc, buddy_alloc_wrapper, buddy_free_wrapper);
 }
 

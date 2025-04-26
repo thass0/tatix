@@ -375,7 +375,7 @@ static bool cpu_has_pat(void)
     return (edx & BIT(16)) != 0;
 }
 
-struct bytes paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn_addrs)
+struct byte_array paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn_addrs)
 {
     assert(PAGE_SIZE == 0x1000);
 
@@ -396,7 +396,7 @@ struct bytes paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn
 
     assert(cpu_has_pat()); // The cacheability controls implementation depends on this feature.
 
-    global_pt_page_alloc = pool_new(bytes_new((void *)dyn_addrs.vbase, pt_bytes), PAGE_SIZE);
+    global_pt_page_alloc = pool_new(byte_array_new((void *)dyn_addrs.vbase, pt_bytes), PAGE_SIZE);
     global_page_table.pml4 = pool_alloc(&global_pt_page_alloc);
     assert(global_page_table.pml4);
 
@@ -426,10 +426,7 @@ struct bytes paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn
 
     write_cr3(result_paddr_t_checked(virt_to_phys((vaddr_t)global_page_table.pml4)));
 
-    struct bytes ret;
-    ret.dat = (byte *)dyn_addrs.vbase + pt_bytes;
-    ret.len = dyn_addrs.len - pt_bytes;
-    return ret;
+    return byte_array_new((byte *)dyn_addrs.vbase + pt_bytes, dyn_addrs.len - pt_bytes);
 }
 
 struct result paging_map_region(struct addr_mapping addrs)

@@ -3,7 +3,7 @@
 
 #include <tx/assert.h>
 #include <tx/base.h>
-#include <tx/bytes.h>
+#include <tx/byte.h>
 
 // Based on this eye-opening post: https://nullprogram.com/blog/2023/09/27/
 
@@ -18,13 +18,13 @@ struct arena {
     byte *end;
 };
 
-// Create a new arena that uses `arena` as its source of memory.
-static inline struct arena arena_new(struct bytes area)
+// Create a new arena that uses `bb` as its source of memory.
+static inline struct arena arena_new(struct byte_array ba)
 {
     struct arena arn;
 
-    arn.beg = area.dat;
-    arn.end = arn.beg + area.len;
+    arn.beg = ba.dat;
+    arn.end = arn.beg + ba.len;
 
     return arn;
 }
@@ -42,7 +42,7 @@ static inline void *arena_alloc_aligned(struct arena *arn, sz n_bytes, sz align)
         crash("Out of memory");
     void *p = arn->beg + padding;
     arn->beg += padding + n_bytes;
-    memset(bytes_new(p, n_bytes), 0);
+    byte_array_set(byte_array_new(p, n_bytes), 0);
     return p;
 }
 
@@ -86,14 +86,12 @@ static inline struct str_buf str_buf_from_arena(struct arena *arn, sz cap)
     return buf;
 }
 
-static inline struct bytes bytes_from_arena(sz n, struct arena *arn)
+static inline struct byte_array byte_array_from_arena(sz n, struct arena *arn)
 {
-    struct bytes bytes;
     assert(arn);
     assert(n > 0);
-    bytes.dat = arena_alloc(arn, n);
-    bytes.len = n;
-    return bytes;
+
+    return byte_array_new(arena_alloc(arn, n), n);
 }
 
 #endif // __TX_ARENA_H__

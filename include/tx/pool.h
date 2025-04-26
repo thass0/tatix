@@ -4,7 +4,7 @@
 #include <tx/arena.h>
 #include <tx/assert.h>
 #include <tx/base.h>
-#include <tx/bytes.h>
+#include <tx/byte.h>
 
 struct pool {
     ptr *head; /* First block in the list */
@@ -12,29 +12,29 @@ struct pool {
 };
 
 /**
- * Create a new pool. It uses `bytes.dat` as its source of memory. The minimum
+ * Create a new pool. It uses `ba.dat` as its source of memory. The minimum
  * block size is `MAX(sizeof(ptr), alignof(void *))`.
  */
-static inline struct pool pool_new(struct bytes bytes, sz block_size)
+static inline struct pool pool_new(struct byte_array ba, sz block_size)
 {
     struct pool pool = { .head = NULL, .size = 0 };
     sz align = MAX(sizeof(ptr), alignof(void *));
     ptr *block = NULL;
     sz n_blocks = 0;
 
-    assert(bytes.dat);
-    assert(bytes.len > 0);
+    assert(ba.dat);
+    assert(ba.len > 0);
     assert(block_size > 0);
 
     assert(align <= SZ_MAX - block_size);
     block_size = (block_size + align - 1) & ~(align - 1);
 
     assert(block_size > 0);
-    n_blocks = bytes.len / block_size;
+    n_blocks = ba.len / block_size;
 
     /* Link all the blocks that are available */
     for (sz i = 0; i < n_blocks * block_size; i += block_size) {
-        block = (ptr *)(bytes.dat + i);
+        block = (ptr *)(ba.dat + i);
         *block = (ptr)pool.head;
         pool.head = block;
     }
@@ -58,7 +58,7 @@ static inline void *pool_alloc(struct pool *pool)
 
     block = pool->head;
     pool->head = (ptr *)*block;
-    memset(bytes_new(block, pool->size), 0);
+    byte_array_set(byte_array_new(block, pool->size), 0);
 
     return block;
 }
@@ -87,7 +87,7 @@ static inline struct pool *pool_from_arena(sz n, sz size, struct arena *arn)
     void *buf = arena_alloc_aligned_array(arn, n, size, size);
     assert(buf);
     assert(n <= SZ_MAX / size);
-    *pool = pool_new(bytes_new(buf, n * size), size);
+    *pool = pool_new(byte_array_new(buf, n * size), size);
     return pool;
 }
 

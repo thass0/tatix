@@ -3,7 +3,7 @@
 
 #include <config.h>
 #include <tx/base.h>
-#include <tx/bytes.h>
+#include <tx/byte.h>
 #include <tx/error.h>
 
 #define PT_FLAG_P BIT(0)
@@ -97,7 +97,7 @@ struct addr_mapping {
 // for page table pages. Not all of the `dyn_addrs.len` bytes will be used for page table pages,
 // so not all of them need to be mapped before calling this function.
 // Returns a contiguous region of virtual addresses that can be dynamically allocated by the kernel.
-struct bytes paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn_addrs);
+struct byte_array paging_init(struct addr_mapping code_addrs, struct addr_mapping dyn_addrs);
 
 struct result paging_map_region(struct addr_mapping addrs);
 struct result paging_unmap_region(struct addr_mapping addrs);

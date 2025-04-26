@@ -2,7 +2,7 @@
 
 #include <tx/asm.h>
 #include <tx/base.h>
-#include <tx/bytes.h>
+#include <tx/byte.h>
 #include <tx/isr.h>
 #include <tx/kvalloc.h>
 #include <tx/paging.h>
@@ -230,7 +230,7 @@ static struct result e1000_init_tx(struct e1000_device *dev)
 
     // Initialize all the descriptors to zero except for the DD bit in the status field. This field
     // must be set to so that the transmit function knows that the descriptors can all be used.
-    memset(bytes_new(tx_queue, tx_mem_size), 0);
+    byte_array_set(byte_array_new(tx_queue, tx_mem_size), 0);
     for (sz i = 0; i < tx_queue_n_desc; i++)
         tx_queue[i].status |= E1000_TX_DESC_STATUS_DD;
 
@@ -289,8 +289,8 @@ static struct result e1000_init_rx(struct e1000_device *dev)
         return result_error(ENOMEM);
     }
 
-    memset(bytes_new(rx_queue, rx_mem_size), 0);
-    memset(bytes_new(rx_buffers, rx_queue_n_desc * sizeof(*rx_buffers)), 0);
+    byte_array_set(byte_array_new(rx_queue, rx_mem_size), 0);
+    byte_array_set(byte_array_new(rx_buffers, rx_queue_n_desc * sizeof(*rx_buffers)), 0);
 
     // The 8254x needs a physical addresses because it will use them for DMA.
     struct result_paddr_t paddr_rx_queue_res = virt_to_phys((vaddr_t)rx_queue);
@@ -361,7 +361,7 @@ static void e1000_set_link_up(struct e1000_device *dev)
     mmio_write32(dev->mmio_base + E1000_OFFSET_CTRL, ctrl);
 }
 
-static struct result e1000_tx_poll(struct e1000_device *dev, struct bytes pkt)
+static struct result e1000_tx_poll(struct e1000_device *dev, struct byte_view pkt)
 {
     struct e1000_legacy_tx_desc *tx_desc = &dev->tx_queue[dev->tx_tail];
 
@@ -379,7 +379,7 @@ static struct result e1000_tx_poll(struct e1000_device *dev, struct bytes pkt)
         return result_error(paddr_base_res.code);
     paddr_t paddr_base = result_paddr_t_checked(paddr_base_res);
 
-    memset(bytes_new(tx_desc, sizeof(*tx_desc)), 0);
+    byte_array_set(byte_array_new(tx_desc, sizeof(*tx_desc)), 0);
     tx_desc->base_addr = (u64)paddr_base;
     tx_desc->length = (u16)pkt.len;
     tx_desc->cmd |= E1000_TX_DESC_CMD_EOP | E1000_TX_DESC_CMD_RS;
@@ -394,7 +394,7 @@ static struct result e1000_tx_poll(struct e1000_device *dev, struct bytes pkt)
     return result_ok();
 }
 
-static struct result e1000_rx_poll(struct e1000_device *dev, struct bytes_buf *buf)
+static struct result e1000_rx_poll(struct e1000_device *dev, struct byte_buf *buf)
 {
     assert(buf);
 
@@ -429,10 +429,10 @@ static struct result e1000_rx_poll(struct e1000_device *dev, struct bytes_buf *b
     vaddr_t rx_buf_vaddr = result_vaddr_t_checked(rx_buf_vaddr_res);
 
     assert(rx_desc->length <= E1000_RX_BUF_SIZE);
-    struct bytes rx_buf = bytes_new((void *)rx_buf_vaddr, rx_desc->length);
+    struct byte_array rx_buf = byte_array_new((void *)rx_buf_vaddr, rx_desc->length);
 
-    bytes_buf_memcpy(buf, rx_buf);
-    memset(rx_buf, 0);
+    byte_buf_append(buf, byte_view_from_array(rx_buf));
+    byte_array_set(rx_buf, 0);
 
     // Notice that `rx_desc->base_addr` remains unchanged because the same buffer can now be reused.
     rx_desc->length = 0;
@@ -463,7 +463,7 @@ static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *
         crash("Interrupt receive queue overrun\n");
 
     if (cause & E1000_INTERRUPT_RXDMT0 || cause & E1000_INTERRUPT_RXT0) {
-        struct bytes_buf buf = bytes_buf_new(dev->tmp_recv_buf, 0, E1000_RX_BUF_SIZE);
+        struct byte_buf buf = byte_buf_new(dev->tmp_recv_buf, 0, E1000_RX_BUF_SIZE);
         struct result res = result_ok();
 
         while (1) {
@@ -498,7 +498,7 @@ static struct result e1000_probe(struct pci_device *pci)
     dev->mmio_base = pci->bars[0].base;
     dev->mmio_len = pci->bars[0].len;
 
-    memset(bytes_new(&dev->stats, sizeof(dev->stats)), 0);
+    byte_array_set(byte_array_new(&dev->stats, sizeof(dev->stats)), 0);
 
     struct result res = e1000_init_mmio(dev, (pci->bars[0].flags & PCI_BAR_FLAG_PREFETCHABLE) ?
                                                  ADDR_MAPPING_MEMORY_DEFAULT :

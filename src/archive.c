@@ -12,7 +12,7 @@ u64 djb2_hash(struct str str)
     return hash;
 }
 
-struct result archive_extract(struct bytes archive, struct ram_fs *rfs)
+struct result archive_extract(struct byte_view archive, struct ram_fs *rfs)
 {
     assert(rfs);
 
