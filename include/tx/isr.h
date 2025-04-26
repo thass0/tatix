@@ -72,8 +72,6 @@ void isr_stub_45(void);
 void isr_stub_46(void);
 void isr_stub_47(void);
 
-void isr_stub_128(void);
-
 __naked void isr_return(void);
 void handle_interrupt(struct trap_frame *cpu_state);
 
