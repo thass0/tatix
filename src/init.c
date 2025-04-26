@@ -95,8 +95,14 @@ void print_hello_txt(struct ram_fs *rfs)
     print_str(str_from_buf(sbuf));
 }
 
+static void handle_timer_interrupt(struct trap_frame *cpu_state __unused, void *private_data __unused)
+{
+    return;
+}
+
 __noreturn void kernel_init(void)
 {
+    isr_register_handler(0x20, handle_timer_interrupt, NULL);
     gdt_init();
     com_init(COM1_PORT);
     interrupt_init();

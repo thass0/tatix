@@ -72,9 +72,6 @@ void isr_stub_45(void);
 void isr_stub_46(void);
 void isr_stub_47(void);
 
-__naked void isr_return(void);
-void handle_interrupt(struct trap_frame *cpu_state);
-
 // Ranges for different types of interrupt vectors. Given as intervals: [beg; end)
 #define RESERVED_VECTORS_BEG 0
 #define RESERVED_VECTORS_END 32
@@ -83,5 +80,9 @@ void handle_interrupt(struct trap_frame *cpu_state);
 #define IRQ_VECTORS_BEG RESERVED_VECTORS_END
 #define IRQ_VECTORS_END 48
 #define NUM_IRQ_VECTORS (IRQ_VECTORS_END - IRQ_VECTORS_BEG)
+
+typedef void (*interrupt_handler_func_t)(struct trap_frame *cpu_state, void *private_data);
+
+struct result isr_register_handler(u64 vector, interrupt_handler_func_t handler, void *private_data);
 
 #endif // __TX_ISR_H__

@@ -1,12 +1,65 @@
 // Interrupt service routines
 
 #include <tx/arena.h>
+#include <tx/assert.h>
 #include <tx/base.h>
 #include <tx/fmt.h>
 #include <tx/isr.h>
 #include <tx/pic.h>
 
-__naked void isr_stub_common(void)
+///////////////////////////////////////////////////////////////////////////////
+// Interrupt handling                                                        //
+///////////////////////////////////////////////////////////////////////////////
+
+struct interrupt_handler {
+    u8 is_used;
+    interrupt_handler_func_t handler;
+    void *private_data;
+};
+
+static struct interrupt_handler handler_table[IRQ_VECTORS_END];
+
+struct result isr_register_handler(u64 vector, interrupt_handler_func_t handler, void *private_data)
+{
+    assert(handler);
+
+    if (vector >= IRQ_VECTORS_END)
+        return result_error(EINVAL);
+
+    if (handler_table[vector].is_used)
+        return result_error(EINVAL);
+
+    handler_table[vector].is_used = true;
+    handler_table[vector].handler = handler;
+    handler_table[vector].private_data = private_data;
+
+    return result_ok();
+}
+
+static bool have_interrupt_handler(u64 vector)
+{
+    if (vector >= IRQ_VECTORS_END)
+        return false;
+    return handler_table[vector].is_used;
+}
+
+static void handle_interrupt(struct trap_frame *cpu_state)
+{
+    if (cpu_state->vector < IRQ_VECTORS_END) {
+        struct interrupt_handler *handler = &handler_table[cpu_state->vector];
+        if (handler->is_used) {
+            handler->handler(cpu_state, handler->private_data);
+        }
+    }
+
+    pic_send_eoi(cpu_state->vector);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Catch-all ISR                                                             //
+///////////////////////////////////////////////////////////////////////////////
+
+static __naked __unused void isr_stub_common(void)
 {
     __asm__ volatile("push %r15");
     __asm__ volatile("push %r14");
@@ -24,14 +77,14 @@ __naked void isr_stub_common(void)
     __asm__ volatile("push %rbx");
     __asm__ volatile("push %rax");
 
-    // Pass `handle_interrupt` the CPU state as a struct by pointer
+    // Pass `interrupt_catch_all` the CPU state as a struct by pointer
     __asm__ volatile("mov %rsp, %rdi");
-    __asm__ volatile("call handle_interrupt");
+    __asm__ volatile("call interrupt_catch_all");
 
     __asm__ volatile("jmp isr_return");
 }
 
-__naked void isr_return(void)
+static __naked __unused void isr_return(void)
 {
     __asm__ volatile("pop %rax");
     __asm__ volatile("pop %rbx");
@@ -111,7 +164,7 @@ ISR_STUB(45)
 ISR_STUB(46)
 ISR_STUB(47)
 
-void fmt_cpu_state(struct trap_frame *cpu_state, struct str_buf *buf)
+static void fmt_cpu_state(struct trap_frame *cpu_state, struct str_buf *buf)
 {
     fmt(buf,
         STR("rax: 0x%lx\nrbx: 0x%lx\nrcx: 0x%lx\nrdx: 0x%lx\nrsi: 0x%lx\nrdi: 0x%lx\nrbp: 0x%lx\n"
@@ -123,27 +176,26 @@ void fmt_cpu_state(struct trap_frame *cpu_state, struct str_buf *buf)
         cpu_state->rsp, cpu_state->ss);
 }
 
-void handle_interrupt(struct trap_frame *cpu_state)
+static void __unused interrupt_catch_all(struct trap_frame *cpu_state)
 {
     char underlying[1024];
     struct str_buf buf = str_buf_new(underlying, 0, countof(underlying));
 
-    print_dbg(STR("*** Interrupt handler start\n"));
-
-    if (cpu_state->vector < RESERVED_VECTORS_END) {
-        fmt_cpu_state(cpu_state, &buf);
-        print_dbg(STR("Error: caught unimplemented system interrupt\nSystem state:\n"));
-        print_dbg(str_from_buf(buf));
-        hlt();
-    } else if (cpu_state->vector < IRQ_VECTORS_END) {
-        print_dbg(STR("Caught an IRQ: vector=%lu error_code=%lu\n"), cpu_state->vector, cpu_state->error_code);
-        pic_send_eoi(cpu_state->vector);
-    } else {
-        fmt_cpu_state(cpu_state, &buf);
-        print_dbg(STR("Error: caught unexpected interrupt:\n"));
-        print_dbg(str_from_buf(buf));
-        hlt();
+    if (have_interrupt_handler(cpu_state->vector)) {
+        handle_interrupt(cpu_state);
+        return;
     }
 
-    print_dbg(STR("*** Interrupt handler end\n"));
+    print_str(STR("*** Interrupt handler failed\n"));
+
+    fmt_cpu_state(cpu_state, &buf);
+
+    if (cpu_state->vector < RESERVED_VECTORS_END)
+        print_str(STR("Error: System interrupt:\n"));
+    else
+        print_str(STR("Error: Unexpected interrupt:\n"));
+
+    print_str(str_from_buf(buf));
+
+    crash("Failed to handle interrupt\n");
 }
