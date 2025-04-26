@@ -6,6 +6,7 @@
 #include <tx/kvalloc.h>
 #include <tx/paging.h>
 #include <tx/pci.h>
+#include <tx/pic.h>
 #include <tx/print.h>
 
 // The 8254x PCI/PCI-X Family of Gigabit Ethernet Controllers Software Developer’s Manual (2009 version) was used as a
@@ -17,12 +18,20 @@
 #define E1000_OFFSET_CTRL 0x0
 #define E1000_OFFSET_EECD 0x10
 #define E1000_OFFSET_EERD 0x14
+
+#define E1000_OFFSET_ICR 0xc0
+#define E1000_OFFSET_ITR 0xc4
+#define E1000_OFFSET_ICS 0xc8
+#define E1000_OFFSET_IMS 0xd0
+#define E1000_OFFSET_IMC 0xd8
+
 #define E1000_OFFSET_RCTL 0x100
 #define E1000_OFFSET_RDBAL 0x2800
 #define E1000_OFFSET_RDBAH 0x2804
 #define E1000_OFFSET_RDLEN 0x2808
 #define E1000_OFFSET_RDH 0x2810
 #define E1000_OFFSET_RDT 0x2818
+
 #define E1000_OFFSET_TCTL 0x400
 #define E1000_OFFSET_TIPG 0x410
 #define E1000_OFFSET_TDBAL 0x3800
@@ -30,8 +39,13 @@
 #define E1000_OFFSET_TDLEN 0x3808
 #define E1000_OFFSET_TDH 0x3810
 #define E1000_OFFSET_TDT 0x3818
+
 #define E1000_OFFSET_RAL0 0x5400
 #define E1000_OFFSET_RAH0 0x5404
+
+#define E1000_INTERRUPT_RXDMT0 BIT(4)
+#define E1000_INTERRUPT_RXO BIT(6)
+#define E1000_INTERRUPT_RXT0 BIT(7)
 
 #define E1000_TX_DESC_SIZE 16
 
@@ -306,6 +320,7 @@ static struct result e1000_init_rx(struct e1000_device *dev)
     rctl |= BIT(1); // Enable receive.
     rctl &= ~(BIT(17) | BIT(16) | BIT(25)); // Buffer size of 2048B (the default).
     rctl &= ~(BIT(5) | BIT(6) | BIT(7)); // Disable long packets and loopback.
+    // Receive Descriptor Minimum Threshold Size (RDMTS) is kept at the default of 1/2 of RDLEN.
     mmio_write32(dev->mmio_base + E1000_OFFSET_RCTL, rctl);
 
     dev->rx_queue = rx_queue;
@@ -314,6 +329,15 @@ static struct result e1000_init_rx(struct e1000_device *dev)
     dev->rx_tail = 0;
 
     return result_ok();
+}
+
+static void e1000_init_interrupts(struct e1000_device *dev)
+{
+    pic_enable_irq(11);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_IMS,
+                 E1000_INTERRUPT_RXDMT0 | E1000_INTERRUPT_RXO | E1000_INTERRUPT_RXT0);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_ITR, 500); // Generate interrupts at a maximum rate of 128 mu/s.
+    mmio_read32(dev->mmio_base + E1000_OFFSET_ICR);
 }
 
 static void e1000_set_link_up(struct e1000_device *dev)
@@ -451,6 +475,8 @@ static struct result e1000_probe(struct pci_device *pci)
 
     print_dbg(STR("Link is up!\n"));
 
+    e1000_init_interrupts(dev);
+
     // Transmit a test packet.
     sz pkt_size = 40;
     u32 *pkt = kvalloc_alloc(pkt_size, alignof(*pkt));
@@ -482,4 +508,5 @@ static struct result e1000_probe(struct pci_device *pci)
 }
 
 PCI_REGISTER_DRIVER(e1000, E1000_NUM_SUPPORTED_IDS, supported_ids,
-                    PCI_DEVICE_DRIVER_CAP_DMA | PCI_DEVICE_DRIVER_CAP_MEM, e1000_probe);
+                    PCI_DEVICE_DRIVER_CAP_DMA | PCI_DEVICE_DRIVER_CAP_MEM | PCI_DEVICE_DRIVER_CAP_INTERRUPT,
+                    e1000_probe);
