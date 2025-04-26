@@ -139,6 +139,8 @@ struct pci_device {
     u8 device;
     u8 func;
 
+    u8 interrupt_line;
+
     struct pci_bar bars[PCI_MAX_BARS];
 
     struct pci_device_driver *driver;

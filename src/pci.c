@@ -313,6 +313,8 @@ struct result pci_probe(void)
                 continue;
             }
 
+            u8 interrupt_line = result_u8_checked(pci_config_read8(bus, device, 0, PCI_OFFSET_HDR0_INTERRUPT_LINE));
+
             // Allocate and link the device. All uninitialized will be zero because the arena returns
             // zero-initialized memory. Also the arena will crash before returning a NULL pointer.
             struct pci_device *dev = arena_alloc_aligned(&arn, sizeof(*dev), alignof(*dev));
@@ -326,6 +328,8 @@ struct result pci_probe(void)
             dev->bus = bus;
             dev->device = device;
             dev->func = 0;
+
+            dev->interrupt_line = interrupt_line;
 
             struct result res = pci_get_resource_info(bus, device, 0, &dev->bars);
             if (res.is_error) {
