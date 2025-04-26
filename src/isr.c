@@ -137,6 +137,7 @@ void handle_interrupt(struct trap_frame *cpu_state)
         hlt();
     } else if (cpu_state->vector < IRQ_VECTORS_END) {
         print_dbg(STR("Caught an IRQ: vector=%lu error_code=%lu\n"), cpu_state->vector, cpu_state->error_code);
+        pic_send_eoi(cpu_state->vector);
     } else {
         fmt_cpu_state(cpu_state, &buf);
         print_dbg(STR("Error: caught unexpected interrupt:\n"));
