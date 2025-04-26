@@ -3,6 +3,7 @@
 #include <tx/asm.h>
 #include <tx/base.h>
 #include <tx/bytes.h>
+#include <tx/isr.h>
 #include <tx/kvalloc.h>
 #include <tx/paging.h>
 #include <tx/pci.h>
@@ -98,12 +99,25 @@ struct __aligned(E1000_RX_DESC_SIZE) e1000_rx_desc {
 static_assert(sizeof(struct e1000_rx_desc) == E1000_RX_DESC_SIZE);
 static_assert(alignof(struct e1000_rx_desc) == E1000_RX_DESC_SIZE);
 
+struct e1000_stats {
+    sz n_packets_rx;
+    sz n_packets_tx;
+    sz n_rxo_interrupts;
+    sz n_rxdmt0_interrupts;
+    sz n_rxt0_interrupts;
+    sz n_interrupts;
+};
+
 struct e1000_device {
+    u8 *tmp_recv_buf; // Just used as a source of memory to receive stuff in the interrupt handler.
+
     u64 mmio_base;
     u64 mmio_len;
 
     bool eeprom_normal_access;
     u8 mac_addr[6];
+
+    struct e1000_stats stats;
 
     struct e1000_legacy_tx_desc *tx_queue;
     sz tx_queue_n_desc;
@@ -307,8 +321,8 @@ static struct result e1000_init_rx(struct e1000_device *dev)
     mmio_write32(dev->mmio_base + E1000_OFFSET_RDLEN, rx_mem_size);
 
     // This indicates that all descriptors are available for the hardware to store packets.
-    mmio_write64(dev->mmio_base + E1000_OFFSET_RDH, 0);
-    mmio_write64(dev->mmio_base + E1000_OFFSET_RDT, rx_queue_n_desc - 1);
+    mmio_write64(dev->mmio_base + E1000_OFFSET_RDH, 1);
+    mmio_write64(dev->mmio_base + E1000_OFFSET_RDT, 0);
 
     // Set RAL0/RAH0 to the MAC address of the controller so that it accepts packets addressed to it.
     // NOTE: Don't need to set up the Multicast Array Table (MTA) as only one RAL/RAH entry is used.
@@ -347,15 +361,6 @@ static void e1000_set_link_up(struct e1000_device *dev)
     mmio_write32(dev->mmio_base + E1000_OFFSET_CTRL, ctrl);
 }
 
-static inline sz e1000_advance_tx_tail(struct e1000_device *dev)
-{
-    sz orig_tail = dev->tx_tail;
-    dev->tx_tail = (dev->tx_tail + 1) % dev->tx_queue_n_desc;
-    assert(dev->tx_tail <= U16_MAX);
-    mmio_write32(dev->mmio_base + E1000_OFFSET_TDT, dev->tx_tail);
-    return orig_tail;
-}
-
 static struct result e1000_tx_poll(struct e1000_device *dev, struct bytes pkt)
 {
     struct e1000_legacy_tx_desc *tx_desc = &dev->tx_queue[dev->tx_tail];
@@ -379,30 +384,29 @@ static struct result e1000_tx_poll(struct e1000_device *dev, struct bytes pkt)
     tx_desc->length = (u16)pkt.len;
     tx_desc->cmd |= E1000_TX_DESC_CMD_EOP | E1000_TX_DESC_CMD_RS;
 
-    e1000_advance_tx_tail(dev);
+    // Advance the tail.
+    dev->tx_tail = (dev->tx_tail + 1) % dev->tx_queue_n_desc;
+    assert(dev->tx_tail <= U16_MAX);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_TDT, dev->tx_tail);
 
-    print_dbg(STR("Transmitted packet: addr=0x%lx, len=%ld\n"), pkt.dat, pkt.len);
+    dev->stats.n_packets_tx++;
 
     return result_ok();
-}
-
-static inline sz e1000_advance_rx_tail(struct e1000_device *dev)
-{
-    sz orig_tail = dev->rx_tail;
-    dev->rx_tail = (dev->rx_tail + 1) % dev->rx_queue_n_desc;
-    assert(dev->rx_tail <= U16_MAX);
-    mmio_write32(dev->mmio_base + E1000_OFFSET_RDT, dev->rx_tail);
-    return orig_tail;
 }
 
 static struct result e1000_rx_poll(struct e1000_device *dev, struct bytes_buf *buf)
 {
     assert(buf);
 
-    struct e1000_rx_desc *rx_desc = &dev->rx_queue[dev->rx_tail];
-
     if (buf->cap - buf->len < E1000_RX_BUF_SIZE)
         return result_error(EINVAL);
+
+    // Check the first packet beyond the tail. We need to do it this way because we can't initialize the head
+    // and the tail pointer to the same value.
+    sz next_tail = (dev->rx_tail + 1) % dev->rx_queue_n_desc;
+    assert(next_tail <= U16_MAX);
+
+    struct e1000_rx_desc *rx_desc = &dev->rx_queue[next_tail];
 
     // The tail points to the first descriptor that has not been processed by software yet. There is nothing for
     // us to do if the hardware hasn't set the Descriptor Done (DD) bit on this descriptor.
@@ -434,11 +438,47 @@ static struct result e1000_rx_poll(struct e1000_device *dev, struct bytes_buf *b
     rx_desc->length = 0;
     rx_desc->status = 0;
 
-    sz orig_tail = e1000_advance_rx_tail(dev);
+    // Advance the tail now that the packet beyond the tail as been received.
+    dev->rx_tail = next_tail;
+    mmio_write32(dev->mmio_base + E1000_OFFSET_RDT, next_tail);
 
-    print_dbg(STR("Received packet: idx=%ld, len=0x%lx\n"), orig_tail, rx_buf.len);
+    dev->stats.n_packets_rx++;
 
     return result_ok();
+}
+
+static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *private_data)
+{
+    assert(private_data);
+    struct e1000_device *dev = private_data;
+
+    u32 cause = mmio_read32(dev->mmio_base + E1000_OFFSET_ICR); // This also clears the register to ack' the interrupt.
+
+    dev->stats.n_interrupts++;
+    dev->stats.n_rxo_interrupts += cause & E1000_INTERRUPT_RXO ? 1 : 0;
+    dev->stats.n_rxdmt0_interrupts += cause & E1000_INTERRUPT_RXDMT0 ? 1 : 0;
+    dev->stats.n_rxt0_interrupts += cause & E1000_INTERRUPT_RXT0 ? 1 : 0;
+
+    if (cause & E1000_INTERRUPT_RXO)
+        crash("Interrupt receive queue overrun\n");
+
+    if (cause & E1000_INTERRUPT_RXDMT0 || cause & E1000_INTERRUPT_RXT0) {
+        struct bytes_buf buf = bytes_buf_new(dev->tmp_recv_buf, 0, E1000_RX_BUF_SIZE);
+        struct result res = result_ok();
+
+        while (1) {
+            res = e1000_rx_poll(dev, &buf);
+            if (res.is_error && res.code == EAGAIN)
+                break; // Stop trying to receive any more data.
+            if (res.is_error)
+                crash("Failed to receive\n");
+            buf.len = 0;
+        }
+    }
+
+    print_dbg(STR("Received N packets: %ld\n"), dev->stats.n_packets_rx);
+    print_dbg(STR("N_RXO: %ld, N_RXDMT0: %ld, N_RXT0: %ld\n"), dev->stats.n_rxo_interrupts,
+              dev->stats.n_rxdmt0_interrupts, dev->stats.n_rxt0_interrupts);
 }
 
 static struct result e1000_probe(struct pci_device *pci)
@@ -449,8 +489,16 @@ static struct result e1000_probe(struct pci_device *pci)
     if (!dev)
         return result_error(ENOMEM);
 
+    // This shouldn't last forever:
+    u8 *recv_buf = kvalloc_alloc(E1000_RX_BUF_SIZE, 64);
+    if (!recv_buf)
+        return result_error(ENOMEM);
+    dev->tmp_recv_buf = recv_buf;
+
     dev->mmio_base = pci->bars[0].base;
     dev->mmio_len = pci->bars[0].len;
+
+    memset(bytes_new(&dev->stats, sizeof(dev->stats)), 0);
 
     struct result res = e1000_init_mmio(dev, (pci->bars[0].flags & PCI_BAR_FLAG_PREFETCHABLE) ?
                                                  ADDR_MAPPING_MEMORY_DEFAULT :
@@ -475,34 +523,11 @@ static struct result e1000_probe(struct pci_device *pci)
 
     print_dbg(STR("Link is up!\n"));
 
+    pic_enable_irq(pci->interrupt_line);
+    res = isr_register_handler(IRQ_VECTORS_BEG + pci->interrupt_line, e1000_handle_interrupt, dev);
+    assert(!res.is_error);
+
     e1000_init_interrupts(dev);
-
-    // Transmit a test packet.
-    sz pkt_size = 40;
-    u32 *pkt = kvalloc_alloc(pkt_size, alignof(*pkt));
-    assert(pkt);
-    for (i32 i = 0; i < pkt_size / 4; i++)
-        pkt[i] = 0xefbeadde;
-
-    res = e1000_tx_poll(dev, bytes_new(pkt, pkt_size));
-    assert(!res.is_error);
-
-    kvalloc_free(pkt, pkt_size);
-
-    u8 *buf_mem = kvalloc_alloc(E1000_RX_BUF_SIZE, 64);
-    assert(buf_mem);
-    struct bytes_buf buf = bytes_buf_new(buf_mem, 0, E1000_RX_BUF_SIZE);
-    memset(bytes_from_buf(buf), 0);
-
-    print_dbg(STR("Polling rx ...\n"));
-    while ((res = e1000_rx_poll(dev, &buf)).code == EAGAIN)
-        ;
-    print_dbg(STR("Done polling!!!\n"));
-    assert(!res.is_error);
-    struct str dat;
-    dat.dat = (char *)buf.dat;
-    dat.len = buf.len;
-    print_dbg(STR("Received:\n%s\n"), dat);
 
     return result_ok();
 }
