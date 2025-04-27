@@ -91,6 +91,7 @@ typedef double f64;
 #define true 1
 #define false 0
 #define STRINGIFY(x) #x
+#define CONCAT(a, b) a##b
 #define TOSTRING(x) STRINGIFY(x)
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -103,7 +104,9 @@ typedef double f64;
 #define DECONST(t, a) ((t)((uptr)((const void *)(a))))
 #define static_assert(x) _static_assert(x, __LINE__)
 #define _static_assert(x, line) __static_assert(x, line)
-#define __static_assert(x, line) typedef __unused char __static_assert_##line[(x) ? 1 : -1]
+#define __CONCAT_EXPAND(a, b) CONCAT(a, b)
+#define __static_assert(x, line) \
+    typedef __unused char __CONCAT_EXPAND(__static_assert_##line##_, __COUNTER__)[(x) ? 1 : -1]
 #define ADD_OVERFLOW(a, b) __builtin_add_overflow_p(a, b, (__typeof__((a) + (b)))0)
 #define SUB_OVERFLOW(a, b) __builtin_sub_overflow_p(a, b, (__typeof__((a) - (b)))0)
 #define MUL_OVERFLOW(a, b) __builtin_mul_overflow_p(a, b, (__typeof__((a) * (b)))0)
