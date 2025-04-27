@@ -3,6 +3,7 @@
 #include <tx/asm.h>
 #include <tx/base.h>
 #include <tx/byte.h>
+#include <tx/ethernet.h>
 #include <tx/isr.h>
 #include <tx/kvalloc.h>
 #include <tx/paging.h>
@@ -116,7 +117,7 @@ struct e1000_device {
     u64 mmio_len;
 
     bool eeprom_normal_access;
-    u8 mac_addr[6];
+    struct mac_addr mac_addr;
 
     struct e1000_stats stats;
 
@@ -196,15 +197,10 @@ static void e1000_read_mac_addr(struct e1000_device *dev)
 {
     // Reference: Table 5-2. Ethernet Controller Address Map
     assert(dev);
-    u16 tmp = e1000_eeprom_read16(dev, 0);
-    dev->mac_addr[0] = tmp & 0xff;
-    dev->mac_addr[1] = tmp >> 8;
-    tmp = e1000_eeprom_read16(dev, 1);
-    dev->mac_addr[2] = tmp & 0xff;
-    dev->mac_addr[3] = tmp >> 8;
-    tmp = e1000_eeprom_read16(dev, 2);
-    dev->mac_addr[4] = tmp & 0xff;
-    dev->mac_addr[5] = tmp >> 8;
+    u16 tmp0 = e1000_eeprom_read16(dev, 0);
+    u16 tmp1 = e1000_eeprom_read16(dev, 1);
+    u16 tmp2 = e1000_eeprom_read16(dev, 2);
+    dev->mac_addr = mac_addr(tmp0 & 0xff, tmp0 >> 8, tmp1 & 0xff, tmp1 >> 8, tmp2 & 0xff, tmp2 >> 8);
 }
 
 static void e1000_init_device(struct e1000_device *dev)
@@ -351,9 +347,9 @@ static struct result e1000_init_rx(struct e1000_device *dev)
 
     // Set RAL0/RAH0 to the MAC address of the controller so that it accepts packets addressed to it.
     // NOTE: Don't need to set up the Multicast Array Table (MTA) as only one RAL/RAH entry is used.
-    mmio_write32(dev->mmio_base + E1000_OFFSET_RAL0,
-                 (dev->mac_addr[3] << 24) | (dev->mac_addr[2] << 16) | (dev->mac_addr[1] << 8) | dev->mac_addr[0]);
-    mmio_write32(dev->mmio_base + E1000_OFFSET_RAH0, BIT(31) | (dev->mac_addr[5] << 8) | dev->mac_addr[4]);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_RAL0, (dev->mac_addr.addr[3] << 24) | (dev->mac_addr.addr[2] << 16) |
+                                                         (dev->mac_addr.addr[1] << 8) | dev->mac_addr.addr[0]);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_RAH0, BIT(31) | (dev->mac_addr.addr[5] << 8) | dev->mac_addr.addr[4]);
 
     u32 rctl = mmio_read32(dev->mmio_base + E1000_OFFSET_RCTL);
     rctl |= BIT(1); // Enable receive.
