@@ -345,7 +345,7 @@ struct result pci_probe(void)
                       vendor_id, device_id);
             for (i32 i = 0; i < PCI_MAX_BARS; i++) {
                 if (dev->bars[i].used) {
-                    print_dbg(PINFO, STR("BAR%d: base=0x%lx, len=0x%lx (%s)\n"), i, dev->bars[i].base, dev->bars[i].len,
+                    print_dbg(PDBG, STR("BAR%d: base=0x%lx, len=0x%lx (%s)\n"), i, dev->bars[i].base, dev->bars[i].len,
                               dev->bars[i].type == PCI_BAR_TYPE_IO ? STR("IO") : STR("MEM"));
                 }
             }
