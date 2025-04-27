@@ -7,14 +7,14 @@ BUILD_DIR := build
 BOOTLOADER_DIR := bootloader
 SRC_DIR := src
 
-ifeq ($(DEBUG),)
+ifneq ($(DEBUG),)
+    DEBUG_FLAGS := -g
+else
 	DEBUG := 0
 endif
 
-ifeq ($(shell [ $(DEBUG) -ge 2 ] 2>/dev/null && echo yes), yes)
-    DEBUG_FLAGS := -g
-endif
-ifeq ($(shell [ $(DEBUG) -ge 3 ] 2>/dev/null && echo yes), yes)
+ifneq ($(GDB),)
+	DEBUG_FLAGS := -g
     QEMU_DEBUG_FLAGS := -s -S
 endif
 

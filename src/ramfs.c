@@ -228,7 +228,6 @@ static struct result_ram_fs_node ram_fs_create_common(struct ram_fs *rfs, struct
         }
 
         struct str parent_path = path_name_to_str(path, &scratch);
-        print_dbg(STR("parent_path: '%s'\n"), parent_path);
         struct result_ram_fs_node parent_res = ram_fs_create_common(rfs, parent_path, RAM_FS_TYPE_DIR, true, scratch);
         if (parent_res.is_error)
             return parent_res;
@@ -645,7 +644,6 @@ static void test_ram_fs_create_dir(struct arena arn)
     assert(!dir_res.is_error);
     struct ram_fs_node *boop_dir = result_ram_fs_node_checked(dir_res);
     assert(boop_dir->type == RAM_FS_TYPE_DIR);
-    print_dbg(STR("boop_dir->name: %s\n"), boop_dir->name);
     assert(str_is_equal(boop_dir->name, STR("boop")));
 }
 
@@ -962,5 +960,5 @@ void ram_fs_run_tests(struct arena arn)
     test_ram_fs_read(arn);
     test_ram_fs_write(arn);
     test_ram_fs_e2e(arn);
-    print_dbg(STR("RAM fs selftest passed\n"));
+    print_dbg(PINFO, STR("RAM fs selftest passed\n"));
 }

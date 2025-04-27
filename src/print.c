@@ -22,19 +22,21 @@ struct result print_fmt(struct str_buf buf, struct str fmt, ...)
     return res;
 }
 
-#if __DEBUG__ >= 1
-
 #define PRINT_DBG_BUF_SIZE 700
 
-struct result __print_dbg(struct str basename, sz line, struct str funcname, struct str fmt_str, ...)
+struct result __print_dbg(struct str basename, sz line, struct str funcname, i16 level, struct str fmt_str, ...)
 {
-    va_list argp;
-    struct result res = result_ok();
+    if (level > __DEBUG__)
+        return result_ok();
+
     char underlying[PRINT_DBG_BUF_SIZE];
     struct str_buf buf = str_buf_new(underlying, 0, countof(underlying));
     struct str_buf buf_cpy = buf;
+
+    va_list argp;
     va_start(argp, fmt_str);
-    res = fmt(&buf_cpy, STR("%s %s:%ld "), funcname, basename, line);
+
+    struct result res = fmt(&buf_cpy, STR("%s %s:%ld "), funcname, basename, line);
     if (!res.is_error) {
         buf = buf_cpy;
     } else {
@@ -51,7 +53,8 @@ struct result __print_dbg(struct str basename, sz line, struct str funcname, str
         return res;
     }
     res = print_str(str_from_buf(buf));
+
     va_end(argp);
+
     return res;
 }
-#endif

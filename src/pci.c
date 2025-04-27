@@ -309,6 +309,7 @@ struct result pci_probe(void)
             // Check if this is a general device (this is the only thing supported for now).
             if ((result_u8_checked(header_type_res) & PCI_MASK_HEADER_TYPE) != 0) {
                 print_dbg(
+                    PDBG,
                     STR("Skipping device %hhx:%hhx.%hhx [%hx:%hx] because its header is not type 0 (general device)\n"),
                     bus, device, 0, vendor_id, device_id);
                 continue;
@@ -340,11 +341,11 @@ struct result pci_probe(void)
 
             dlist_insert(&device_list, &dev->device_list);
 
-            print_dbg(STR("Inserted device %hhx:%hhx.%hhx [%hx:%hx] into device list\n"), bus, device, 0, vendor_id,
-                      device_id);
+            print_dbg(PINFO, STR("Inserted device %hhx:%hhx.%hhx [%hx:%hx] into device list\n"), bus, device, 0,
+                      vendor_id, device_id);
             for (i32 i = 0; i < PCI_MAX_BARS; i++) {
                 if (dev->bars[i].used) {
-                    print_dbg(STR("BAR%d: base=0x%lx, len=0x%lx (%s)\n"), i, dev->bars[i].base, dev->bars[i].len,
+                    print_dbg(PINFO, STR("BAR%d: base=0x%lx, len=0x%lx (%s)\n"), i, dev->bars[i].base, dev->bars[i].len,
                               dev->bars[i].type == PCI_BAR_TYPE_IO ? STR("IO") : STR("MEM"));
                 }
             }
@@ -358,13 +359,13 @@ struct result pci_probe(void)
     while (dev_iter != orig) {
         dev = __container_of(dev_iter, struct pci_device, device_list);
 
-        print_dbg(STR("Looking up drivers for device %hhx:%hhx.%hhx [%hx:%hx]\n"), dev->bus, dev->device, dev->func,
-                  dev->vendor_id, dev->device_id);
+        print_dbg(PDBG, STR("Looking up drivers for device %hhx:%hhx.%hhx [%hx:%hx]\n"), dev->bus, dev->device,
+                  dev->func, dev->vendor_id, dev->device_id);
 
         struct pci_device_driver *drv = pci_lookup_driver(dev->vendor_id, dev->device_id);
 
         if (drv) {
-            print_dbg(STR("Probing driver %s [%hx:%hx]\n"), drv->name, dev->vendor_id, dev->device_id);
+            print_dbg(PINFO, STR("Probing driver %s [%hx:%hx]\n"), drv->name, dev->vendor_id, dev->device_id);
 
             struct result res = pci_set_driver_capabilities(dev, drv->capabilities);
             if (res.is_error) {
@@ -380,13 +381,13 @@ struct result pci_probe(void)
                 return res;
             }
         } else {
-            print_dbg(STR(" ... no single driver found (either zero or more than one)\n"));
+            print_dbg(PDBG, STR(" ... no single driver found (either zero or more than one)\n"));
         }
 
         dev_iter = dev_iter->next;
     }
 
-    print_dbg(STR("Successfully probed all PCI devices\n"));
+    print_dbg(PDBG, STR("Successfully probed all PCI devices\n"));
 
     return result_ok();
 }

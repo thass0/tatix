@@ -225,7 +225,7 @@ static struct pt *pt_get_or_alloc(struct pt *pt, sz idx, u16 perms)
         if (!ret)
             return NULL;
         paddr_t paddr_ret = result_paddr_t_checked(virt_to_phys((vaddr_t)ret));
-        print_dbg(STR("Allocated page table page: vaddr=0x%lx paddr=0x%lx\n"), ret, paddr_ret);
+        print_dbg(PDBG, STR("Allocated page table page: vaddr=0x%lx paddr=0x%lx\n"), ret, paddr_ret);
         pt_insert(pt, idx, pte_from_paddr(paddr_ret, perms, ADDR_MAPPING_MEMORY_DEFAULT));
     } else {
         struct pte pte = pt->entries[idx]; // Safe because `pt_get` succeeded.
@@ -289,20 +289,20 @@ static struct result pt_unmap(struct page_table page_table, vaddr_t vaddr)
     if (!(pt->entries[pt_idx].bits & PT_FLAG_P))
         return result_error(EINVAL);
     pt->entries[pt_idx].bits &= ~PT_FLAG_P;
-    print_dbg(STR("Removed entry: pt_idx=%ld\n"), pt_idx);
+    print_dbg(PDBG, STR("Removed entry: pt_idx=%ld\n"), pt_idx);
 
     if (pt_is_empty(pt)) {
-        print_dbg(STR("Freeing page table: pt=0x%lx\n"), pt);
+        print_dbg(PDBG, STR("Freeing page table: pt=0x%lx\n"), pt);
         pd->entries[PT_IDX(vaddr, PD_BIT_BASE)].bits &= ~PT_FLAG_P;
         pool_free(&global_pt_page_alloc, pt);
     }
     if (pt_is_empty(pd)) {
-        print_dbg(STR("Freeing page directory: pd=0x%lx\n"), pd);
+        print_dbg(PDBG, STR("Freeing page directory: pd=0x%lx\n"), pd);
         pdpt->entries[PT_IDX(vaddr, PDPT_BIT_BASE)].bits &= ~PT_FLAG_P;
         pool_free(&global_pt_page_alloc, pd);
     }
     if (pt_is_empty(pdpt)) {
-        print_dbg(STR("Freeing page directory pointer table: pdpt=0x%lx\n"), pdpt);
+        print_dbg(PDBG, STR("Freeing page directory pointer table: pdpt=0x%lx\n"), pdpt);
         page_table.pml4->entries[PT_IDX(vaddr, PML4_BIT_BASE)].bits &= ~PT_FLAG_P;
         pool_free(&global_pt_page_alloc, pdpt);
     }
@@ -391,8 +391,8 @@ struct byte_array paging_init(struct addr_mapping code_addrs, struct addr_mappin
     assert(dyn_addrs.len / 200 > pt_bytes); // Make sure we don't accidentally waste tons of memory on page tables.
     assert(pt_bytes < 16 * 0x100000); // Ensure pt pages are inside the mapped region (see _start).
 
-    print_dbg(STR("Paging with n_pages=%ld n_pts=%ld n_pds=%ld n_pdpts=%ld n_pml4s=%ld pt_bytes=0x%lx\n"), n_pages,
-              n_pts, n_pds, n_pdpts, n_pml4s, pt_bytes);
+    print_dbg(PINFO, STR("Paging with n_pages=%ld n_pts=%ld n_pds=%ld n_pdpts=%ld n_pml4s=%ld pt_bytes=0x%lx\n"),
+              n_pages, n_pts, n_pds, n_pdpts, n_pml4s, pt_bytes);
 
     assert(cpu_has_pat()); // The cacheability controls implementation depends on this feature.
 

@@ -476,8 +476,8 @@ static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *
         }
     }
 
-    print_dbg(STR("Received N packets: %ld\n"), dev->stats.n_packets_rx);
-    print_dbg(STR("N_RXO: %ld, N_RXDMT0: %ld, N_RXT0: %ld\n"), dev->stats.n_rxo_interrupts,
+    print_dbg(PDBG, STR("Received N packets: %ld\n"), dev->stats.n_packets_rx);
+    print_dbg(PDBG, STR("N_RXO: %ld, N_RXDMT0: %ld, N_RXT0: %ld\n"), dev->stats.n_rxo_interrupts,
               dev->stats.n_rxdmt0_interrupts, dev->stats.n_rxt0_interrupts);
 }
 
@@ -506,8 +506,9 @@ static struct result e1000_probe(struct pci_device *pci)
     e1000_eeprom_check(dev);
     e1000_read_mac_addr(dev);
 
-    print_dbg(STR("EEPROM access mechanism: %s\n"), dev->eeprom_normal_access ? STR("Normal") : STR("Alternate"));
-    print_dbg(STR("MAC: %hhx:%hhx:%hhx:%hhx:%hhx:%hhx\n"), dev->mac_addr[0], dev->mac_addr[1], dev->mac_addr[2],
+    print_dbg(PINFO, STR("EEPROM access mechanism: %s\n"),
+              dev->eeprom_normal_access ? STR("Normal") : STR("Alternate"));
+    print_dbg(PINFO, STR("MAC: %hhx:%hhx:%hhx:%hhx:%hhx:%hhx\n"), dev->mac_addr[0], dev->mac_addr[1], dev->mac_addr[2],
               dev->mac_addr[3], dev->mac_addr[4], dev->mac_addr[5]);
 
     e1000_init_device(dev);
@@ -519,7 +520,7 @@ static struct result e1000_probe(struct pci_device *pci)
 
     e1000_set_link_up(dev);
 
-    print_dbg(STR("Link is up!\n"));
+    print_dbg(PINFO, STR("Link is up!\n"));
 
     pic_enable_irq(pci->interrupt_line);
     res = isr_register_handler(IRQ_VECTORS_BEG + pci->interrupt_line, e1000_handle_interrupt, dev);
