@@ -480,12 +480,9 @@ static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *
                 break; // Stop trying to receive any more data.
             if (res.is_error)
                 crash("Failed to receive\n");
+            ethernet_handle_frame(byte_view_from_buf(buf));
         }
     }
-
-    print_dbg(PDBG, STR("Received N packets: %ld\n"), dev->stats.n_packets_rx);
-    print_dbg(PDBG, STR("N_RXO: %ld, N_RXDMT0: %ld, N_RXT0: %ld\n"), dev->stats.n_rxo_interrupts,
-              dev->stats.n_rxdmt0_interrupts, dev->stats.n_rxt0_interrupts);
 }
 
 // TODO: This is temporary because it assumes too strongly that there can only be one such device.
@@ -525,7 +522,7 @@ static struct result e1000_probe(struct pci_device *pci)
     e1000_eeprom_check(&global_dev);
     e1000_read_mac_addr(&global_dev);
 
-    print_dbg(PINFO, STR("EEPROM access mechanism: %s\n"),
+    print_dbg(PDBG, STR("EEPROM access mechanism: %s\n"),
               global_dev.eeprom_normal_access ? STR("Normal") : STR("Alternate"));
     print_dbg(PINFO, STR("MAC: %hhx:%hhx:%hhx:%hhx:%hhx:%hhx\n"), global_dev.mac_addr.addr[0],
               global_dev.mac_addr.addr[1], global_dev.mac_addr.addr[2], global_dev.mac_addr.addr[3],

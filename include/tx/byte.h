@@ -100,7 +100,7 @@ static inline void *byte_array_ptr(struct byte_array ba)
     return (void *)ba.dat;
 }
 
-// Conversions into byte views.
+// Byte view conversions.
 
 static inline struct byte_view byte_view_from_array(struct byte_array ba)
 {
@@ -115,6 +115,13 @@ static inline struct byte_view byte_view_from_buf(struct byte_buf bb)
 static inline struct byte_view byte_view_from_str(struct str sv)
 {
     return byte_view_new(sv.dat, sv.len);
+}
+
+// Same kind of convenience function as for the byte array to allow setting pointers of different types to the byte
+// view's base address without explicit casting.
+static inline void *byte_view_ptr(struct byte_view bv)
+{
+    return (void *)bv.dat;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -133,6 +140,19 @@ static inline sz byte_buf_append(struct byte_buf *bb, struct byte_view bv)
 
     for (sz i = 0; i < n; i++)
         bb->dat[bb->len + i] = bv.dat[i];
+
+    bb->len += n;
+    return n;
+}
+
+static inline sz byte_buf_append_n(struct byte_buf *bb, sz n, byte value)
+{
+    assert(bb);
+
+    n = MIN(bb->cap - bb->len, n);
+
+    for (sz i = 0; i < n; i++)
+        bb->dat[bb->len + i] = value;
 
     bb->len += n;
     return n;
