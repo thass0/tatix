@@ -45,7 +45,7 @@ struct result kvalloc_init(struct byte_array vaddrs)
     return result_ok();
 }
 
-void *kvalloc_alloc(sz n_bytes, sz align)
+struct option_byte_array kvalloc_alloc(sz n_bytes, sz align)
 {
     assert(global_kvalloc_is_initiallized);
 
@@ -54,30 +54,29 @@ void *kvalloc_alloc(sz n_bytes, sz align)
     assert(align <= PAGE_SIZE);
 
     sz real_size = ALIGN_UP(n_bytes, PAGE_SIZE);
-    void *vaddr = buddy_alloc(global_kvalloc.virt_alloc, real_size);
-    if (!vaddr)
-        return NULL;
-
-    return vaddr;
+    return buddy_alloc(global_kvalloc.virt_alloc, real_size);
 }
 
-void kvalloc_free(void *ptr, sz n_bytes)
+void kvalloc_free(struct byte_array ba)
 {
     assert(global_kvalloc_is_initiallized);
 
-    if (!ptr)
+    if (!ba.dat)
         return;
 
-    sz real_size = ALIGN_UP(n_bytes, PAGE_SIZE);
-    buddy_free(global_kvalloc.virt_alloc, ptr, real_size);
+    ba.len = ALIGN_UP(ba.len, PAGE_SIZE); // This is the real size we need to free.
+    buddy_free(global_kvalloc.virt_alloc, ba);
 }
 
 void *kvalloc_alloc_wrapper(void *a __unused, sz size, sz align)
 {
-    return kvalloc_alloc(size, align);
+    struct option_byte_array ba = kvalloc_alloc(size, align);
+    if (ba.is_none)
+        return NULL;
+    return byte_array_ptr(option_byte_array_checked(ba));
 }
 
 void kvalloc_free_wrapper(void *a __unused, void *ptr, sz size)
 {
-    kvalloc_free(ptr, size);
+    kvalloc_free(byte_array_new(ptr, size));
 }

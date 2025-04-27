@@ -6,6 +6,7 @@
 #include <tx/base.h>
 #include <tx/byte.h>
 #include <tx/list.h>
+#include <tx/option.h>
 
 #define PAGE_SIZE_SHIFT 12
 #define N_FREE_LISTS ((sizeof(void *) * BYTE_WIDTH) - PAGE_SIZE_SHIFT)
@@ -27,14 +28,13 @@ struct buddy {
 struct buddy *buddy_init(struct byte_array ba, struct arena *arn);
 
 // Allocate `size` bytes from the given buddy allocator. `buddy` must be non-NULL
-// and `size` must be greater than zero. The returned pointer will be aligned to a page
-// boundary.
-void *buddy_alloc(struct buddy *buddy, sz size);
+// and `size` must be greater than zero. The byte array that this function returns will
+// be aligned to a page boundary.
+struct option_byte_array buddy_alloc(struct buddy *buddy, sz size);
 
-// Free an allocation from the given buddy allocator. `buddy` must be non-NULL
-// and `size` must be greater than zero. `ptr` may be NULL. The size must match that
-// or the original allocation.
-void buddy_free(struct buddy *buddy, void *ptr, sz size);
+// Free an allocation from the given buddy allocator. `buddy` must be non-NULL,
+// and `ba.len` must match the size must of the original allocation.
+void buddy_free(struct buddy *buddy, struct byte_array ba);
 
 // For `struct alloc`.
 void *buddy_alloc_wrapper(void *a, sz size, sz align __unused);

@@ -34,8 +34,11 @@
         o.is_none = false;                                                                              \
         o.unchecked_option_value = t;                                                                   \
         return o;                                                                                       \
-    }
+    }                                                                                                   \
+                                                                                                        \
+    typedef char REQUIRE_SEMICOLON_AFTER_MACRO_STRUCT_OPTION_##name
 
-struct_option(sz, sz)
+struct_option(sz, sz);
+struct_option(byte_array, struct byte_array);
 
 #endif // __TX_OPTION_H__

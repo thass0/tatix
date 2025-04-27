@@ -207,7 +207,7 @@ static void buddy_free_raw(struct buddy *buddy, void *ptr, sz ord)
     dlist_insert(&buddy->avail[ord].link, &block->link);
 }
 
-void *buddy_alloc(struct buddy *buddy, sz size)
+struct option_byte_array buddy_alloc(struct buddy *buddy, sz size)
 {
     assert(buddy);
     assert(size > 0);
@@ -219,29 +219,33 @@ void *buddy_alloc(struct buddy *buddy, sz size)
     // Because this implementation deals in pages as the smallest unit, we need
     // to divide by the page size to arrive at the number of blocks that are needed.
     sz ord = order_of(min_power_of_two_geq(real_size) / PAGE_SIZE);
-    return buddy_alloc_raw(buddy, ord);
+    void *mem = buddy_alloc_raw(buddy, ord);
+    if (!mem)
+        return option_byte_array_none();
+    return option_byte_array_ok(byte_array_new(mem, size));
 }
 
-void buddy_free(struct buddy *buddy, void *ptr, sz size)
+void buddy_free(struct buddy *buddy, struct byte_array ba)
 {
     assert(buddy);
-    assert(size > 0);
-
-    if (!ptr)
-        return;
+    assert(ba.len > 0);
+    assert(ba.dat);
 
     // See `buddy_alloc` for comments.
-    sz real_size = ALIGN_UP(size, PAGE_SIZE);
+    sz real_size = ALIGN_UP(ba.len, PAGE_SIZE);
     sz ord = order_of(min_power_of_two_geq(real_size) / PAGE_SIZE);
-    buddy_free_raw(buddy, ptr, ord);
+    buddy_free_raw(buddy, ba.dat, ord);
 }
 
 void *buddy_alloc_wrapper(void *a, sz size, sz align __unused)
 {
-    return buddy_alloc((struct buddy *)a, size);
+    struct option_byte_array ba = buddy_alloc((struct buddy *)a, size);
+    if (ba.is_none)
+        return NULL;
+    return byte_array_ptr(option_byte_array_checked(ba));
 }
 
 void buddy_free_wrapper(void *a, void *ptr, sz size)
 {
-    buddy_free((struct buddy *)a, ptr, size);
+    buddy_free((struct buddy *)a, byte_array_new(ptr, size));
 }

@@ -3,6 +3,7 @@
 
 #include <tx/assert.h>
 #include <tx/base.h>
+#include <tx/byte.h>
 #include <tx/errordef.h>
 
 // NOTE: `struct_result(name, type)` can only be used in contexts, where `assert` is availble.
@@ -39,7 +40,7 @@
         return r;                                                                                       \
     }                                                                                                   \
                                                                                                         \
-    typedef char REQUIRE_SEMICOLON_AFTER_MACRO_##name
+    typedef char REQUIRE_SEMICOLON_AFTER_MACRO_STRUCT_RESULT_##name
 
 struct_result(sz, sz);
 struct_result(ptr, ptr);
