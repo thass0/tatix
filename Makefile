@@ -1,11 +1,10 @@
+# This Makefile drives compilation for all of Tatix.
+
+################################################################################
+# Variable definitions                                                         #
+################################################################################
+
 .PHONY = clean boot fmt
-
-CONFIG := config.mk
-include $(CONFIG)
-
-BUILD_DIR := build
-BOOTLOADER_DIR := bootloader
-SRC_DIR := src
 
 ifneq ($(DEBUG),)
     DEBUG_FLAGS := -g
@@ -17,6 +16,13 @@ ifneq ($(GDB),)
 	DEBUG_FLAGS := -g
     QEMU_DEBUG_FLAGS := -s -S
 endif
+
+CONFIG := config.mk
+include $(CONFIG)
+
+BUILD_DIR := build
+BOOTLOADER_DIR := bootloader
+SRC_DIR := src
 
 CC := gcc
 CPPFLAGS := -MMD -Iinclude/
@@ -43,12 +49,18 @@ LINKER_CONFIG := $(BUILD_DIR)/config.ld
 NASM_CONFIG := $(BUILD_DIR)/config.s
 HEADER_CONFIG := $(BUILD_DIR)/config.h
 
+################################################################################
+# Compilation                                                                  #
+################################################################################
+
 all: $(DISK_IMAGE)
 
 $(DISK_IMAGE): $(BOOTLOADER_IMAGE) $(KERNEL_ELF) | $(BUILD_DIR)
 	cat $^ > $@
 
-# Compile bootloader
+################################################################################
+# Compile bootloader                                                           #
+################################################################################
 
 $(BOOTLOADER_IMAGE): $(BOOTLOADER_OBJS) | $(BUILD_DIR) $(LINKER_CONFIG) bootloader.ld
 	ld -L$(dir $(LINKER_CONFIG)) -T bootloader.ld -o $(BUILD_DIR)/bootloader.elf $^
@@ -61,7 +73,9 @@ $(BUILD_DIR)/%.s.o: $(BOOTLOADER_DIR)/%.s | $(BUILD_DIR) $(NASM_CONFIG)
 $(BUILD_DIR)/%.c.o: $(BOOTLOADER_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
 	$(CC) $(CPPFLAGS) -I$(dir $(HEADER_CONFIG)) $(CFLAGS) -c $< -o $@
 
-# Compile kernel
+################################################################################
+# Compile kernel                                                               #
+################################################################################
 
 $(KERNEL_ELF): $(OBJS) $(ROOTFS_OBJ) | $(BUILD_DIR) $(LINKER_CONFIG) kernel.ld
 	ld -L$(dir $(LINKER_CONFIG)) $(DEBUG_FLAGS) -T kernel.ld -o $@ $^
@@ -75,6 +89,10 @@ $(BUILD_DIR)/%.c.o: $(SRC_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
 $(BUILD_DIR)/%.s.o: $(SRC_DIR)/%.s | $(BUILD_DIR)
 	$(NASM) $< -o $@
 
+################################################################################
+# Build rootfs                                                                 #
+################################################################################
+
 # This will create an archive of the rootfs and place it into the .rootfs_archive section of a normal object.
 # The linker will come looking for this later and put the section into the kernel ELF (see kernel.ld).
 $(ROOTFS_OBJ): $(ROOTFS_ARCHIVE) | $(BUILD_DIR)
@@ -83,7 +101,9 @@ $(ROOTFS_OBJ): $(ROOTFS_ARCHIVE) | $(BUILD_DIR)
 $(ROOTFS_ARCHIVE): $(ROOTFS_DIR) | $(BUILD_DIR)
 	./scripts/archive.py enc $< $@
 
-# Misc
+################################################################################
+# Misc                                                                         #
+################################################################################
 
 $(LINKER_CONFIG): $(CONFIG)
 	./scripts/make_config.sh -f linker -o $@ $<
