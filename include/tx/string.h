@@ -2,8 +2,27 @@
 #define __TX_STRING_H__
 
 #include <tx/assert.h>
+#include <tx/byte.h>
 #include <tx/option.h>
 #include <tx/stringdef.h>
+
+// TODO: Ideally, we would like to have safe unicode strings. Then, there would need to be checks that make
+// sure these functions are safe:
+
+static inline struct str_buf str_buf_from_byte_array(struct byte_array ba)
+{
+    return str_buf_new((char *)ba.dat, 0, ba.len);
+}
+
+static inline struct str_buf str_buf_from_byte_buf(struct byte_buf bb)
+{
+    return str_buf_new((char *)bb.dat, bb.len, bb.cap);
+}
+
+static inline struct str str_from_byte_buf(struct byte_buf bb)
+{
+    return str_new((char *)bb.dat, bb.len);
+}
 
 static inline char str_buf_get_checked(struct str_buf *buf, sz idx)
 {
