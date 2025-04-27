@@ -64,6 +64,7 @@
 
 // Maximum ethernet frame size is 1500B so this should work
 #define E1000_RX_BUF_SIZE 2048
+#define E1000_TX_BUF_SIZE 2048
 
 #define E1000_VENDOR_ID 0x8086
 #define E1000_DEVICE_ID 0x100E
@@ -122,6 +123,7 @@ struct e1000_device {
     struct e1000_legacy_tx_desc *tx_queue;
     sz tx_queue_n_desc;
     sz tx_tail;
+    byte (*tx_buffers)[E1000_TX_BUF_SIZE];
 
     struct e1000_rx_desc *rx_queue;
     sz rx_queue_n_desc;
@@ -230,19 +232,38 @@ static struct result e1000_init_tx(struct e1000_device *dev)
     struct byte_array tx_mem = option_byte_array_checked(tx_mem_opt);
     struct e1000_legacy_tx_desc *tx_queue = byte_array_ptr(tx_mem);
 
-    // Initialize all the descriptors to zero except for the DD bit in the status field. This field
-    // must be set to so that the transmit function knows that the descriptors can all be used.
+    struct option_byte_array tx_buffers_mem_opt = kvalloc_alloc(tx_queue_n_desc * E1000_TX_BUF_SIZE, 64);
+    if (tx_buffers_mem_opt.is_none) {
+        kvalloc_free(tx_mem);
+        return result_error(ENOMEM);
+    }
+    struct byte_array tx_buffers_mem = option_byte_array_checked(tx_buffers_mem_opt);
+
     byte_array_set(tx_mem, 0);
-    for (sz i = 0; i < tx_queue_n_desc; i++)
-        tx_queue[i].status |= E1000_TX_DESC_STATUS_DD;
+    byte_array_set(tx_buffers_mem, 0);
 
     // The 8254x needs a physical address because it will use it for DMA.
     struct result_paddr_t paddr_tx_queue_res = virt_to_phys((vaddr_t)tx_queue);
+    struct result_paddr_t paddr_tx_buffers_res = virt_to_phys((vaddr_t)byte_array_ptr(tx_buffers_mem));
     if (paddr_tx_queue_res.is_error) {
         kvalloc_free(tx_mem);
+        kvalloc_free(tx_buffers_mem);
         return result_error(paddr_tx_queue_res.code);
     }
+    if (paddr_tx_buffers_res.is_error) {
+        kvalloc_free(tx_mem);
+        kvalloc_free(tx_buffers_mem);
+        return result_error(paddr_tx_buffers_res.code);
+    }
     paddr_t paddr_tx_queue = result_paddr_t_checked(paddr_tx_queue_res);
+    paddr_t paddr_tx_buffers = result_paddr_t_checked(paddr_tx_buffers_res);
+
+    // The addresses of these buffers don't change so we can set them once and leave them. The DD bit must be set so
+    // the transmit function knows that the descriptors can all be used.
+    for (sz i = 0; i < tx_queue_n_desc; i++) {
+        tx_queue[i].status |= E1000_TX_DESC_STATUS_DD;
+        tx_queue[i].base_addr = paddr_tx_buffers + i * E1000_TX_BUF_SIZE;
+    }
 
     assert(IS_ALIGNED(paddr_tx_queue, 16));
     mmio_write32(dev->mmio_base + E1000_OFFSET_TDBAL, (u64)paddr_tx_queue & 0xffffffff);
@@ -266,6 +287,7 @@ static struct result e1000_init_tx(struct e1000_device *dev)
     mmio_write32(dev->mmio_base + E1000_OFFSET_TIPG, 10 | (8 << 10) | (6 << 20));
 
     dev->tx_queue = tx_queue;
+    dev->tx_buffers = byte_array_ptr(tx_buffers_mem);
     dev->tx_queue_n_desc = tx_queue_n_desc;
     dev->tx_tail = 0;
 
@@ -368,7 +390,7 @@ static struct result e1000_tx_poll(struct e1000_device *dev, struct byte_view pk
 {
     struct e1000_legacy_tx_desc *tx_desc = &dev->tx_queue[dev->tx_tail];
 
-    if (pkt.len > U16_MAX)
+    if (pkt.len > E1000_TX_BUF_SIZE)
         return result_error(EINVAL);
 
     // If there is space in the queue, the tail points to a descriptor with the DD flag set, because the 8254x
@@ -376,15 +398,11 @@ static struct result e1000_tx_poll(struct e1000_device *dev, struct byte_view pk
     if (!(tx_desc->status & E1000_TX_DESC_STATUS_DD))
         return result_error(ENOBUFS);
 
-    // The 8254x needs a physical address because it will use the base address for DMA.
-    struct result_paddr_t paddr_base_res = virt_to_phys((vaddr_t)pkt.dat);
-    if (paddr_base_res.is_error)
-        return result_error(paddr_base_res.code);
-    paddr_t paddr_base = result_paddr_t_checked(paddr_base_res);
+    struct byte_buf tx_buf = byte_buf_new(&dev->tx_buffers[dev->tx_tail], 0, E1000_TX_BUF_SIZE);
+    assert(byte_buf_append(&tx_buf, pkt) == pkt.len);
 
-    byte_array_set(byte_array_new(tx_desc, sizeof(*tx_desc)), 0);
-    tx_desc->base_addr = (u64)paddr_base;
     tx_desc->length = (u16)pkt.len;
+    tx_desc->status = 0;
     tx_desc->cmd |= E1000_TX_DESC_CMD_EOP | E1000_TX_DESC_CMD_RS;
 
     // Advance the tail.
@@ -424,15 +442,8 @@ static struct result e1000_rx_poll(struct e1000_device *dev, struct byte_buf *bu
     if (rx_desc->error)
         return result_error(EIO);
 
-    // The descriptor stores a physical address because it is used by the 8254x for DMA. We need to translate
-    // this physical address back to a virtual address before we can access it.
-    struct result_vaddr_t rx_buf_vaddr_res = phys_to_virt((paddr_t)rx_desc->base_addr);
-    if (rx_buf_vaddr_res.is_error)
-        return result_error(rx_buf_vaddr_res.code);
-    vaddr_t rx_buf_vaddr = result_vaddr_t_checked(rx_buf_vaddr_res);
-
     assert(rx_desc->length <= E1000_RX_BUF_SIZE);
-    struct byte_array rx_buf = byte_array_new((void *)rx_buf_vaddr, rx_desc->length);
+    struct byte_array rx_buf = byte_array_new(&dev->rx_buffers[next_tail], rx_desc->length);
 
     byte_buf_append(buf, byte_view_from_array(rx_buf));
     byte_array_set(rx_buf, 0);
