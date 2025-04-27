@@ -193,7 +193,7 @@ struct ram_fs_node *ram_fs_node_alloc(struct ram_fs *rfs, struct str name, enum 
     name_buf.cap = name.len;
     append_str(name, &name_buf);
     node->name = str_from_buf(name_buf);
-    node->data = str_buf_new(NULL, 0, 0);
+    node->data = byte_buf_new(NULL, 0, 0);
     return node;
 }
 
@@ -302,7 +302,7 @@ struct ram_fs *ram_fs_new(struct alloc alloc)
     root_dir->next = NULL;
     root_dir->type = RAM_FS_TYPE_DIR;
     root_dir->name = STR("");
-    root_dir->data = str_buf_new(NULL, 0, 0);
+    root_dir->data = byte_buf_new(NULL, 0, 0);
     root_dir->fs = rfs;
 
     rfs->root = root_dir;
@@ -326,7 +326,7 @@ struct result_ram_fs_node ram_fs_create_file(struct ram_fs *rfs, struct str file
     void *data = alloc_alloc(rfs->data_alloc, RAM_FS_DEFAULT_FILE_SIZE, alignof(void *));
     if (!data)
         return result_ram_fs_node_error(ENOMEM);
-    node->data = str_buf_new(data, 0, RAM_FS_DEFAULT_FILE_SIZE);
+    node->data = byte_buf_new(data, 0, RAM_FS_DEFAULT_FILE_SIZE);
     return result_ram_fs_node_ok(node);
 }
 
@@ -351,10 +351,10 @@ struct result_ram_fs_node ram_fs_open(struct ram_fs *rfs, struct str filename)
     return result_ram_fs_node_ok(node);
 }
 
-struct result_sz ram_fs_read(struct ram_fs_node *rfs_node, struct str_buf *sbuf, sz offset)
+struct result_sz ram_fs_read(struct ram_fs_node *rfs_node, struct byte_buf *bbuf, sz offset)
 {
     assert(rfs_node);
-    assert(sbuf);
+    assert(bbuf);
 
     if (rfs_node->type != RAM_FS_TYPE_FILE)
         return result_sz_error(EINVAL);
@@ -365,15 +365,12 @@ struct result_sz ram_fs_read(struct ram_fs_node *rfs_node, struct str_buf *sbuf,
         return result_sz_ok(0);
 
     sz avail = rfs_node->data.len - offset;
-    sz read_len = MIN(sbuf->cap, avail);
-    struct result res = append_str(str_new((char *)rfs_node->data.dat + offset, read_len), sbuf);
+    sz n_appended = byte_buf_append(bbuf, byte_view_new(rfs_node->data.dat + offset, avail));
 
-    if (res.is_error)
-        return result_sz_error(res.code);
-    return result_sz_ok(read_len);
+    return result_sz_ok(n_appended);
 }
 
-struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct str str, sz offset)
+struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct byte_view bview, sz offset)
 {
     assert(rfs_node);
 
@@ -388,28 +385,28 @@ struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct str str, sz o
     if (offset > rfs_node->data.len)
         return result_sz_error(EINVAL);
 
-    if (str.len + offset > rfs_node->data.cap) {
+    if (bview.len + offset > rfs_node->data.cap) {
         // The write operation exceeds the capacity of the file. We need to reallocate the data.
         sz new_data_cap = 2 * rfs_node->data.cap;
         void *new_data = alloc_alloc(rfs_node->fs->data_alloc, new_data_cap, alignof(void *));
         if (!new_data)
             return result_sz_error(ENOMEM);
-        struct str_buf new_data_buf = str_buf_new(new_data, 0, new_data_cap);
-        append_str(str_from_buf(rfs_node->data), &new_data_buf);
+        struct byte_buf new_data_buf = byte_buf_new(new_data, 0, new_data_cap);
+        byte_buf_append(&new_data_buf, byte_view_from_buf(rfs_node->data));
         rfs_node->data = new_data_buf;
     }
 
     // Now we have: str.len + offset <= rfs_node->data.cap => str.len <= rfs_node->data.cap - offset
     sz avail = rfs_node->data.cap - offset;
-    assert(str.len <= avail); // Make sure the reallocation above worked as expected.
-    sz write_len = MIN(str.len, avail);
+    assert(bview.len <= avail); // Make sure the reallocation above worked as expected.
+    sz write_len = MIN(bview.len, avail);
 
     // Make sure we don't write of out bounds of the buffer. These assertions may seem redundant, but
     // better safe than sorry.
     assert(rfs_node->data.cap >= offset);
     assert(write_len <= rfs_node->data.cap - offset);
     struct byte_buf bb = byte_buf_new(rfs_node->data.dat + offset, 0, write_len);
-    byte_buf_append(&bb, byte_view_from_str(str));
+    byte_buf_append(&bb, bview);
     assert(bb.len == write_len);
     rfs_node->data.len = MAX(rfs_node->data.len, offset + write_len);
 
@@ -560,28 +557,28 @@ static void test_ram_fs_node_lookup(struct arena arn)
     root_dir->next = NULL;
     root_dir->type = RAM_FS_TYPE_DIR;
     root_dir->name = STR("");
-    root_dir->data = str_buf_new(NULL, 0, 0);
+    root_dir->data = byte_buf_new(NULL, 0, 0);
     root_dir->fs = rfs;
 
     blah_dir->first = NULL;
     blah_dir->next = NULL;
     blah_dir->type = RAM_FS_TYPE_DIR;
     blah_dir->name = STR("blah");
-    blah_dir->data = str_buf_new(NULL, 0, 0);
+    blah_dir->data = byte_buf_new(NULL, 0, 0);
     blah_dir->fs = rfs;
 
     foo_file->first = NULL;
     foo_file->next = NULL;
     foo_file->type = RAM_FS_TYPE_FILE;
     foo_file->name = STR("foo");
-    foo_file->data = str_buf_new(NULL, 0, 0);
+    foo_file->data = byte_buf_new(NULL, 0, 0);
     foo_file->fs = rfs;
 
     bar_file->first = NULL;
     bar_file->next = NULL;
     bar_file->type = RAM_FS_TYPE_FILE;
     bar_file->name = STR("bar");
-    bar_file->data = str_buf_new(NULL, 0, 0);
+    bar_file->data = byte_buf_new(NULL, 0, 0);
     bar_file->fs = rfs;
 
     root_dir->first = blah_dir;
@@ -730,14 +727,14 @@ static void test_ram_fs_open(struct arena arn)
     dir_node->next = NULL;
     dir_node->type = RAM_FS_TYPE_DIR;
     dir_node->name = STR("dir");
-    dir_node->data = str_buf_new(NULL, 0, 0);
+    dir_node->data = byte_buf_new(NULL, 0, 0);
     dir_node->fs = rfs;
 
     file_node->first = NULL;
     file_node->next = NULL;
     file_node->type = RAM_FS_TYPE_FILE;
     file_node->name = STR("file");
-    file_node->data = str_buf_new(NULL, 0, 0);
+    file_node->data = byte_buf_new(NULL, 0, 0);
     file_node->fs = rfs;
 
     rfs->root->first = dir_node;
@@ -798,7 +795,7 @@ static void test_ram_fs_read(struct arena arn)
     struct ram_fs *rfs = ram_fs_new(test_helper_create_alloc(&arn));
 
     struct result_sz res;
-    struct str_buf sbuf;
+    struct byte_buf bbuf;
 
     // Manually setting up the file system structure to avoid dependency on file creation logic
     struct ram_fs_node *file_node = arena_alloc_aligned(&arn, sizeof(*file_node), alignof(*file_node));
@@ -806,42 +803,42 @@ static void test_ram_fs_read(struct arena arn)
     file_node->next = NULL;
     file_node->type = RAM_FS_TYPE_FILE;
     file_node->name = STR("file");
-    file_node->data = str_buf_from_arena(&arn, 13);
+    file_node->data = byte_buf_from_array(byte_array_from_arena(13, &arn));
     file_node->fs = rfs;
-    append_str(STR("Hello, world!"), &file_node->data);
+    byte_buf_append(&file_node->data, byte_view_from_str(STR("Hello, world!")));
 
     rfs->root->first = file_node;
 
     // Read the entire file
-    sbuf = str_buf_from_arena(&arn, 13);
-    res = ram_fs_read(file_node, &sbuf, 0);
+    bbuf = byte_buf_from_array(byte_array_from_arena(13, &arn));
+    res = ram_fs_read(file_node, &bbuf, 0);
     assert(!res.is_error);
     assert(result_sz_checked(res) == 13);
-    assert(str_is_equal(str_from_buf(sbuf), STR("Hello, world!")));
+    assert(byte_view_is_equal(byte_view_from_buf(bbuf), byte_view_from_str(STR("Hello, world!"))));
 
     // Read a part of the file
-    sbuf = str_buf_from_arena(&arn, 5);
-    res = ram_fs_read(file_node, &sbuf, 7);
+    bbuf = byte_buf_from_array(byte_array_from_arena(5, &arn));
+    res = ram_fs_read(file_node, &bbuf, 7);
     assert(!res.is_error);
     assert(result_sz_checked(res) == 5);
-    assert(str_is_equal(str_from_buf(sbuf), STR("world")));
+    assert(byte_view_is_equal(byte_view_from_buf(bbuf), byte_view_from_str(STR("world"))));
 
     // Read past the end of the file
-    sbuf = str_buf_from_arena(&arn, 5);
-    res = ram_fs_read(file_node, &sbuf, 13);
+    bbuf = byte_buf_from_array(byte_array_from_arena(5, &arn));
+    res = ram_fs_read(file_node, &bbuf, 13);
     assert(!res.is_error);
     assert(result_sz_checked(res) == 0);
-    assert(str_is_equal(str_from_buf(sbuf), STR("")));
+    assert(byte_view_is_equal(byte_view_from_buf(bbuf), byte_view_from_str(STR(""))));
 
     // Read with offset past the end of the file
-    sbuf = str_buf_from_arena(&arn, 5);
-    res = ram_fs_read(file_node, &sbuf, 14);
+    bbuf = byte_buf_from_array(byte_array_from_arena(5, &arn));
+    res = ram_fs_read(file_node, &bbuf, 14);
     assert(res.is_error);
     assert(res.code == EINVAL);
 
     // Read with offset past the end of the file
-    sbuf = str_buf_from_arena(&arn, 5);
-    res = ram_fs_read(file_node, &sbuf, 15);
+    bbuf = byte_buf_from_array(byte_array_from_arena(5, &arn));
+    res = ram_fs_read(file_node, &bbuf, 15);
     assert(res.is_error);
     assert(res.code == EINVAL);
 
@@ -851,11 +848,11 @@ static void test_ram_fs_read(struct arena arn)
     dir_node->next = NULL;
     dir_node->type = RAM_FS_TYPE_DIR;
     dir_node->name = STR("dir");
-    dir_node->data = str_buf_new(NULL, 0, 0);
+    dir_node->data = byte_buf_new(NULL, 0, 0);
     dir_node->fs = rfs;
 
-    sbuf = str_buf_from_arena(&arn, 5);
-    res = ram_fs_read(dir_node, &sbuf, 0);
+    bbuf = byte_buf_from_array(byte_array_from_arena(5, &arn));
+    res = ram_fs_read(dir_node, &bbuf, 0);
     assert(res.is_error);
     assert(res.code == EINVAL);
 }
@@ -873,44 +870,44 @@ static void test_ram_fs_write(struct arena arn)
     file_node->type = RAM_FS_TYPE_FILE;
     file_node->name = STR("file");
     file_node->fs = rfs;
-    file_node->data = str_buf_from_arena(&arn, 13);
+    file_node->data = byte_buf_from_array(byte_array_from_arena(13, &arn));
 
     rfs->root->first = file_node;
 
     // Write to an empty file
-    res = ram_fs_write(file_node, STR("Hello, world!"), 0);
+    res = ram_fs_write(file_node, byte_view_from_str(STR("Hello, world!")), 0);
     assert(!res.is_error);
     assert(result_sz_checked(res) == 13);
-    assert(str_is_equal(str_from_buf(file_node->data), STR("Hello, world!")));
+    assert(byte_view_is_equal(byte_view_from_buf(file_node->data), byte_view_from_str(STR("Hello, world!"))));
 
     // Write to the beginning of the file
-    res = ram_fs_write(file_node, STR("Adieu, "), 0);
+    res = ram_fs_write(file_node, byte_view_from_str(STR("Adieu, ")), 0);
     assert(!res.is_error);
     assert(result_sz_checked(res) == 7);
-    assert(str_is_equal(str_from_buf(file_node->data), STR("Adieu, world!")));
+    assert(byte_view_is_equal(byte_view_from_buf(file_node->data), byte_view_from_str(STR("Adieu, world!"))));
 
     // Write to the end of the file
-    res = ram_fs_write(file_node, STR("!!!"), 13);
+    res = ram_fs_write(file_node, byte_view_from_str(STR("!!!")), 13);
     assert(!res.is_error);
     assert(result_sz_checked(res) == 3);
-    assert(str_is_equal(str_from_buf(file_node->data), STR("Adieu, world!!!!")));
+    assert(byte_view_is_equal(byte_view_from_buf(file_node->data), byte_view_from_str(STR("Adieu, world!!!!"))));
 
     // Write to the middle of the file
-    res = ram_fs_write(file_node, STR("friend"), 7);
+    res = ram_fs_write(file_node, byte_view_from_str(STR("friend")), 7);
     assert(!res.is_error);
     assert(result_sz_checked(res) == 6);
-    assert(str_is_equal(str_from_buf(file_node->data), STR("Adieu, friend!!!")));
+    assert(byte_view_is_equal(byte_view_from_buf(file_node->data), byte_view_from_str(STR("Adieu, friend!!!"))));
 
     // Write with offset past the end of the file
-    res = ram_fs_write(file_node, STR("!!!"), 21);
+    res = ram_fs_write(file_node, byte_view_from_str(STR("!!!")), 21);
     assert(res.is_error);
     assert(res.code == EINVAL);
 
     // Write with an offset close to the end of the file so part of the write exceeds the end of the file.
-    res = ram_fs_write(file_node, STR("......"), 13);
+    res = ram_fs_write(file_node, byte_view_from_str(STR("......")), 13);
     assert(!res.is_error);
     assert(result_sz_checked(res) == 6);
-    assert(str_is_equal(str_from_buf(file_node->data), STR("Adieu, friend......")));
+    assert(byte_view_is_equal(byte_view_from_buf(file_node->data), byte_view_from_str(STR("Adieu, friend......"))));
 }
 
 static void test_ram_fs_e2e(struct arena arn)
@@ -929,7 +926,7 @@ static void test_ram_fs_e2e(struct arena arn)
     struct ram_fs_node *bar_file = result_ram_fs_node_checked(res);
 
     // Write to bar_file
-    res_sz = ram_fs_write(bar_file, STR("Blah"), 0);
+    res_sz = ram_fs_write(bar_file, byte_view_from_str(STR("Blah")), 0);
     assert(!res_sz.is_error);
     assert(result_sz_checked(res_sz) == 4);
 
@@ -938,7 +935,7 @@ static void test_ram_fs_e2e(struct arena arn)
     assert(!res.is_error);
     struct ram_fs_node *bar_file_opened = result_ram_fs_node_checked(res);
 
-    res_sz = ram_fs_write(bar_file_opened, STR("Hello, world!"), 0);
+    res_sz = ram_fs_write(bar_file_opened, byte_view_from_str(STR("Hello, world!")), 0);
     assert(!res_sz.is_error);
     assert(result_sz_checked(res_sz) == 13);
 
@@ -947,11 +944,11 @@ static void test_ram_fs_e2e(struct arena arn)
     assert(!res.is_error);
     bar_file_opened = result_ram_fs_node_checked(res);
 
-    struct str_buf sbuf = str_buf_from_arena(&arn, 13);
-    res_sz = ram_fs_read(bar_file_opened, &sbuf, 0);
+    struct byte_buf bbuf = byte_buf_from_array(byte_array_from_arena(13, &arn));
+    res_sz = ram_fs_read(bar_file_opened, &bbuf, 0);
     assert(!res_sz.is_error);
     assert(result_sz_checked(res_sz) == 13);
-    assert(str_is_equal(str_from_buf(sbuf), STR("Hello, world!")));
+    assert(byte_view_is_equal(byte_view_from_buf(bbuf), byte_view_from_str(STR("Hello, world!"))));
 }
 
 void ram_fs_run_tests(struct arena arn)

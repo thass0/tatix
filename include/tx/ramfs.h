@@ -27,7 +27,7 @@ struct ram_fs_node {
     enum ram_fs_node_type type;
     struct str name;
     // Data of the file if this node is of type RAM_FS_TYPE_FILE.
-    struct str_buf data;
+    struct byte_buf data;
     // Pointer back to parent FS.
     struct ram_fs *fs;
 };
@@ -61,14 +61,14 @@ struct result_ram_fs_node ram_fs_create_file(struct ram_fs *rfs, struct str file
 // the file or an error.
 struct result_ram_fs_node ram_fs_open(struct ram_fs *rfs, struct str filename);
 
-// Read from the file behind `rfs_node`. Data is read into `sbuf` starting at `offset` until `sbuf`
+// Read from the file behind `rfs_node`. Data is read into `bbuf` starting at `offset` until `bbuf`
 // is full or the end of the file is reached. Returns the number of bytes read or an error.
-struct result_sz ram_fs_read(struct ram_fs_node *rfs_node, struct str_buf *sbuf, sz offset);
+struct result_sz ram_fs_read(struct ram_fs_node *rfs_node, struct byte_buf *bbuf, sz offset);
 
-// Write to the file behind `rfs_node`. Data is written into the file from `str` starting at `offset`.
+// Write to the file behind `rfs_node`. Data is written into the file from `bview` starting at `offset`.
 // Existing data at `offset` will be overwritten. If `offset` is equal to the length of the file, the
-// data from `str` will be appended. Returns the number of bytes written or an error.
-struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct str str, sz offset);
+// data from `bview` will be appended. Returns the number of bytes written or an error.
+struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct byte_view bview, sz offset);
 
 void ram_fs_run_tests(struct arena arn);
 

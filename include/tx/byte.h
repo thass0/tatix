@@ -145,4 +145,14 @@ static inline void byte_array_set(struct byte_array ba, byte value)
         ba.dat[i] = value;
 }
 
+static inline bool byte_view_is_equal(struct byte_view bv1, struct byte_view bv2)
+{
+    if (bv1.len != bv2.len)
+        return false;
+    for (sz i = 0; i < bv1.len; i++)
+        if (bv1.dat[i] != bv2.dat[i])
+            return false;
+    return true;
+}
+
 #endif // __TX_BYTE_H__

@@ -1,14 +1,10 @@
 #include <tx/archive.h>
 
-u64 djb2_hash(struct str str)
+u64 djb2_hash(struct byte_view bv)
 {
     u64 hash = 5381;
-    for (sz i = 0; i < str.len; i++) {
-        // NOTE: `struct str` stores an array of `char`s. We need to cast it to `u8` to avoid
-        // sign extension when the `char` is negative.
-        // TODO: Remove the cast once RAM fs uses a `u8` byte buffer.
-        hash = ((hash << 5) + hash) + (u8)str.dat[i];
-    }
+    for (sz i = 0; i < bv.len; i++)
+        hash = ((hash << 5) + hash) + bv.dat[i];
     return hash;
 }
 
@@ -51,9 +47,9 @@ struct result archive_extract(struct byte_view archive, struct ram_fs *rfs)
             return result_error(EINVAL);
 
         struct str path = str_new((char *)(archive.dat + index_ent->offset), index_ent->path_length);
-        struct str data = str_new((char *)(archive.dat + index_ent->offset + index_ent->path_length),
-                                  index_ent->size - index_ent->path_length);
-        struct str path_and_data = str_new((char *)(archive.dat + index_ent->offset), index_ent->size);
+        struct byte_view data = byte_view_new(archive.dat + index_ent->offset + index_ent->path_length,
+                                              index_ent->size - index_ent->path_length);
+        struct byte_view path_and_data = byte_view_new(archive.dat + index_ent->offset, index_ent->size);
 
         if (djb2_hash(path_and_data) != index_ent->hash)
             return result_error(EINVAL);

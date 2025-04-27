@@ -86,11 +86,11 @@ void print_hello_txt(struct ram_fs *rfs)
     struct result_ram_fs_node node_res = ram_fs_open(rfs, STR("/hello.txt"));
     assert(!node_res.is_error);
     struct ram_fs_node *node = result_ram_fs_node_checked(node_res);
-    struct str_buf sbuf = str_buf_from_byte_array(option_byte_array_checked(kvalloc_alloc(500, alignof(void *))));
-    struct result_sz read_res = ram_fs_read(node, &sbuf, 0);
+    struct byte_buf bbuf = byte_buf_from_array(option_byte_array_checked(kvalloc_alloc(500, alignof(void *))));
+    struct result_sz read_res = ram_fs_read(node, &bbuf, 0);
     assert(!read_res.is_error);
 
-    print_str(str_from_buf(sbuf));
+    print_str(str_from_byte_buf(bbuf));
 }
 
 static void handle_timer_interrupt(struct trap_frame *cpu_state __unused, void *private_data __unused)
