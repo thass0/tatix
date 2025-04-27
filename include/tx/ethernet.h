@@ -39,6 +39,8 @@ static inline bool mac_addr_is_equal(struct mac_addr a1, struct mac_addr a2)
            a1.addr[3] == a2.addr[3] && a1.addr[4] == a2.addr[4] && a1.addr[5] == a2.addr[5];
 }
 
+#define ETHERNET_MAX_FRAME_SIZE 1522
+
 // This is the data linker layer (layer 2) format. I.e., the one _without_ the preamble, start frame delimiter and
 // Interpacket gap.
 struct ethernet_frame_header {

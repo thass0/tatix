@@ -3,10 +3,10 @@
 #include <tx/asm.h>
 #include <tx/base.h>
 #include <tx/byte.h>
-#include <tx/e1000.h>
 #include <tx/ethernet.h>
 #include <tx/isr.h>
 #include <tx/kvalloc.h>
+#include <tx/netdev.h>
 #include <tx/paging.h>
 #include <tx/pci.h>
 #include <tx/pic.h>
@@ -66,6 +66,7 @@
 
 // Maximum ethernet frame size is 1500B so this should work
 #define E1000_RX_BUF_SIZE 2048
+#define E1000_TX_BUF_SIZE 2048
 
 #define E1000_VENDOR_ID 0x8086
 #define E1000_DEVICE_ID 0x100E
@@ -394,11 +395,11 @@ static void e1000_set_link_up(struct e1000_device *dev)
 // Receive and transmit                                                      //
 ///////////////////////////////////////////////////////////////////////////////
 
-static struct result e1000_tx_poll(struct e1000_device *dev, struct byte_view pkt)
+static struct result e1000_tx_poll(struct e1000_device *dev, struct byte_view frame)
 {
     struct e1000_legacy_tx_desc *tx_desc = &dev->tx_queue[dev->tx_tail];
 
-    if (pkt.len > E1000_TX_BUF_SIZE)
+    if (frame.len > E1000_TX_BUF_SIZE)
         return result_error(EINVAL);
 
     // If there is space in the queue, the tail points to a descriptor with the DD flag set, because the 8254x
@@ -407,9 +408,9 @@ static struct result e1000_tx_poll(struct e1000_device *dev, struct byte_view pk
         return result_error(ENOBUFS);
 
     struct byte_buf tx_buf = byte_buf_new(&dev->tx_buffers[dev->tx_tail], 0, E1000_TX_BUF_SIZE);
-    assert(byte_buf_append(&tx_buf, pkt) == pkt.len);
+    assert(byte_buf_append(&tx_buf, frame) == frame.len);
 
-    tx_desc->length = (u16)pkt.len;
+    tx_desc->length = (u16)frame.len;
     tx_desc->status = 0;
     tx_desc->cmd |= E1000_TX_DESC_CMD_EOP | E1000_TX_DESC_CMD_RS;
 
@@ -501,65 +502,72 @@ static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *
 // Outside interface                                                         //
 ///////////////////////////////////////////////////////////////////////////////
 
-// TODO: This is temporary because it assumes too strongly that there can only be one such device.
-static struct e1000_device global_dev;
-
-struct result e1000_send(struct byte_view frame)
+static struct result e1000_netdev_send_frame(struct netdev *netdev, struct byte_view frame)
 {
-    if (!global_dev.mmio_base)
-        return result_error(ENODEV); // Not probed yet.
-    return e1000_tx_poll(&global_dev, frame);
-}
-
-struct result_mac_addr e1000_mac(void)
-{
-    if (!global_dev.mmio_base)
-        return result_mac_addr_error(ENODEV);
-    return result_mac_addr_ok(global_dev.mac_addr);
+    assert(netdev);
+    assert(netdev->private_data);
+    struct e1000_device *dev = netdev->private_data;
+    assert(mac_addr_is_equal(netdev->mac_addr, dev->mac_addr));
+    return e1000_tx_poll(dev, frame);
 }
 
 static struct result e1000_probe(struct pci_device *pci)
 {
     assert(pci);
 
+    struct option_byte_array dev_mem = kvalloc_alloc(sizeof(struct e1000_device), alignof(struct e1000_device));
+    if (dev_mem.is_none)
+        return result_error(ENOMEM);
+    struct e1000_device *dev = byte_array_ptr(option_byte_array_checked(dev_mem));
+
     // This shouldn't last forever:
-    global_dev.tmp_recv_buf = option_byte_array_checked(kvalloc_alloc(E1000_RX_BUF_SIZE, 64));
+    dev->tmp_recv_buf = option_byte_array_checked(kvalloc_alloc(E1000_RX_BUF_SIZE, 64));
 
-    global_dev.mmio_base = pci->bars[0].base;
-    global_dev.mmio_len = pci->bars[0].len;
+    dev->mmio_base = pci->bars[0].base;
+    dev->mmio_len = pci->bars[0].len;
 
-    byte_array_set(byte_array_new(&global_dev.stats, sizeof(global_dev.stats)), 0);
+    byte_array_set(byte_array_new(&dev->stats, sizeof(dev->stats)), 0);
 
-    struct result res = e1000_init_mmio(&global_dev, (pci->bars[0].flags & PCI_BAR_FLAG_PREFETCHABLE) ?
-                                                         ADDR_MAPPING_MEMORY_DEFAULT :
-                                                         ADDR_MAPPING_MEMORY_STRONG_UNCACHEABLE);
-    assert(!res.is_error);
+    struct result res = e1000_init_mmio(dev, (pci->bars[0].flags & PCI_BAR_FLAG_PREFETCHABLE) ?
+                                                 ADDR_MAPPING_MEMORY_DEFAULT :
+                                                 ADDR_MAPPING_MEMORY_STRONG_UNCACHEABLE);
+    if (res.is_error)
+        return res;
 
-    e1000_eeprom_check(&global_dev);
-    e1000_read_mac_addr(&global_dev);
+    e1000_eeprom_check(dev);
+    e1000_read_mac_addr(dev);
 
-    print_dbg(PDBG, STR("EEPROM access mechanism: %s\n"),
-              global_dev.eeprom_normal_access ? STR("Normal") : STR("Alternate"));
-    print_dbg(PINFO, STR("MAC: %hhx:%hhx:%hhx:%hhx:%hhx:%hhx\n"), global_dev.mac_addr.addr[0],
-              global_dev.mac_addr.addr[1], global_dev.mac_addr.addr[2], global_dev.mac_addr.addr[3],
-              global_dev.mac_addr.addr[4], global_dev.mac_addr.addr[5]);
+    print_dbg(PDBG, STR("EEPROM access mechanism: %s\n"), dev->eeprom_normal_access ? STR("Normal") : STR("Alternate"));
+    print_dbg(PINFO, STR("MAC: %hhx:%hhx:%hhx:%hhx:%hhx:%hhx\n"), dev->mac_addr.addr[0], dev->mac_addr.addr[1],
+              dev->mac_addr.addr[2], dev->mac_addr.addr[3], dev->mac_addr.addr[4], dev->mac_addr.addr[5]);
 
-    e1000_init_device(&global_dev);
+    e1000_init_device(dev);
 
-    res = e1000_init_tx(&global_dev);
-    assert(!res.is_error);
-    res = e1000_init_rx(&global_dev);
-    assert(!res.is_error);
+    res = e1000_init_tx(dev);
+    if (res.is_error)
+        return res;
+    res = e1000_init_rx(dev);
+    if (res.is_error)
+        return res;
 
-    e1000_set_link_up(&global_dev);
+    e1000_set_link_up(dev);
 
     print_dbg(PINFO, STR("Link is up!\n"));
 
     pic_enable_irq(pci->interrupt_line);
-    res = isr_register_handler(IRQ_VECTORS_BEG + pci->interrupt_line, e1000_handle_interrupt, &global_dev);
-    assert(!res.is_error);
+    res = isr_register_handler(IRQ_VECTORS_BEG + pci->interrupt_line, e1000_handle_interrupt, dev);
+    if (res.is_error)
+        return res;
 
-    e1000_init_interrupts(&global_dev);
+    e1000_init_interrupts(dev);
+
+    struct netdev netdev;
+    netdev.mac_addr = dev->mac_addr;
+    netdev.send_frame = e1000_netdev_send_frame;
+    netdev.private_data = dev;
+    res = netdev_register_device(netdev);
+    if (res.is_error)
+        return res;
 
     return result_ok();
 }

@@ -1,5 +1,5 @@
 #include <tx/arp.h>
-#include <tx/e1000.h>
+#include <tx/netdev.h>
 
 struct arp_table_ent {
     bool is_used;
@@ -10,16 +10,13 @@ struct arp_table_ent {
 #define GLOBAL_ARP_TABLE_SIZE 32
 static struct arp_table_ent global_arp_table[GLOBAL_ARP_TABLE_SIZE];
 
-static struct ip_addr global_host_ip;
-static struct mac_addr global_host_mac;
-
-static struct result arp_request_mac_addr(struct ip_addr ip_addr, struct arena arn)
+struct result arp_send_request(struct ip_addr src_ip, struct mac_addr src_mac, struct ip_addr dest_ip, struct arena arn)
 {
-    struct byte_buf frame_buf = byte_buf_from_array(byte_array_from_arena(E1000_TX_BUF_SIZE, &arn));
+    struct byte_buf frame_buf = byte_buf_from_array(byte_array_from_arena(ETHERNET_MAX_FRAME_SIZE, &arn));
 
     struct ethernet_frame_header ether_hdr;
     ether_hdr.dest = MAC_ADDR_BROADCAST;
-    ether_hdr.src = global_host_mac;
+    ether_hdr.src = src_mac;
     ether_hdr.ether_type = net_u16_from_u16(ETHERNET_PTYPE_ARP);
     byte_buf_append(&frame_buf, byte_view_new(&ether_hdr, sizeof(ether_hdr)));
 
@@ -31,21 +28,18 @@ static struct result arp_request_mac_addr(struct ip_addr ip_addr, struct arena a
     arp_hdr.opcode = net_u16_from_u16(ARP_OPCODE_REQUEST);
     byte_buf_append(&frame_buf, byte_view_new(&arp_hdr, sizeof(arp_hdr)));
 
-    byte_buf_append(&frame_buf, byte_view_new(&global_host_mac, sizeof(global_host_mac)));
-    byte_buf_append(&frame_buf, byte_view_new(&global_host_ip, sizeof(global_host_ip)));
+    byte_buf_append(&frame_buf, byte_view_new(&src_mac, sizeof(src_mac)));
+    byte_buf_append(&frame_buf, byte_view_new(&src_ip, sizeof(src_ip)));
     byte_buf_append_n(&frame_buf, sizeof(struct mac_addr), 0);
-    byte_buf_append(&frame_buf, byte_view_new(&ip_addr, sizeof(ip_addr)));
+    byte_buf_append(&frame_buf, byte_view_new(&dest_ip, sizeof(dest_ip)));
 
-    return e1000_send(byte_view_from_buf(frame_buf));
+    print_dbg(PINFO, STR("Broadcasting ARP request for IP address %hhd.%hhd.%hhd.%hhd\n"), dest_ip.addr[0],
+              dest_ip.addr[1], dest_ip.addr[2], dest_ip.addr[3]);
+
+    return netdev_send_frame(src_mac, byte_view_from_buf(frame_buf));
 }
 
-void arp_set_host(struct ip_addr host_ip, struct mac_addr host_mac)
-{
-    global_host_ip = host_ip;
-    global_host_mac = host_mac;
-}
-
-struct result_mac_addr arp_lookup_mac_addr(struct ip_addr ip_addr, struct arena arn)
+struct result_mac_addr arp_lookup_mac_addr(struct ip_addr ip_addr)
 {
     sz n_matches = 0;
     struct arp_table_ent *last_match = NULL;
@@ -59,10 +53,8 @@ struct result_mac_addr arp_lookup_mac_addr(struct ip_addr ip_addr, struct arena 
 
     assert(n_matches <= 1);
 
-    if (n_matches == 0) {
-        arp_request_mac_addr(ip_addr, arn);
-        return result_mac_addr_error(EAGAIN);
-    }
+    if (n_matches == 0)
+        return result_mac_addr_error(EHOSTUNREACH);
 
     return result_mac_addr_ok(last_match->mac_addr);
 }
@@ -98,7 +90,7 @@ static void arp_handle_reply(struct byte_view payload)
     }
 
     struct mac_addr src_mac = *(struct mac_addr *)payload.dat;
-    struct ip_addr src_ip = *(struct ip_addr *)(payload.dat + sizeof(struct mac_addr *));
+    struct ip_addr src_ip = *(struct ip_addr *)(payload.dat + sizeof(struct mac_addr));
 
     print_dbg(PINFO, STR("Received ARP reply from %hhd.%hhd.%hhd.%hhd (%hhx:%hhx:%hhx:%hhx:%hhx:%hhx)\n"),
               src_ip.addr[0], src_ip.addr[1], src_ip.addr[2], src_ip.addr[3], src_mac.addr[0], src_mac.addr[1],

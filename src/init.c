@@ -1,17 +1,16 @@
 #include <config.h>
 #include <tx/archive.h>
 #include <tx/arena.h>
-#include <tx/arp.h>
 #include <tx/assert.h>
 #include <tx/base.h>
 #include <tx/buddy.h>
 #include <tx/byte.h>
 #include <tx/com.h>
-#include <tx/e1000.h>
 #include <tx/gdt.h>
 #include <tx/idt.h>
 #include <tx/isr.h>
 #include <tx/kvalloc.h>
+#include <tx/netdev.h>
 #include <tx/paging.h>
 #include <tx/pci.h>
 #include <tx/print.h>
@@ -145,10 +144,8 @@ __noreturn void kernel_init(void)
     res = pci_probe();
     assert(!res.is_error);
 
-    arp_set_host(ip_addr(192, 168, 100, 2), result_mac_addr_checked(e1000_mac()));
-
-    struct arena arn = arena_new(option_byte_array_checked(kvalloc_alloc(2048, 64)));
-    arp_lookup_mac_addr(ip_addr(192, 168, 100, 1), arn);
+    struct arena arn = arena_new(option_byte_array_checked(kvalloc_alloc(ETHERNET_MAX_FRAME_SIZE, 64)));
+    netdev_arp_scan(ip_addr(192, 168, 100, 2), ip_addr(192, 168, 100, 1), arn);
 
     hlt();
 }

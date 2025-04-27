@@ -25,10 +25,10 @@ struct arp_header {
 
 static_assert(sizeof(struct arp_header) == 8);
 
-void arp_set_host(struct ip_addr our_ip, struct mac_addr our_mac);
+struct result arp_send_request(struct ip_addr src_ip, struct mac_addr src_mac, struct ip_addr dest_ip,
+                               struct arena arn);
 
-struct result_mac_addr arp_lookup_mac_addr(struct ip_addr ip_addr, struct arena arn);
-struct result_ip_addr arp_lookup_ip_addr(struct mac_addr map_addr);
+struct result_mac_addr arp_lookup_mac_addr(struct ip_addr ip_addr);
 
 void arp_handle_packet(struct byte_view packet);
 

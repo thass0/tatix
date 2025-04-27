@@ -74,5 +74,6 @@ static inline struct result result_ok(void)
 #define EINVAL 22
 #define ENAMETOOLONG 36
 #define ENOBUFS 105
+#define EHOSTUNREACH 113
 
 #endif // __TX_ERRORDEF_H__
