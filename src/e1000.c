@@ -132,17 +132,9 @@ struct e1000_device {
     byte (*rx_buffers)[E1000_RX_BUF_SIZE];
 };
 
-static struct result e1000_init_mmio(struct e1000_device *dev, enum addr_mapping_memory_type mem_type)
-{
-    struct addr_mapping mapping;
-    mapping.type = ADDR_MAPPING_TYPE_CANONICAL;
-    mapping.mem_type = mem_type;
-    mapping.perms = PT_FLAG_RW;
-    mapping.pbase = dev->mmio_base;
-    mapping.vbase = dev->mmio_base;
-    mapping.len = dev->mmio_len;
-    return paging_map_region(mapping);
-}
+///////////////////////////////////////////////////////////////////////////////
+// EEPROM                                                                    //
+///////////////////////////////////////////////////////////////////////////////
 
 static void e1000_eeprom_check(struct e1000_device *dev)
 {
@@ -201,6 +193,22 @@ static void e1000_read_mac_addr(struct e1000_device *dev)
     u16 tmp1 = e1000_eeprom_read16(dev, 1);
     u16 tmp2 = e1000_eeprom_read16(dev, 2);
     dev->mac_addr = mac_addr(tmp0 & 0xff, tmp0 >> 8, tmp1 & 0xff, tmp1 >> 8, tmp2 & 0xff, tmp2 >> 8);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Initialization                                                            //
+///////////////////////////////////////////////////////////////////////////////
+
+static struct result e1000_init_mmio(struct e1000_device *dev, enum addr_mapping_memory_type mem_type)
+{
+    struct addr_mapping mapping;
+    mapping.type = ADDR_MAPPING_TYPE_CANONICAL;
+    mapping.mem_type = mem_type;
+    mapping.perms = PT_FLAG_RW;
+    mapping.pbase = dev->mmio_base;
+    mapping.vbase = dev->mmio_base;
+    mapping.len = dev->mmio_len;
+    return paging_map_region(mapping);
 }
 
 static void e1000_init_device(struct e1000_device *dev)
@@ -382,6 +390,10 @@ static void e1000_set_link_up(struct e1000_device *dev)
     mmio_write32(dev->mmio_base + E1000_OFFSET_CTRL, ctrl);
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// Receive and transmit                                                      //
+///////////////////////////////////////////////////////////////////////////////
+
 static struct result e1000_tx_poll(struct e1000_device *dev, struct byte_view pkt)
 {
     struct e1000_legacy_tx_desc *tx_desc = &dev->tx_queue[dev->tx_tail];
@@ -484,6 +496,10 @@ static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *
         }
     }
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// Outside interface                                                         //
+///////////////////////////////////////////////////////////////////////////////
 
 // TODO: This is temporary because it assumes too strongly that there can only be one such device.
 static struct e1000_device global_dev;
