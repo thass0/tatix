@@ -3,6 +3,7 @@
 #include <tx/asm.h>
 #include <tx/base.h>
 #include <tx/byte.h>
+#include <tx/e1000.h>
 #include <tx/ethernet.h>
 #include <tx/isr.h>
 #include <tx/kvalloc.h>
@@ -65,7 +66,6 @@
 
 // Maximum ethernet frame size is 1500B so this should work
 #define E1000_RX_BUF_SIZE 2048
-#define E1000_TX_BUF_SIZE 2048
 
 #define E1000_VENDOR_ID 0x8086
 #define E1000_DEVICE_ID 0x100E
@@ -488,52 +488,65 @@ static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *
               dev->stats.n_rxdmt0_interrupts, dev->stats.n_rxt0_interrupts);
 }
 
+// TODO: This is temporary because it assumes too strongly that there can only be one such device.
+static struct e1000_device global_dev;
+
+struct result e1000_send(struct byte_view frame)
+{
+    if (!global_dev.mmio_base)
+        return result_error(ENODEV); // Not probed yet.
+    return e1000_tx_poll(&global_dev, frame);
+}
+
+struct result_mac_addr e1000_mac(void)
+{
+    if (!global_dev.mmio_base)
+        return result_mac_addr_error(ENODEV);
+    return result_mac_addr_ok(global_dev.mac_addr);
+}
+
 static struct result e1000_probe(struct pci_device *pci)
 {
     assert(pci);
 
-    struct option_byte_array dev_mem_opt = kvalloc_alloc(sizeof(struct e1000_device), alignof(struct e1000_device));
-    if (dev_mem_opt.is_none)
-        return result_error(ENOMEM);
-    struct e1000_device *dev = byte_array_ptr(option_byte_array_checked(dev_mem_opt));
-
     // This shouldn't last forever:
-    dev->tmp_recv_buf = option_byte_array_checked(kvalloc_alloc(E1000_RX_BUF_SIZE, 64));
+    global_dev.tmp_recv_buf = option_byte_array_checked(kvalloc_alloc(E1000_RX_BUF_SIZE, 64));
 
-    dev->mmio_base = pci->bars[0].base;
-    dev->mmio_len = pci->bars[0].len;
+    global_dev.mmio_base = pci->bars[0].base;
+    global_dev.mmio_len = pci->bars[0].len;
 
-    byte_array_set(byte_array_new(&dev->stats, sizeof(dev->stats)), 0);
+    byte_array_set(byte_array_new(&global_dev.stats, sizeof(global_dev.stats)), 0);
 
-    struct result res = e1000_init_mmio(dev, (pci->bars[0].flags & PCI_BAR_FLAG_PREFETCHABLE) ?
-                                                 ADDR_MAPPING_MEMORY_DEFAULT :
-                                                 ADDR_MAPPING_MEMORY_STRONG_UNCACHEABLE);
+    struct result res = e1000_init_mmio(&global_dev, (pci->bars[0].flags & PCI_BAR_FLAG_PREFETCHABLE) ?
+                                                         ADDR_MAPPING_MEMORY_DEFAULT :
+                                                         ADDR_MAPPING_MEMORY_STRONG_UNCACHEABLE);
     assert(!res.is_error);
 
-    e1000_eeprom_check(dev);
-    e1000_read_mac_addr(dev);
+    e1000_eeprom_check(&global_dev);
+    e1000_read_mac_addr(&global_dev);
 
     print_dbg(PINFO, STR("EEPROM access mechanism: %s\n"),
-              dev->eeprom_normal_access ? STR("Normal") : STR("Alternate"));
-    print_dbg(PINFO, STR("MAC: %hhx:%hhx:%hhx:%hhx:%hhx:%hhx\n"), dev->mac_addr[0], dev->mac_addr[1], dev->mac_addr[2],
-              dev->mac_addr[3], dev->mac_addr[4], dev->mac_addr[5]);
+              global_dev.eeprom_normal_access ? STR("Normal") : STR("Alternate"));
+    print_dbg(PINFO, STR("MAC: %hhx:%hhx:%hhx:%hhx:%hhx:%hhx\n"), global_dev.mac_addr.addr[0],
+              global_dev.mac_addr.addr[1], global_dev.mac_addr.addr[2], global_dev.mac_addr.addr[3],
+              global_dev.mac_addr.addr[4], global_dev.mac_addr.addr[5]);
 
-    e1000_init_device(dev);
+    e1000_init_device(&global_dev);
 
-    res = e1000_init_tx(dev);
+    res = e1000_init_tx(&global_dev);
     assert(!res.is_error);
-    res = e1000_init_rx(dev);
+    res = e1000_init_rx(&global_dev);
     assert(!res.is_error);
 
-    e1000_set_link_up(dev);
+    e1000_set_link_up(&global_dev);
 
     print_dbg(PINFO, STR("Link is up!\n"));
 
     pic_enable_irq(pci->interrupt_line);
-    res = isr_register_handler(IRQ_VECTORS_BEG + pci->interrupt_line, e1000_handle_interrupt, dev);
+    res = isr_register_handler(IRQ_VECTORS_BEG + pci->interrupt_line, e1000_handle_interrupt, &global_dev);
     assert(!res.is_error);
 
-    e1000_init_interrupts(dev);
+    e1000_init_interrupts(&global_dev);
 
     return result_ok();
 }
