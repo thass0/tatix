@@ -24,21 +24,6 @@ static inline struct str str_from_byte_buf(struct byte_buf bb)
     return str_new((char *)bb.dat, bb.len);
 }
 
-static inline char str_buf_get_checked(struct str_buf *buf, sz idx)
-{
-    assert(buf);
-    assert(idx >= 0);
-    assert(idx < buf->len);
-    return buf->dat[idx];
-}
-
-static inline void str_buf_pop(struct str_buf *buf)
-{
-    assert(buf);
-    if (buf->len > 0)
-        buf->len--;
-}
-
 static inline bool str_is_equal(struct str a, struct str b)
 {
     bool not_equal = false;
