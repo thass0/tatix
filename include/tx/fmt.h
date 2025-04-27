@@ -3,7 +3,7 @@
 
 #include <tx/base.h>
 #include <tx/errordef.h>
-#include <tx/stringdef.h>
+#include <tx/string.h>
 
 // Formatting is based on: https://nullprogram.com/blog/2023/02/13/
 
@@ -11,35 +11,6 @@
 // that they're given. `fmt` and `vfmt` are wrappers around the `append_*`
 // functions. `fmt` and `vfmt` implement a printf-like syntax for convenience
 // while the `append_*` functions implement formatting of different data types.
-
-static inline struct result append_str(struct str s, struct str_buf *buf)
-{
-    if (!buf)
-        return result_error(EINVAL);
-
-    if (buf->cap < buf->len + s.len)
-        return result_error(ENOMEM);
-
-    for (sz i = 0; i < s.len; i++)
-        (buf->dat + buf->len)[i] = s.dat[i];
-    buf->len += s.len;
-
-    return result_ok();
-}
-
-static inline struct result append_char(char ch, struct str_buf *buf)
-{
-    if (!buf)
-        return result_error(EINVAL);
-
-    // Capacity will be exceeded if we add one byte.
-    if (buf->cap == buf->len)
-        return result_error(ENOMEM);
-
-    buf->dat[buf->len++] = ch;
-
-    return result_ok();
-}
 
 static inline struct result append_i64(i64 x, struct str_buf *buf)
 {
@@ -59,7 +30,7 @@ static inline struct result append_i64(i64 x, struct str_buf *buf)
         *(--beg) = '-';
     }
 
-    return append_str(str_from_range(beg, end), buf);
+    return str_buf_append(buf, str_from_range(beg, end));
 }
 
 static inline struct result append_u64(u64 x, struct str_buf *buf)
@@ -75,7 +46,7 @@ static inline struct result append_u64(u64 x, struct str_buf *buf)
         *(--beg) = '0' + (x % 10);
     } while (x /= 10);
 
-    return append_str(str_from_range(beg, end), buf);
+    return str_buf_append(buf, str_from_range(beg, end));
 }
 
 enum fmt_hex_alpha { HEX_ALPHA_UPPER, HEX_ALPHA_LOWER };
@@ -103,7 +74,7 @@ static inline struct result append_hex(u64 x, enum fmt_hex_alpha alpha, struct s
         *--beg = a[x & 0xf];
     } while (x >>= 4);
 
-    return append_str(str_from_range(beg, end), buf);
+    return str_buf_append(buf, str_from_range(beg, end));
 }
 
 static inline struct result append_ptr(void *p, struct str_buf *buf)
@@ -129,7 +100,7 @@ static inline struct result vfmt(struct str_buf *buf, struct str fmt, va_list ar
         }
 
         if (expect == NOTHING) {
-            res = append_char(fmt.dat[i], buf);
+            res = str_buf_append_char(buf, fmt.dat[i]);
             if (res.is_error)
                 return res;
             i++;
@@ -212,14 +183,14 @@ static inline struct result vfmt(struct str_buf *buf, struct str fmt, va_list ar
             case 's': {
                 struct str s = va_arg(argp, struct str);
                 if (!STR_IS_NULL(s))
-                    res = append_str(s, buf);
+                    res = str_buf_append(buf, s);
                 else
-                    res = append_str(STR("(NULL)"), buf);
+                    res = str_buf_append(buf, STR("(NULL)"));
                 modifier = NONE;
                 break;
             }
             case 'c':
-                res = append_char((char)va_arg(argp, i32) & 0xff, buf);
+                res = str_buf_append_char(buf, (char)va_arg(argp, i32) & 0xff);
                 modifier = NONE;
                 break;
             default:

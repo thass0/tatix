@@ -3,6 +3,7 @@
 
 #include <tx/assert.h>
 #include <tx/byte.h>
+#include <tx/error.h>
 #include <tx/option.h>
 #include <tx/stringdef.h>
 
@@ -46,6 +47,35 @@ static inline struct option_sz str_find_char(struct str s, char ch)
         s.len--;
     }
     return option_sz_none();
+}
+
+static inline struct result str_buf_append(struct str_buf *buf, struct str s)
+{
+    if (!buf)
+        return result_error(EINVAL);
+
+    if (buf->cap < buf->len + s.len)
+        return result_error(ENOMEM);
+
+    for (sz i = 0; i < s.len; i++)
+        (buf->dat + buf->len)[i] = s.dat[i];
+    buf->len += s.len;
+
+    return result_ok();
+}
+
+static inline struct result str_buf_append_char(struct str_buf *buf, char ch)
+{
+    if (!buf)
+        return result_error(EINVAL);
+
+    // Capacity will be exceeded if we add one byte.
+    if (buf->cap == buf->len)
+        return result_error(ENOMEM);
+
+    buf->dat[buf->len++] = ch;
+
+    return result_ok();
 }
 
 #endif // __TX_STRING_H__

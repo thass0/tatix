@@ -53,7 +53,7 @@ static struct result_path_name path_name_parse(struct str name, struct arena *ar
     // `struct path_name` needs to maintain a copy of the name string so that the string slices
     // in `components` can point to it.
     struct str_buf src_buf = str_buf_from_arena(arn, name.len);
-    append_str(name, &src_buf);
+    str_buf_append(&src_buf, name);
     path.src = str_from_buf(src_buf);
 
     // A path of length N can at most have C = N / 2 + 1 components. The reasoning goes as follows. A path with
@@ -109,11 +109,11 @@ struct str path_name_to_str(struct path_name path_name, struct arena *arn)
 {
     struct str_buf sbuf = str_buf_from_arena(arn, PATH_NAME_MAX_LEN);
     if (path_name.is_absolute)
-        append_char('/', &sbuf);
+        str_buf_append_char(&sbuf, '/');
     for (sz i = 0; i < path_name.n_components; i++) {
         if (i)
-            append_char('/', &sbuf);
-        append_str(path_name.components[i], &sbuf);
+            str_buf_append_char(&sbuf, '/');
+        str_buf_append(&sbuf, path_name.components[i]);
     }
     return str_from_buf(sbuf);
 }
@@ -191,7 +191,7 @@ struct ram_fs_node *ram_fs_node_alloc(struct ram_fs *rfs, struct str name, enum 
     name_buf.dat = alloc_alloc(rfs->data_alloc, name.len, alignof(void *));
     name_buf.len = 0;
     name_buf.cap = name.len;
-    append_str(name, &name_buf);
+    str_buf_append(&name_buf, name);
     node->name = str_from_buf(name_buf);
     node->data = byte_buf_new(NULL, 0, 0);
     return node;
@@ -503,7 +503,7 @@ static void test_path_name_parse(struct arena arn)
     // Maximum length
     struct str_buf sbuf = str_buf_from_arena(&arn, PATH_NAME_MAX_LEN + 2);
     for (i32 i = 0; i < PATH_NAME_MAX_LEN / 2; i++)
-        append_str(STR("/a"), &sbuf);
+        str_buf_append(&sbuf, STR("/a"));
     path_name_res = path_name_parse(str_from_buf(sbuf), &arn);
     assert(!path_name_res.is_error);
     path_name = result_path_name_checked(path_name_res);
@@ -512,7 +512,7 @@ static void test_path_name_parse(struct arena arn)
         assert(str_is_equal(path_name.components[i], STR("a")));
 
     // Now we make it too long
-    append_str(STR("/a"), &sbuf);
+    str_buf_append(&sbuf, STR("/a"));
     path_name_res = path_name_parse(str_from_buf(sbuf), &arn);
     assert(path_name_res.is_error);
     assert(path_name_res.code == ENAMETOOLONG);

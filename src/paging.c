@@ -316,7 +316,7 @@ static void _pt_fmt_indent(struct str_buf *buf, i16 level)
     // OOM errors in `append_str` are ignored here because they will be caught
     // the next time `buf` is used for formatting.
     for (i16 i = 0; i < level; i++)
-        append_str(STR("    "), buf);
+        str_buf_append(buf, STR("    "));
 }
 
 __unused static struct result _pt_fmt(struct pt *pt, struct str_buf *buf, i16 level, i16 depth, vaddr_t base_vaddr)
