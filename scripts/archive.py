@@ -143,8 +143,6 @@ def encode_archive(dir_path, archive_file):
     with open(archive_file, 'wb') as file:
         file.write(archive_data)
 
-    print(f"Directory '{dir_path}' archived successfully to '{archive_file}'.")
-
 def decode_archive(archive_file, dir_path):
     with open(archive_file, 'rb') as file:
         archive_data = file.read()
@@ -157,8 +155,6 @@ def decode_archive(archive_file, dir_path):
 
         with open(full_path, 'wb') as file:
             file.write(file_data)
-
-    print(f"Archive '{archive_file}' extracted successfully to '{dir_path}'.")
 
 if __name__ == "__main__":
     main()
