@@ -30,8 +30,6 @@ struct str_buf {
 // expressions. So use this any time using `STR()` gives you warnings.
 #define STR_STATIC(s) { .dat = (s), .len = lengthof(s) }
 
-#define STR_IS_NULL(s) ((s).dat == NULL)
-
 static inline struct str_buf str_buf_new(char *dat, sz len, sz cap)
 {
     struct str_buf buf;

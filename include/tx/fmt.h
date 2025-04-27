@@ -182,7 +182,7 @@ static inline struct result fmt_vfmt(struct str_buf *buf, struct str fmt, va_lis
                 break;
             case 's': {
                 struct str s = va_arg(argp, struct str);
-                if (!STR_IS_NULL(s))
+                if (s.dat && s.len >= 0)
                     res = str_buf_append(buf, s);
                 else
                     res = str_buf_append(buf, STR("(NULL)"));
