@@ -4,10 +4,13 @@ ENTRY(_start)
 
 PHDRS
 {
-    entry_seg PT_LOAD FLAGS(7); /* rwx */
+    entry_text_seg PT_LOAD FLAGS(5); /* r-x */
+    entry_data_seg PT_LOAD FLAGS(6); /* rw- */
+
     text_seg PT_LOAD FLAGS(5); /* r-x */
     rodata_seg PT_LOAD FLAGS(4); /* r-- */
     data_seg PT_LOAD FLAGS(6); /* rw- */
+
     archive_seg PT_LOAD FLAGS(4); /* r-- */
 }
 
@@ -17,8 +20,13 @@ SECTIONS
     . = KERN_ENTRY_PADDR;
     .entry : AT(KERN_ENTRY_PADDR)
     {
-        *(*.entry*);
-    } :entry_seg
+        *(*.entry.text*);
+    } :entry_text_seg
+
+    .entry :
+    {
+        *(*.entry.data*);
+    } :entry_data_seg
 
     . = KERN_BASE_VADDR;
 
