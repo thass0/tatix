@@ -276,11 +276,11 @@ static struct result pci_set_driver_capabilities(struct pci_device *dev, u16 cap
 
 struct result pci_probe(void)
 {
-    sz mem_size = 16 * sizeof(struct pci_device);
-    void *mem = kvalloc_alloc(sizeof(struct pci_device) * 16, alignof(struct pci_device));
-    if (!mem)
+    struct option_byte_array mem_opt = kvalloc_alloc(16 * sizeof(struct pci_device), alignof(struct pci_device));
+    if (mem_opt.is_none)
         return result_error(ENOMEM);
-    struct arena arn = arena_new(byte_array_new(mem, mem_size));
+    struct byte_array mem = option_byte_array_checked(mem_opt);
+    struct arena arn = arena_new(mem);
 
     struct dlist device_list;
     dlist_init_empty(&device_list);
@@ -294,7 +294,7 @@ struct result pci_probe(void)
 
             struct result_u8 header_type_res = pci_config_read8(bus, device, 0, PCI_OFFSET_HEADER_TYPE);
             if (header_type_res.is_error) {
-                kvalloc_free(mem, mem_size);
+                kvalloc_free(mem);
                 return result_error(header_type_res.code);
             }
 
@@ -334,7 +334,7 @@ struct result pci_probe(void)
 
             struct result res = pci_get_resource_info(bus, device, 0, &dev->bars);
             if (res.is_error) {
-                kvalloc_free(mem, mem_size);
+                kvalloc_free(mem);
                 return res;
             }
 
@@ -368,7 +368,7 @@ struct result pci_probe(void)
 
             struct result res = pci_set_driver_capabilities(dev, drv->capabilities);
             if (res.is_error) {
-                kvalloc_free(mem, mem_size);
+                kvalloc_free(mem);
                 return res;
             }
 
@@ -376,7 +376,7 @@ struct result pci_probe(void)
             dev->driver = drv;
             res = drv->probe(dev);
             if (res.is_error) {
-                kvalloc_free(mem, mem_size);
+                kvalloc_free(mem);
                 return res;
             }
         } else {

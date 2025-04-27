@@ -109,7 +109,7 @@ struct e1000_stats {
 };
 
 struct e1000_device {
-    u8 *tmp_recv_buf; // Just used as a source of memory to receive stuff in the interrupt handler.
+    struct byte_array tmp_recv_buf; // Just used as a source of memory to receive stuff in the interrupt handler.
 
     u64 mmio_base;
     u64 mmio_len;
@@ -222,22 +222,24 @@ static struct result e1000_init_tx(struct e1000_device *dev)
     // Reference: Section 14.5
 
     sz tx_queue_n_desc = 32;
-    sz tx_mem_size = tx_queue_n_desc * sizeof(struct e1000_legacy_tx_desc);
 
-    struct e1000_legacy_tx_desc *tx_queue = kvalloc_alloc(tx_mem_size, alignof(*tx_queue));
-    if (!tx_queue)
+    struct option_byte_array tx_mem_opt =
+        kvalloc_alloc(tx_queue_n_desc * sizeof(struct e1000_legacy_tx_desc), alignof(struct e1000_legacy_tx_desc));
+    if (tx_mem_opt.is_none)
         return result_error(ENOMEM);
+    struct byte_array tx_mem = option_byte_array_checked(tx_mem_opt);
+    struct e1000_legacy_tx_desc *tx_queue = byte_array_ptr(tx_mem);
 
     // Initialize all the descriptors to zero except for the DD bit in the status field. This field
     // must be set to so that the transmit function knows that the descriptors can all be used.
-    byte_array_set(byte_array_new(tx_queue, tx_mem_size), 0);
+    byte_array_set(tx_mem, 0);
     for (sz i = 0; i < tx_queue_n_desc; i++)
         tx_queue[i].status |= E1000_TX_DESC_STATUS_DD;
 
     // The 8254x needs a physical address because it will use it for DMA.
     struct result_paddr_t paddr_tx_queue_res = virt_to_phys((vaddr_t)tx_queue);
     if (paddr_tx_queue_res.is_error) {
-        kvalloc_free(tx_queue, tx_mem_size);
+        kvalloc_free(tx_mem);
         return result_error(paddr_tx_queue_res.code);
     }
     paddr_t paddr_tx_queue = result_paddr_t_checked(paddr_tx_queue_res);
@@ -246,9 +248,9 @@ static struct result e1000_init_tx(struct e1000_device *dev)
     mmio_write32(dev->mmio_base + E1000_OFFSET_TDBAL, (u64)paddr_tx_queue & 0xffffffff);
     mmio_write32(dev->mmio_base + E1000_OFFSET_TDBAH, ((u64)paddr_tx_queue >> 32) & 0xffffffff);
 
-    assert(IS_ALIGNED(tx_mem_size, 128));
-    assert(tx_mem_size <= U32_MAX);
-    mmio_write32(dev->mmio_base + E1000_OFFSET_TDLEN, tx_mem_size);
+    assert(IS_ALIGNED(tx_mem.len, 128));
+    assert(tx_mem.len <= U32_MAX);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_TDLEN, tx_mem.len);
 
     mmio_write64(dev->mmio_base + E1000_OFFSET_TDH, 0);
     mmio_write64(dev->mmio_base + E1000_OFFSET_TDT, 0);
@@ -275,34 +277,35 @@ static struct result e1000_init_rx(struct e1000_device *dev)
     // Reference: Section 14.4
 
     sz rx_queue_n_desc = 128;
-    sz rx_mem_size = rx_queue_n_desc * sizeof(struct e1000_rx_desc);
 
-    struct e1000_rx_desc *rx_queue = kvalloc_alloc(rx_mem_size, alignof(*rx_queue));
-    if (!rx_queue)
+    struct option_byte_array rx_mem_opt =
+        kvalloc_alloc(rx_queue_n_desc * sizeof(struct e1000_rx_desc), alignof(struct e1000_rx_desc));
+    if (rx_mem_opt.is_none)
         return result_error(ENOMEM);
+    struct byte_array rx_mem = option_byte_array_checked(rx_mem_opt);
+    struct e1000_rx_desc *rx_queue = byte_array_ptr(rx_mem);
 
-    // Align on a cache line:
-    byte(*rx_buffers)[E1000_RX_BUF_SIZE] = kvalloc_alloc(rx_queue_n_desc * sizeof(*rx_buffers), 64);
-    static_assert(sizeof(*rx_buffers) == E1000_RX_BUF_SIZE);
-    if (!rx_buffers) {
-        kvalloc_free(rx_queue, rx_mem_size);
+    struct option_byte_array rx_buffers_mem_opt = kvalloc_alloc(rx_queue_n_desc * E1000_RX_BUF_SIZE, 64);
+    if (rx_buffers_mem_opt.is_none) {
+        kvalloc_free(rx_mem);
         return result_error(ENOMEM);
     }
+    struct byte_array rx_buffers_mem = option_byte_array_checked(rx_buffers_mem_opt);
 
-    byte_array_set(byte_array_new(rx_queue, rx_mem_size), 0);
-    byte_array_set(byte_array_new(rx_buffers, rx_queue_n_desc * sizeof(*rx_buffers)), 0);
+    byte_array_set(rx_mem, 0);
+    byte_array_set(rx_buffers_mem, 0);
 
     // The 8254x needs a physical addresses because it will use them for DMA.
     struct result_paddr_t paddr_rx_queue_res = virt_to_phys((vaddr_t)rx_queue);
-    struct result_paddr_t paddr_rx_buffers_res = virt_to_phys((vaddr_t)rx_buffers);
+    struct result_paddr_t paddr_rx_buffers_res = virt_to_phys((vaddr_t)byte_array_ptr(rx_buffers_mem));
     if (paddr_rx_queue_res.is_error) {
-        kvalloc_free(rx_queue, rx_mem_size);
-        kvalloc_free(rx_buffers, rx_queue_n_desc * sizeof(*rx_buffers));
+        kvalloc_free(rx_mem);
+        kvalloc_free(rx_buffers_mem);
         return result_error(paddr_rx_queue_res.code);
     }
     if (paddr_rx_buffers_res.is_error) {
-        kvalloc_free(rx_queue, rx_mem_size);
-        kvalloc_free(rx_buffers, rx_queue_n_desc * sizeof(*rx_buffers));
+        kvalloc_free(rx_mem);
+        kvalloc_free(rx_buffers_mem);
         return result_error(paddr_rx_buffers_res.code);
     }
     paddr_t paddr_rx_queue = result_paddr_t_checked(paddr_rx_queue_res);
@@ -310,15 +313,15 @@ static struct result e1000_init_rx(struct e1000_device *dev)
 
     // Initialize all descriptors to point to the right buffers.
     for (sz i = 0; i < rx_queue_n_desc; i++)
-        rx_queue[i].base_addr = paddr_rx_buffers + i * sizeof(*rx_buffers);
+        rx_queue[i].base_addr = paddr_rx_buffers + i * E1000_RX_BUF_SIZE;
 
     assert(IS_ALIGNED(paddr_rx_queue, 16));
     mmio_write32(dev->mmio_base + E1000_OFFSET_RDBAL, (u64)paddr_rx_queue & 0xffffffff);
     mmio_write32(dev->mmio_base + E1000_OFFSET_RDBAH, ((u64)paddr_rx_queue >> 32) & 0xffffffff);
 
-    assert(IS_ALIGNED(rx_mem_size, 128));
-    assert(rx_mem_size <= U32_MAX);
-    mmio_write32(dev->mmio_base + E1000_OFFSET_RDLEN, rx_mem_size);
+    assert(IS_ALIGNED(rx_mem.len, 128));
+    assert(rx_mem.len <= U32_MAX);
+    mmio_write32(dev->mmio_base + E1000_OFFSET_RDLEN, rx_mem.len);
 
     // This indicates that all descriptors are available for the hardware to store packets.
     mmio_write64(dev->mmio_base + E1000_OFFSET_RDH, 1);
@@ -339,7 +342,7 @@ static struct result e1000_init_rx(struct e1000_device *dev)
 
     dev->rx_queue = rx_queue;
     dev->rx_queue_n_desc = rx_queue_n_desc;
-    dev->rx_buffers = rx_buffers;
+    dev->rx_buffers = byte_array_ptr(rx_buffers_mem);
     dev->rx_tail = 0;
 
     return result_ok();
@@ -463,16 +466,13 @@ static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *
         crash("Interrupt receive queue overrun\n");
 
     if (cause & E1000_INTERRUPT_RXDMT0 || cause & E1000_INTERRUPT_RXT0) {
-        struct byte_buf buf = byte_buf_new(dev->tmp_recv_buf, 0, E1000_RX_BUF_SIZE);
-        struct result res = result_ok();
-
         while (1) {
-            res = e1000_rx_poll(dev, &buf);
+            struct byte_buf buf = byte_buf_from_array(dev->tmp_recv_buf);
+            struct result res = e1000_rx_poll(dev, &buf);
             if (res.is_error && res.code == EAGAIN)
                 break; // Stop trying to receive any more data.
             if (res.is_error)
                 crash("Failed to receive\n");
-            buf.len = 0;
         }
     }
 
@@ -485,15 +485,13 @@ static struct result e1000_probe(struct pci_device *pci)
 {
     assert(pci);
 
-    struct e1000_device *dev = kvalloc_alloc(sizeof(struct e1000_device), alignof(struct e1000_device));
-    if (!dev)
+    struct option_byte_array dev_mem_opt = kvalloc_alloc(sizeof(struct e1000_device), alignof(struct e1000_device));
+    if (dev_mem_opt.is_none)
         return result_error(ENOMEM);
+    struct e1000_device *dev = byte_array_ptr(option_byte_array_checked(dev_mem_opt));
 
     // This shouldn't last forever:
-    u8 *recv_buf = kvalloc_alloc(E1000_RX_BUF_SIZE, 64);
-    if (!recv_buf)
-        return result_error(ENOMEM);
-    dev->tmp_recv_buf = recv_buf;
+    dev->tmp_recv_buf = option_byte_array_checked(kvalloc_alloc(E1000_RX_BUF_SIZE, 64));
 
     dev->mmio_base = pci->bars[0].base;
     dev->mmio_len = pci->bars[0].len;

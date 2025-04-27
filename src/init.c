@@ -74,10 +74,8 @@ __section(".entry.text") __noreturn void _start(void)
 
 void ram_fs_selftest(void)
 {
-    sz test_arn_size = 5 * BIT(20);
-    void *test_arn_mem = kvalloc_alloc(test_arn_size, alignof(void *));
-    assert(test_arn_mem);
-    struct arena test_arn = arena_new(byte_array_new(test_arn_mem, test_arn_size));
+    struct byte_array test_arn_mem = option_byte_array_checked(kvalloc_alloc(5 * BIT(20), alignof(void *)));
+    struct arena test_arn = arena_new(test_arn_mem);
     ram_fs_run_tests(test_arn);
 }
 
@@ -88,7 +86,7 @@ void print_hello_txt(struct ram_fs *rfs)
     struct result_ram_fs_node node_res = ram_fs_open(rfs, STR("/hello.txt"));
     assert(!node_res.is_error);
     struct ram_fs_node *node = result_ram_fs_node_checked(node_res);
-    struct str_buf sbuf = str_buf_from_kvalloc(500);
+    struct str_buf sbuf = str_buf_from_byte_array(option_byte_array_checked(kvalloc_alloc(500, alignof(void *))));
     struct result_sz read_res = ram_fs_read(node, &sbuf, 0);
     assert(!read_res.is_error);
 
