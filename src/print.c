@@ -14,7 +14,7 @@ struct result print_fmt(struct str_buf buf, struct str fmt, ...)
     va_list argp;
     struct result res = result_ok();
     va_start(argp, fmt);
-    res = vfmt(&buf, fmt, argp);
+    res = fmt_vfmt(&buf, fmt, argp);
     if (res.is_error)
         return res;
     res = com_write(COM1_PORT, str_from_buf(buf));
@@ -41,7 +41,7 @@ struct result __print_dbg(struct str basename, sz line, struct str funcname, str
         print_str(STR("ERROR: print_dbg failed to format source code location\n"));
         return res;
     }
-    res = vfmt(&buf_cpy, fmt_str, argp);
+    res = fmt_vfmt(&buf_cpy, fmt_str, argp);
     if (!res.is_error) {
         buf = buf_cpy;
     } else {
