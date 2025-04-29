@@ -1,9 +1,12 @@
 #ifndef __TX_IP_H__
 #define __TX_IP_H__
 
+#include <tx/arena.h>
 #include <tx/base.h>
 #include <tx/error.h>
+#include <tx/fmt.h>
 #include <tx/netorder.h>
+#include <tx/string.h>
 
 struct ip_addr {
     u8 addr[4];
@@ -13,7 +16,7 @@ static_assert(sizeof(struct ip_addr) == 4);
 
 struct_result(ip_addr, struct ip_addr);
 
-static inline struct ip_addr ip_addr(u8 a0, u8 a1, u8 a2, u8 a3)
+static inline struct ip_addr ip_addr_new(u8 a0, u8 a1, u8 a2, u8 a3)
 {
     struct ip_addr addr;
     addr.addr[0] = a0;
@@ -25,7 +28,15 @@ static inline struct ip_addr ip_addr(u8 a0, u8 a1, u8 a2, u8 a3)
 
 static inline bool ip_addr_is_equal(struct ip_addr addr1, struct ip_addr addr2)
 {
-    return addr1.addr == addr2.addr;
+    return addr1.addr[0] == addr2.addr[0] && addr1.addr[1] == addr2.addr[1] && addr1.addr[2] == addr2.addr[2] &&
+           addr1.addr[3] == addr2.addr[3];
+}
+
+static inline struct str ip_addr_format(struct ip_addr addr, struct arena *arn)
+{
+    struct str_buf sbuf = str_buf_from_byte_array(byte_array_from_arena(32, arn));
+    fmt(&sbuf, STR("%hhu.%hhu.%hhu.%hhu"), addr.addr[0], addr.addr[1], addr.addr[2], addr.addr[3]);
+    return str_from_buf(sbuf);
 }
 
 #endif // __TX_IP_H__

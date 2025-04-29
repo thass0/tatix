@@ -193,7 +193,7 @@ static void e1000_read_mac_addr(struct e1000_device *dev)
     u16 tmp0 = e1000_eeprom_read16(dev, 0);
     u16 tmp1 = e1000_eeprom_read16(dev, 1);
     u16 tmp2 = e1000_eeprom_read16(dev, 2);
-    dev->mac_addr = mac_addr(tmp0 & 0xff, tmp0 >> 8, tmp1 & 0xff, tmp1 >> 8, tmp2 & 0xff, tmp2 >> 8);
+    dev->mac_addr = mac_addr_new(tmp0 & 0xff, tmp0 >> 8, tmp1 & 0xff, tmp1 >> 8, tmp2 & 0xff, tmp2 >> 8);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -493,7 +493,7 @@ static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *
                 break; // Stop trying to receive any more data.
             if (res.is_error)
                 crash("Failed to receive\n");
-            ethernet_handle_frame(byte_view_from_buf(buf));
+            ethernet_handle_frame(dev->mac_addr, byte_view_from_buf(buf));
         }
     }
 }
@@ -537,9 +537,10 @@ static struct result e1000_probe(struct pci_device *pci)
     e1000_eeprom_check(dev);
     e1000_read_mac_addr(dev);
 
+    static byte mac_addr_fmt_buf[MAC_ADDR_FMT_BUF_SIZE];
+    struct arena mac_addr_fmt_arn = arena_new(byte_array_new(mac_addr_fmt_buf, countof(mac_addr_fmt_buf)));
     print_dbg(PDBG, STR("EEPROM access mechanism: %s\n"), dev->eeprom_normal_access ? STR("Normal") : STR("Alternate"));
-    print_dbg(PINFO, STR("MAC: %hhx:%hhx:%hhx:%hhx:%hhx:%hhx\n"), dev->mac_addr.addr[0], dev->mac_addr.addr[1],
-              dev->mac_addr.addr[2], dev->mac_addr.addr[3], dev->mac_addr.addr[4], dev->mac_addr.addr[5]);
+    print_dbg(PINFO, STR("MAC: %s\n"), mac_addr_format(dev->mac_addr, &mac_addr_fmt_arn));
 
     e1000_init_device(dev);
 

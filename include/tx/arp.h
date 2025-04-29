@@ -28,8 +28,8 @@ static_assert(sizeof(struct arp_header) == 8);
 struct result arp_send_request(struct ip_addr src_ip, struct mac_addr src_mac, struct ip_addr dest_ip,
                                struct arena arn);
 
-struct result_mac_addr arp_lookup_mac_addr(struct ip_addr ip_addr);
+struct option_mac_addr arp_lookup_mac_addr(struct ip_addr ip_addr);
 
-void arp_handle_packet(struct byte_view packet);
+void arp_handle_packet(struct byte_view packet, struct arena arn);
 
 #endif // __TX_ARP_H__

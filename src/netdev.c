@@ -8,11 +8,13 @@ static struct netdev global_netdev_table[NETDEV_TABLE_SIZE];
 
 struct result netdev_register_device(struct netdev dev)
 {
+    byte mac_addr_fmt_buf[2 * MAC_ADDR_FMT_BUF_SIZE];
+    struct arena mac_addr_fmt_arn = arena_new(byte_array_new(mac_addr_fmt_buf, countof(mac_addr_fmt_buf)));
+
     for (sz i = 0; i < NETDEV_TABLE_SIZE; i++) {
         if (global_netdev_table_used[i] && mac_addr_is_equal(dev.mac_addr, global_netdev_table[i].mac_addr)) {
-            print_dbg(PDBG, STR("Device with MAC address %hhx:%hhx:%hhx:%hhx:%hhx:%hhx already exists\n"),
-                      dev.mac_addr.addr[0], dev.mac_addr.addr[1], dev.mac_addr.addr[2], dev.mac_addr.addr[3],
-                      dev.mac_addr.addr[4], dev.mac_addr.addr[5]);
+            print_dbg(PDBG, STR("Device with MAC address %s already exists\n"),
+                      mac_addr_format(dev.mac_addr, &mac_addr_fmt_arn));
             return result_error(EEXIST);
         }
     }
@@ -21,9 +23,8 @@ struct result netdev_register_device(struct netdev dev)
         if (!global_netdev_table_used[i]) {
             global_netdev_table_used[i] = true;
             global_netdev_table[i] = dev;
-            print_dbg(PINFO, STR("Registered device with MAC address %hhx:%hhx:%hhx:%hhx:%hhx:%hhx\n"),
-                      dev.mac_addr.addr[0], dev.mac_addr.addr[1], dev.mac_addr.addr[2], dev.mac_addr.addr[3],
-                      dev.mac_addr.addr[4], dev.mac_addr.addr[5]);
+            print_dbg(PINFO, STR("Registered device with MAC address %s\n"),
+                      mac_addr_format(dev.mac_addr, &mac_addr_fmt_arn));
             return result_ok();
         }
     }
