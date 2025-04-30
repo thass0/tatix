@@ -64,6 +64,11 @@
 #define E1000_RX_DESC_STATUS_DD BIT(0)
 #define E1000_RX_DESC_STATUS_EOP BIT(1)
 
+#define E1000_RCTL_EN BIT(1)
+#define E1000_RCTL_UPE BIT(3)
+#define E1000_RCTL_MPE BIT(4)
+#define E1000_RCTL_BAM BIT(15)
+
 // Maximum ethernet frame size is 1500B so this should work
 #define E1000_RX_BUF_SIZE 2048
 #define E1000_TX_BUF_SIZE 2048
@@ -360,11 +365,11 @@ static struct result e1000_init_rx(struct e1000_device *dev)
                                                          (dev->mac_addr.addr[1] << 8) | dev->mac_addr.addr[0]);
     mmio_write32(dev->mmio_base + E1000_OFFSET_RAH0, BIT(31) | (dev->mac_addr.addr[5] << 8) | dev->mac_addr.addr[4]);
 
+    // TODO: We don't strip the CRC here (bit 26 is the SECRC flag to strip CRCs). I'm not sure, though, if we should.
     u32 rctl = mmio_read32(dev->mmio_base + E1000_OFFSET_RCTL);
-    rctl |= BIT(1); // Enable receive.
-    rctl &= ~(BIT(17) | BIT(16) | BIT(25)); // Buffer size of 2048B (the default).
-    rctl &= ~(BIT(5) | BIT(6) | BIT(7)); // Disable long packets and loopback.
-    // Receive Descriptor Minimum Threshold Size (RDMTS) is kept at the default of 1/2 of RDLEN.
+    // NOTE: The buffer size is kept at the default of 2048B. Long packet reception and loopback mode are disabled
+    // by default. And the Receive Descriptor Minimum Threshold Size (RDMTS) is kept at the default of 1/2 of RDLEN.
+    rctl |= E1000_RCTL_EN | E1000_RCTL_UPE | E1000_RCTL_MPE | E1000_RCTL_BAM;
     mmio_write32(dev->mmio_base + E1000_OFFSET_RCTL, rctl);
 
     dev->rx_queue = rx_queue;
