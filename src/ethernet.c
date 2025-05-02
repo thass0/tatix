@@ -10,7 +10,9 @@ void ethernet_handle_frame(struct mac_addr mac, struct byte_view frame)
         return;
     }
 
-    // TODO: Allocation takes time. We should pre-allocate temporary buffers like this.
+    // TODO: Allocation takes time. We should pre-allocate temporary buffers like this. This is also dangerous
+    // because the system could be crashed by receiving too many packets and thus running out of memory.
+    //
     // NOTE: This arena is large enough to fit a few frames because it will likely be used to store frames but may
     // also be used at times to server other smaller allocations.
     struct byte_array tmp_arn_mem = option_byte_array_checked(kvalloc_alloc(4 * ETHERNET_MAX_FRAME_SIZE, 64));
@@ -23,8 +25,10 @@ void ethernet_handle_frame(struct mac_addr mac, struct byte_view frame)
               u16_from_net_u16(ether_hdr->ether_type));
 
     if (!mac_addr_is_equal(ether_hdr->dest, mac) && !mac_addr_is_equal(ether_hdr->dest, MAC_ADDR_BROADCAST)) {
-        print_dbg(PWARN, STR("Received ethernet frame for unknown MAC address %s"),
+        print_dbg(PDBG, STR("Received ethernet frame for unknown MAC address %s. Dropping ...\n"),
                   mac_addr_format(ether_hdr->dest, &tmp_arn));
+        kvalloc_free(tmp_arn_mem);
+        return;
     }
 
     // TODO: Check if we need to strip anything from the end. We can find this out once we receive frames bigger
