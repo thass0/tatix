@@ -1,4 +1,4 @@
-// Address Resolution Protocol (ARP) implementation for IPv4 address resolution.
+// Address Resolution Protocol (ARP) implementation for IPv4v4 address resolution.
 
 #ifndef __TX_ARP_H__
 #define __TX_ARP_H__
@@ -25,18 +25,18 @@ struct arp_header {
 
 static_assert(sizeof(struct arp_header) == 8);
 
-// Broadcast an ARP REQUEST packet from the device with MAC address `src_mac`. The `src_ip` IP address is the IP
-// address of this computer (the host). The `dest_ip` is the IP address that we want to known the MAC address for.
+// Broadcast an ARP REQUEST packet from the device with MAC address `src_mac`. The `src_ip` IPv4 address is the IPv4
+// address of this computer (the host). The `dest_ip` is the IPv4 address that we want to known the MAC address for.
 // `arn` is used for temporary storage.
 //
 // NOTE: Consider doing an ARP scan (`netdev_arp_scan`) instead of calling this function directly. With
 // `netdev_arp_scan`,  you don't have to care about the `src_mac` MAC address.
-struct result arp_send_request(struct ip_addr src_ip, struct mac_addr src_mac, struct ip_addr dest_ip,
+struct result arp_send_request(struct ipv4_addr src_ip, struct mac_addr src_mac, struct ipv4_addr dest_ip,
                                struct arena arn);
 
-// Lookup a MAC address associated with the given IP address in the ARP table. Returns either the MAC address or
+// Lookup a MAC address associated with the given IPv4 address in the ARP table. Returns either the MAC address or
 // nothing.
-struct option_mac_addr arp_lookup_mac_addr(struct ip_addr ip_addr);
+struct option_mac_addr arp_lookup_mac_addr(struct ipv4_addr ip_addr);
 
 // Handle an ARP packet. Call this function on any incoming packets that were identified as ARP packets. It will
 // update the ARP table and reply to the sender (if a reply was requested).

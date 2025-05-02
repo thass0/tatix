@@ -5,7 +5,7 @@
 
 struct arp_table_ent {
     bool is_used;
-    struct ip_addr ip_addr;
+    struct ipv4_addr ip_addr;
     struct mac_addr mac_addr;
 };
 
@@ -14,15 +14,15 @@ static struct arp_table_ent global_arp_table[GLOBAL_ARP_TABLE_SIZE];
 
 struct ip_ethernet_arp_payload {
     struct mac_addr src_mac;
-    struct ip_addr src_ip;
+    struct ipv4_addr src_ip;
     struct mac_addr dest_mac;
-    struct ip_addr dest_ip;
+    struct ipv4_addr dest_ip;
 } __packed;
 
 static_assert(sizeof(struct ip_ethernet_arp_payload) == 20);
 
-static struct result arp_send_common(u16 opcode, struct ip_addr src_ip, struct mac_addr src_mac, struct ip_addr dest_ip,
-                                     struct mac_addr dest_mac, struct arena arn)
+static struct result arp_send_common(u16 opcode, struct ipv4_addr src_ip, struct mac_addr src_mac,
+                                     struct ipv4_addr dest_ip, struct mac_addr dest_mac, struct arena arn)
 {
     struct byte_buf frame_buf = byte_buf_from_array(byte_array_from_arena(ETHERNET_MAX_FRAME_SIZE, &arn));
 
@@ -36,7 +36,7 @@ static struct result arp_send_common(u16 opcode, struct ip_addr src_ip, struct m
     arp_hdr.htype = net_u16_from_u16(ARP_HTYPE_ETHERNET);
     arp_hdr.ptype = net_u16_from_u16(ETHERNET_PTYPE_IPV4);
     arp_hdr.hlen = sizeof(struct mac_addr);
-    arp_hdr.plen = sizeof(struct ip_addr);
+    arp_hdr.plen = sizeof(struct ipv4_addr);
     arp_hdr.opcode = net_u16_from_u16(opcode);
     byte_buf_append(&frame_buf, byte_view_new(&arp_hdr, sizeof(arp_hdr)));
 
@@ -50,24 +50,25 @@ static struct result arp_send_common(u16 opcode, struct ip_addr src_ip, struct m
     assert(frame_buf.len == 14 + 8 + 20);
 
     print_dbg(PINFO, STR("Sending ARP packet (0x%hx). src_ip=%s, src_mac=%s, dest_ip=%s, dest_mac=%s\n"), opcode,
-              ip_addr_format(src_ip, &arn), mac_addr_format(src_mac, &arn), ip_addr_format(dest_ip, &arn),
+              ipv4_addr_format(src_ip, &arn), mac_addr_format(src_mac, &arn), ipv4_addr_format(dest_ip, &arn),
               mac_addr_format(dest_mac, &arn));
 
     return netdev_send_frame(src_mac, byte_view_from_buf(frame_buf));
 }
 
-struct result arp_send_request(struct ip_addr src_ip, struct mac_addr src_mac, struct ip_addr dest_ip, struct arena arn)
+struct result arp_send_request(struct ipv4_addr src_ip, struct mac_addr src_mac, struct ipv4_addr dest_ip,
+                               struct arena arn)
 {
     return arp_send_common(ARP_OPCODE_REQUEST, src_ip, src_mac, dest_ip, MAC_ADDR_BROADCAST, arn);
 }
 
-struct option_mac_addr arp_lookup_mac_addr(struct ip_addr ip_addr)
+struct option_mac_addr arp_lookup_mac_addr(struct ipv4_addr ip_addr)
 {
     sz n_matches = 0;
     struct arp_table_ent *last_match = NULL;
 
     for (sz i = 0; i < GLOBAL_ARP_TABLE_SIZE; i++) {
-        if (global_arp_table[i].is_used && ip_addr_is_equal(global_arp_table[i].ip_addr, ip_addr)) {
+        if (global_arp_table[i].is_used && ipv4_addr_is_equal(global_arp_table[i].ip_addr, ip_addr)) {
             n_matches++;
             last_match = &global_arp_table[i];
         }
@@ -82,17 +83,17 @@ struct option_mac_addr arp_lookup_mac_addr(struct ip_addr ip_addr)
     return option_mac_addr_ok(last_match->mac_addr);
 }
 
-static struct result_bool arp_table_update_or_insert(struct ip_addr ip_addr, struct mac_addr mac_addr)
+static struct result_bool arp_table_update_or_insert(struct ipv4_addr ip_addr, struct mac_addr mac_addr)
 {
-    // If the given IP address already has an entry in the table, we just need to update its associated MAC address.
+    // If the given IPv4 address already has an entry in the table, we just need to update its associated MAC address.
     for (sz i = 0; i < GLOBAL_ARP_TABLE_SIZE; i++) {
-        if (global_arp_table[i].is_used && ip_addr_is_equal(ip_addr, global_arp_table[i].ip_addr)) {
+        if (global_arp_table[i].is_used && ipv4_addr_is_equal(ip_addr, global_arp_table[i].ip_addr)) {
             global_arp_table[i].mac_addr = mac_addr;
             return result_bool_ok(true);
         }
     }
 
-    // There is no entry for the given IP address in the table so we can create a new one.
+    // There is no entry for the given IPv4 address in the table so we can create a new one.
     for (sz i = 0; i < GLOBAL_ARP_TABLE_SIZE; i++) {
         if (!global_arp_table[i].is_used) {
             global_arp_table[i].is_used = true;
@@ -121,7 +122,7 @@ void arp_handle_packet(struct byte_view packet, struct arena arn)
                   u16_from_net_u16(arp_hdr->htype), u16_from_net_u16(arp_hdr->ptype));
     }
 
-    if (arp_hdr->hlen != sizeof(struct mac_addr) || arp_hdr->plen != sizeof(struct ip_addr)) {
+    if (arp_hdr->hlen != sizeof(struct mac_addr) || arp_hdr->plen != sizeof(struct ipv4_addr)) {
         print_dbg(
             PWARN,
             STR("Received ARP packet with hlen=%hhu and plen=%hhu. These are wrong for IPv4 over Ethernet. Continuing assuming hlen=6 and plen=4\n"),
@@ -140,7 +141,7 @@ void arp_handle_packet(struct byte_view packet, struct arena arn)
     }
 
     print_dbg(PINFO, STR("Updated ARP table with ip_addr=%s, mac_addr=%s (old mac_addr=%s)\n"),
-              ip_addr_format(payload->src_ip, &arn), mac_addr_format(payload->src_mac, &arn),
+              ipv4_addr_format(payload->src_ip, &arn), mac_addr_format(payload->src_mac, &arn),
               result_bool_checked(insert_res) ? mac_addr_format(option_mac_addr_checked(old_mac_opt), &arn) :
                                                 STR("none"));
 

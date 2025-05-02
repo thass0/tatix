@@ -22,10 +22,10 @@ struct netdev {
 // Send a frame (only Ethernet right now) with data `frame` using the device with MAC address `addr`.
 struct result netdev_send_frame(struct mac_addr addr, struct byte_view frame);
 
-// Perform an ARP scan by broadcasting an ARP REQUEST for the device with IP address `dest_ip` from each of the
-// registered network devices. `src_ip` is the IP address of this computer (the host) and `dest_ip` is the IP
+// Perform an ARP scan by broadcasting an ARP REQUEST for the device with IPv4 address `dest_ip` from each of the
+// registered network devices. `src_ip` is the IPv4 address of this computer (the host) and `dest_ip` is the IPv4
 // address that we want to know the MAC address for. `arn` is used for temporary storage.
-struct result netdev_arp_scan(struct ip_addr src_ip, struct ip_addr dest_ip, struct arena arn);
+struct result netdev_arp_scan(struct ipv4_addr src_ip, struct ipv4_addr dest_ip, struct arena arn);
 
 // Register a `struct netdev` network device with the `netdev` subsystem. The `mac_addr` field in the given structure
 // `dev` will be used to look up the device. `send_frame` will be called to send a frame over the device. `private_data`

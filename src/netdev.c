@@ -53,7 +53,7 @@ struct result netdev_send_frame(struct mac_addr addr, struct byte_view frame)
     return dev->send_frame(dev, frame);
 }
 
-struct result netdev_arp_scan(struct ip_addr src_ip, struct ip_addr dest_ip, struct arena arn)
+struct result netdev_arp_scan(struct ipv4_addr src_ip, struct ipv4_addr dest_ip, struct arena arn)
 {
     struct result res = result_ok();
 

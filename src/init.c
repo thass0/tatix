@@ -145,7 +145,7 @@ __noreturn void kernel_init(void)
     assert(!res.is_error);
 
     struct arena arn = arena_new(option_byte_array_checked(kvalloc_alloc(ETHERNET_MAX_FRAME_SIZE, 64)));
-    netdev_arp_scan(ip_addr_new(192, 168, 100, 2), ip_addr_new(192, 168, 100, 1), arn);
+    netdev_arp_scan(ipv4_addr_new(192, 168, 100, 2), ipv4_addr_new(192, 168, 100, 1), arn);
 
     hlt();
 }
