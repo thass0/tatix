@@ -478,7 +478,10 @@ static struct result e1000_rx_poll(struct e1000_device *dev, struct byte_buf *bu
 static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *private_data)
 {
     assert(private_data);
-    struct e1000_device *dev = private_data;
+    struct netdev *netdev = private_data;
+
+    assert(netdev->private_data);
+    struct e1000_device *dev = netdev->private_data;
 
     u32 cause = mmio_read32(dev->mmio_base + E1000_OFFSET_ICR); // This also clears the register to ack' the interrupt.
 
@@ -498,7 +501,7 @@ static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *
                 break; // Stop trying to receive any more data.
             if (res.is_error)
                 crash("Failed to receive\n");
-            ethernet_handle_frame(dev->mac_addr, byte_view_from_buf(buf));
+            ethernet_handle_frame(netdev, byte_view_from_buf(buf));
         }
     }
 }
@@ -524,6 +527,11 @@ static struct result e1000_probe(struct pci_device *pci)
     if (dev_mem.is_none)
         return result_error(ENOMEM);
     struct e1000_device *dev = byte_array_ptr(option_byte_array_checked(dev_mem));
+
+    struct option_byte_array netdev_mem = kvalloc_alloc(sizeof(struct netdev), alignof(struct netdev));
+    if (netdev_mem.is_none)
+        return result_error(ENOMEM);
+    struct netdev *netdev = byte_array_ptr(option_byte_array_checked(netdev_mem));
 
     // This shouldn't last forever:
     dev->tmp_recv_buf = option_byte_array_checked(kvalloc_alloc(E1000_RX_BUF_SIZE, 64));
@@ -556,24 +564,27 @@ static struct result e1000_probe(struct pci_device *pci)
     if (res.is_error)
         return res;
 
-    e1000_set_link_up(dev);
+    netdev->mac_addr = dev->mac_addr;
+    netdev->ip_addr = ipv4_addr_new(0, 0, 0, 0);
+    netdev->send_frame = e1000_netdev_send_frame;
+    netdev->private_data = dev;
 
-    print_dbg(PINFO, STR("Link is up!\n"));
+    res = netdev_register_device(netdev);
+    if (res.is_error)
+        return res;
 
-    pic_enable_irq(pci->interrupt_line);
-    res = isr_register_handler(IRQ_VECTORS_BEG + pci->interrupt_line, e1000_handle_interrupt, dev);
+    // NOTE: We DON'T register the `dev` (struct e1000_device) structure with the ISR handler. Instead, we register
+    // the `netdev` structure that's also registered with the `netdev` subsystem so that, e.g., we can later retrieve
+    // information about the IP address that was assigned to the network device.
+    res = isr_register_handler(IRQ_VECTORS_BEG + pci->interrupt_line, e1000_handle_interrupt, netdev);
     if (res.is_error)
         return res;
 
     e1000_init_interrupts(dev);
+    pic_enable_irq(pci->interrupt_line);
 
-    struct netdev netdev;
-    netdev.mac_addr = dev->mac_addr;
-    netdev.send_frame = e1000_netdev_send_frame;
-    netdev.private_data = dev;
-    res = netdev_register_device(netdev);
-    if (res.is_error)
-        return res;
+    e1000_set_link_up(dev);
+    print_dbg(PINFO, STR("Link is up!\n"));
 
     return result_ok();
 }
