@@ -8,6 +8,7 @@
 struct result print_str(struct str str);
 struct result print_fmt(struct str_buf buf, struct str fmt, ...);
 
+#define PVERBOSE 3 /* This is for logs that can generate a lot of spam */
 #define PDBG 2
 #define PINFO 1
 #define PWARN 0
