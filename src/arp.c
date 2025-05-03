@@ -120,6 +120,7 @@ void arp_handle_packet(struct byte_view packet, struct arena arn)
         u16_from_net_u16(arp_hdr->ptype) != ETHERNET_PTYPE_IPV4) {
         print_dbg(PDBG, STR("Received ARP packet with unknown htype=0x%hx or ptype=0x%hx. Dropping ...\n"),
                   u16_from_net_u16(arp_hdr->htype), u16_from_net_u16(arp_hdr->ptype));
+        return;
     }
 
     if (arp_hdr->hlen != sizeof(struct mac_addr) || arp_hdr->plen != sizeof(struct ipv4_addr)) {
