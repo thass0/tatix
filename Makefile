@@ -109,7 +109,7 @@ $(DISK_IMAGE): $(BOOTLOADER_IMAGE) $(KERNEL_ELF) | $(BUILD_DIR)
 ################################################################################
 
 $(BOOTLOADER_IMAGE): $(BOOTLOADER_OBJS) | $(BUILD_DIR) $(LINKER_CONFIG) bootloader.ld
-	$(call run_ld,$(BUILD_DIR)/bootloader.elf,$^,-L$(dir $(LINKER_CONFIG)) -T bootloader.ld --no-warn-rwx-segments)
+	$(call run_ld,$(BUILD_DIR)/bootloader.elf,$^,-L$(BUILD_DIR) -T bootloader.ld --no-warn-rwx-segments)
 	$(call run_objcopy,$@,$(BUILD_DIR)/bootloader.elf,-O binary)
 	$(call run_truncate,$@,-s $(shell expr $(SECTOR_SIZE) \* $(BOOT_SECTOR_COUNT)),)
 
@@ -124,7 +124,7 @@ $(BUILD_DIR)/%.c.o: $(BOOTLOADER_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
 ################################################################################
 
 $(KERNEL_ELF): $(OBJS) $(ROOTFS_OBJ) | $(BUILD_DIR) $(LINKER_CONFIG) $(LINKER_PRINT_INFO) kernel.ld
-	$(call run_ld,$@,$^,-L$(dir $(LINKER_CONFIG)) $(DEBUG_FLAGS) -T kernel.ld)
+	$(call run_ld,$@,$^,-L$(BUILD_DIR) $(DEBUG_FLAGS) -T kernel.ld)
 
 # To recompile if headers change:
 -include $(DEPS)
