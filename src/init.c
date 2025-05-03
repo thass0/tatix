@@ -6,6 +6,7 @@
 #include <tx/buddy.h>
 #include <tx/byte.h>
 #include <tx/com.h>
+#include <tx/ethernet.h>
 #include <tx/gdt.h>
 #include <tx/idt.h>
 #include <tx/isr.h>
@@ -141,11 +142,13 @@ __noreturn void kernel_init(void)
 
     print_hello_txt(rfs);
 
+    netdev_set_default_ip_addr(ipv4_addr_new(192, 168, 100, 2));
+
     res = pci_probe();
     assert(!res.is_error);
 
     struct arena arn = arena_new(option_byte_array_checked(kvalloc_alloc(ETHERNET_MAX_FRAME_SIZE, 64)));
-    netdev_arp_scan(ipv4_addr_new(192, 168, 100, 2), ipv4_addr_new(192, 168, 100, 1), arn);
+    netdev_arp_scan(ipv4_addr_new(192, 168, 100, 1), arn);
 
     hlt();
 }
