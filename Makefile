@@ -47,6 +47,8 @@ LINKER_CONFIG := $(BUILD_DIR)/config.ld
 NASM_CONFIG := $(BUILD_DIR)/config.s
 HEADER_CONFIG := $(BUILD_DIR)/config.h
 
+LINKER_PRINT_INFO := $(BUILD_DIR)/print_info.ld
+
 ################################################################################
 # Function definitions                                                         #
 ################################################################################
@@ -121,7 +123,7 @@ $(BUILD_DIR)/%.c.o: $(BOOTLOADER_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
 # Compile kernel                                                               #
 ################################################################################
 
-$(KERNEL_ELF): $(OBJS) $(ROOTFS_OBJ) | $(BUILD_DIR) $(LINKER_CONFIG) kernel.ld
+$(KERNEL_ELF): $(OBJS) $(ROOTFS_OBJ) | $(BUILD_DIR) $(LINKER_CONFIG) $(LINKER_PRINT_INFO) kernel.ld
 	$(call run_ld,$@,$^,-L$(dir $(LINKER_CONFIG)) $(DEBUG_FLAGS) -T kernel.ld)
 
 # To recompile if headers change:
@@ -158,6 +160,14 @@ $(NASM_CONFIG): $(CONFIG)
 
 $(HEADER_CONFIG): $(CONFIG)
 	@./scripts/make_config.sh -f header -o $@ $<
+
+$(LINKER_PRINT_INFO): $(OBJS) | $(BUILD_DIR)
+	@echo "/* Auto-generated linker symbols */" > $@
+	@echo "BASENAME_MAX_LEN = $$(for f in $(notdir $(SRCS)); do \
+		echo -n "$$f" | wc -c; \
+		done | sort -nr | head -1);" >> $@
+	@echo "LINE_MAX_LEN = $$(wc -l --total=never $(SRCS) | sort -n | tail -1 | awk '{print length($$1)}');" >> $@
+	@echo "FUNCNAME_MAX_LEN = $$(nm -C $(OBJS) | grep ' [tT] ' | awk '{ print length($$3) }' | sort -n | tail -1);" >> $@
 
 $(BUILD_DIR):
 	@mkdir $@

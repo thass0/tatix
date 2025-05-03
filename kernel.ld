@@ -1,4 +1,5 @@
 INCLUDE config.ld
+INCLUDE print_info.ld
 
 ENTRY(_start)
 
