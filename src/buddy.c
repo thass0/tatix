@@ -130,7 +130,7 @@ static void *buddy_alloc_raw(struct buddy *buddy, sz req_ord)
     }
 
     if (ord > buddy->max_ord) {
-        print_dbg(PDBG, STR("No block found, all blocks too small: ord=%ld\n"), req_ord);
+        print_dbg(PVERBOSE, STR("No block found, all blocks too small: ord=%ld\n"), req_ord);
         return NULL;
     }
 
@@ -139,7 +139,7 @@ static void *buddy_alloc_raw(struct buddy *buddy, sz req_ord)
     dlist_remove(buddy->avail[ord].link.next);
 
     if (ord == req_ord) {
-        print_dbg(PDBG, STR("Found perfect fit: ret=0x%lx ord=%ld\n"), ret, ord);
+        print_dbg(PVERBOSE, STR("Found perfect fit: ret=0x%lx ord=%ld\n"), ret, ord);
         return ret;
     }
 
@@ -150,10 +150,10 @@ static void *buddy_alloc_raw(struct buddy *buddy, sz req_ord)
         set_avail(buddy, rem, ord);
         rem->ord = ord;
         dlist_insert(&buddy->avail[ord].link, &rem->link);
-        print_dbg(PDBG, STR("Split blocks: ret=0x%lx rem=0x%lx ord=%ld\n"), ret, rem, ord);
+        print_dbg(PVERBOSE, STR("Split blocks: ret=0x%lx rem=0x%lx ord=%ld\n"), ret, rem, ord);
     }
 
-    print_dbg(PDBG, STR("Found block after splitting: ret=0x%lx ord=%ld\n"), ret, ord);
+    print_dbg(PVERBOSE, STR("Found block after splitting: ret=0x%lx ord=%ld\n"), ret, ord);
     return ret;
 }
 
@@ -192,10 +192,10 @@ static void buddy_free_raw(struct buddy *buddy, void *ptr, sz ord)
     struct block *block = ptr;
     struct block *buddy_block = get_buddy(buddy, block, ord);
 
-    print_dbg(PDBG, STR("Freeing block: block=0x%lx ord=%ld\n"), block, ord);
+    print_dbg(PVERBOSE, STR("Freeing block: block=0x%lx ord=%ld\n"), block, ord);
 
     while (ord < buddy->max_ord && is_avail(buddy, buddy_block)) {
-        print_dbg(PDBG, STR("Coalescing blocks: block=0x%lx buddy_block=0x%lx ord=%ld\n"), block, buddy_block, ord);
+        print_dbg(PVERBOSE, STR("Coalescing blocks: block=0x%lx buddy_block=0x%lx ord=%ld\n"), block, buddy_block, ord);
         dlist_remove(&buddy_block->link);
         ord++;
         if (buddy_block < block)
