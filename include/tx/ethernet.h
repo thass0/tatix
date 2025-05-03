@@ -5,6 +5,7 @@
 
 #include <tx/base.h>
 #include <tx/mac.h>
+#include <tx/netdev.h>
 #include <tx/netorder.h>
 
 #define ETHERNET_PTYPE_IPV4 0x0800
@@ -18,13 +19,13 @@ struct ethernet_frame_header {
     struct mac_addr dest;
     struct mac_addr src;
     net_u16 ether_type;
-    u8 payload[];
+    byte payload[];
 };
 
 static_assert(sizeof(struct ethernet_frame_header) == 14);
 
 // TODO: This is called by the e1000 in the interrupt handler. It would be better if frames were processed outside
 // of the interrupt handler.
-void ethernet_handle_frame(struct mac_addr mac_addr, struct byte_view frame);
+void ethernet_handle_frame(struct netdev *dev, struct byte_view frame);
 
 #endif // __TX_ETHERNET_H__

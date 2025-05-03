@@ -3,8 +3,10 @@
 #include <tx/kvalloc.h>
 #include <tx/print.h>
 
-void ethernet_handle_frame(struct mac_addr mac, struct byte_view frame)
+void ethernet_handle_frame(struct netdev *dev, struct byte_view frame)
 {
+    assert(dev);
+
     if (frame.len < sizeof(struct ethernet_frame_header)) {
         print_dbg(PDBG, STR("Received frame smaller than ethernet header. Dropping ...\n"));
         return;
@@ -24,7 +26,7 @@ void ethernet_handle_frame(struct mac_addr mac, struct byte_view frame)
               mac_addr_format(ether_hdr->dest, &tmp_arn), mac_addr_format(ether_hdr->src, &tmp_arn),
               u16_from_net_u16(ether_hdr->ether_type));
 
-    if (!mac_addr_is_equal(ether_hdr->dest, mac) && !mac_addr_is_equal(ether_hdr->dest, MAC_ADDR_BROADCAST)) {
+    if (!mac_addr_is_equal(ether_hdr->dest, dev->mac_addr) && !mac_addr_is_equal(ether_hdr->dest, MAC_ADDR_BROADCAST)) {
         print_dbg(PDBG, STR("Received ethernet frame for unknown MAC address %s. Dropping ...\n"),
                   mac_addr_format(ether_hdr->dest, &tmp_arn));
         kvalloc_free(tmp_arn_mem);
@@ -38,7 +40,7 @@ void ethernet_handle_frame(struct mac_addr mac, struct byte_view frame)
 
     switch (u16_from_net_u16(ether_hdr->ether_type)) {
     case ETHERNET_PTYPE_ARP:
-        arp_handle_packet(payload, tmp_arn);
+        arp_handle_packet(payload, dev->ip_addr, dev->mac_addr, tmp_arn);
         break;
     default:
         print_dbg(PDBG, STR("Ether type 0x%hx of frame unknown. Dropping ...\n"), ether_hdr->ether_type);
