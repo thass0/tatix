@@ -22,16 +22,18 @@ void ethernet_handle_frame(struct netdev *dev, struct byte_view frame)
 
     struct ethernet_frame_header *ether_hdr = byte_view_ptr(frame);
 
-    print_dbg(PDBG, STR("Received ethernet frame: dest=%s, src=%s, type=0x%hx\n"),
-              mac_addr_format(ether_hdr->dest, &tmp_arn), mac_addr_format(ether_hdr->src, &tmp_arn),
-              u16_from_net_u16(ether_hdr->ether_type));
-
     if (!mac_addr_is_equal(ether_hdr->dest, dev->mac_addr) && !mac_addr_is_equal(ether_hdr->dest, MAC_ADDR_BROADCAST)) {
-        print_dbg(PDBG, STR("Received ethernet frame for unknown MAC address %s. Dropping ...\n"),
-                  mac_addr_format(ether_hdr->dest, &tmp_arn));
+        print_dbg(PVERBOSE,
+                  STR("Received ethernet frame for unknown MAC address: dest=%s, src=%s, type=0x%hx. Dropping ...\n"),
+                  mac_addr_format(ether_hdr->dest, &tmp_arn), mac_addr_format(ether_hdr->src, &tmp_arn),
+                  u16_from_net_u16(ether_hdr->ether_type));
         kvalloc_free(tmp_arn_mem);
         return;
     }
+
+    print_dbg(PDBG, STR("Received ethernet frame: dest=%s, src=%s, type=0x%hx\n"),
+              mac_addr_format(ether_hdr->dest, &tmp_arn), mac_addr_format(ether_hdr->src, &tmp_arn),
+              u16_from_net_u16(ether_hdr->ether_type));
 
     // TODO: Check if we need to strip anything from the end. We can find this out once we receive frames bigger
     // than 64 bytes (because frames smaller than 64 bytes are padded so we don't know where the data ends).
