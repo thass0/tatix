@@ -14,9 +14,10 @@ struct result print_fmt(struct str_buf buf, struct str fmt, ...);
 #define PWARN 0
 #define PERROR 0
 
-struct result __print_dbg(struct str basename, sz lineno, struct str funcname, i16 level, struct str fmt, ...);
+struct result __print_dbg(struct str basename, struct str line, struct str funcname, i16 level, struct str fmt, ...);
+
 #define print_dbg(level, fmt, ...)                                                                       \
-    __print_dbg(STR(__BASENAME__), __LINE__,                                                             \
+    __print_dbg(STR(__BASENAME__), STR(TOSTRING(__LINE__)),                                              \
                 (struct str){ .dat = DECONST(char *, __func__), .len = lengthof(__func__) }, level, fmt, \
                 ##__VA_ARGS__)
 

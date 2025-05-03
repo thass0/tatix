@@ -78,4 +78,20 @@ static inline struct result str_buf_append_char(struct str_buf *buf, char ch)
     return result_ok();
 }
 
+static inline struct result str_buf_append_n(struct str_buf *buf, sz n, char ch)
+{
+    if (!buf)
+        return result_error(EINVAL);
+
+    // Capacity will be exceeded if we add n bytes.
+    if (buf->cap < buf->len + n)
+        return result_error(ENOMEM);
+
+    for (sz i = 0; i < n; i++)
+        (buf->dat + buf->len)[i] = ch;
+    buf->len += n;
+
+    return result_ok();
+}
+
 #endif // __TX_STRING_H__
