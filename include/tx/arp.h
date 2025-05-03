@@ -5,8 +5,8 @@
 
 #include <tx/arena.h>
 #include <tx/byte.h>
-#include <tx/ethernet.h>
 #include <tx/ip.h>
+#include <tx/mac.h>
 #include <tx/netorder.h>
 
 #define ARP_OPCODE_REQUEST 1

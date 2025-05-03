@@ -6,7 +6,7 @@
 #include <tx/arena.h>
 #include <tx/byte.h>
 #include <tx/error.h>
-#include <tx/ethernet.h>
+#include <tx/mac.h>
 #include <tx/ip.h>
 
 struct netdev;

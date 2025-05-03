@@ -1,6 +1,7 @@
 // ARP implementation for Ethernet over IPv4.
 
 #include <tx/arp.h>
+#include <tx/ethernet.h>
 #include <tx/netdev.h>
 
 struct arp_table_ent {
