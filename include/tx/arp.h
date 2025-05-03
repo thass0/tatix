@@ -39,10 +39,11 @@ struct result arp_send_request(struct ipv4_addr src_ip, struct mac_addr src_mac,
 struct option_mac_addr arp_lookup_mac_addr(struct ipv4_addr ip_addr);
 
 // Handle an ARP packet. Call this function on any incoming packets that were identified as ARP packets. It will
-// update the ARP table and reply to the sender (if a reply was requested).
+// update the ARP table and reply to the sender with the `host_ip` and `host_mac` IP and MAC addresses (if a reply was
+// requested).
 //
 // NOTE: This function WILL NOT check if the destination MAC address in the ARP packet belongs to this host. The
 // caller of this function which receives the packet should ensure that it's correctly destined for this host.
-void arp_handle_packet(struct byte_view packet, struct arena arn);
+void arp_handle_packet(struct byte_view packet, struct ipv4_addr host_ip, struct mac_addr host_mac, struct arena arn);
 
 #endif // __TX_ARP_H__

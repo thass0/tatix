@@ -107,7 +107,7 @@ static struct result_bool arp_table_update_or_insert(struct ipv4_addr ip_addr, s
     return result_bool_error(ENOMEM);
 }
 
-void arp_handle_packet(struct byte_view packet, struct arena arn)
+void arp_handle_packet(struct byte_view packet, struct ipv4_addr host_ip, struct mac_addr host_mac, struct arena arn)
 {
     if (packet.len < sizeof(struct arp_header) + sizeof(struct ip_ethernet_arp_payload)) {
         print_dbg(PDBG,
@@ -147,7 +147,8 @@ void arp_handle_packet(struct byte_view packet, struct arena arn)
               result_bool_checked(insert_res) ? mac_addr_format(option_mac_addr_checked(old_mac_opt), &arn) :
                                                 STR("none"));
 
-    // The reply has the `src_*` and `dest_*` fields swapped from the incoming packet.
+    // The reply has the `src_*` and `dest_*` fields swapped from the incoming packet and uses the source fields
+    // of the host.
     if (u16_from_net_u16(arp_hdr->opcode) == ARP_OPCODE_REQUEST)
-        arp_send_common(ARP_OPCODE_REPLY, payload->dest_ip, payload->dest_mac, payload->src_ip, payload->src_mac, arn);
+        arp_send_common(ARP_OPCODE_REPLY, host_ip, host_mac, payload->src_ip, payload->src_mac, arn);
 }
