@@ -3,7 +3,6 @@
 #include <tx/asm.h>
 #include <tx/base.h>
 #include <tx/byte.h>
-#include <tx/ethernet.h>
 #include <tx/isr.h>
 #include <tx/kvalloc.h>
 #include <tx/netdev.h>
@@ -11,6 +10,7 @@
 #include <tx/pci.h>
 #include <tx/pic.h>
 #include <tx/print.h>
+#include <tx/send_buf.h>
 
 // The 8254x PCI/PCI-X Family of Gigabit Ethernet Controllers Software Developer’s Manual (2009 version) was used as a
 // source for this driver References to sections are with respect to this document. A copy of the manual used can be
@@ -400,11 +400,13 @@ static void e1000_set_link_up(struct e1000_device *dev)
 // Receive and transmit                                                      //
 ///////////////////////////////////////////////////////////////////////////////
 
-static struct result e1000_tx_poll(struct e1000_device *dev, struct byte_view frame)
+static struct result e1000_tx_poll(struct e1000_device *dev, struct send_buf sb)
 {
     struct e1000_legacy_tx_desc *tx_desc = &dev->tx_queue[dev->tx_tail];
 
-    if (frame.len > E1000_TX_BUF_SIZE)
+    sz len = send_buf_total_length(sb);
+
+    if (len > E1000_TX_BUF_SIZE)
         return result_error(EINVAL);
 
     // If there is space in the queue, the tail points to a descriptor with the DD flag set, because the 8254x
@@ -413,9 +415,9 @@ static struct result e1000_tx_poll(struct e1000_device *dev, struct byte_view fr
         return result_error(ENOBUFS);
 
     struct byte_buf tx_buf = byte_buf_new(&dev->tx_buffers[dev->tx_tail], 0, E1000_TX_BUF_SIZE);
-    assert(byte_buf_append(&tx_buf, frame) == frame.len);
+    assert(!send_buf_assemble(sb, &tx_buf).is_error);
 
-    tx_desc->length = (u16)frame.len;
+    tx_desc->length = (u16)len;
     tx_desc->status = 0;
     tx_desc->cmd |= E1000_TX_DESC_CMD_EOP | E1000_TX_DESC_CMD_RS;
 
@@ -501,7 +503,7 @@ static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *
                 break; // Stop trying to receive any more data.
             if (res.is_error)
                 crash("Failed to receive\n");
-            ethernet_handle_frame(netdev, byte_view_from_buf(buf));
+            netdev_intr_receive(netdev, byte_view_from_buf(buf));
         }
     }
 }
@@ -510,13 +512,13 @@ static void e1000_handle_interrupt(struct trap_frame *cpu_state __unused, void *
 // Outside interface                                                         //
 ///////////////////////////////////////////////////////////////////////////////
 
-static struct result e1000_netdev_send_frame(struct netdev *netdev, struct byte_view frame)
+static struct result e1000_netdev_send_frame(struct netdev *netdev, struct send_buf sb)
 {
     assert(netdev);
     assert(netdev->private_data);
     struct e1000_device *dev = netdev->private_data;
     assert(mac_addr_is_equal(netdev->mac_addr, dev->mac_addr));
-    return e1000_tx_poll(dev, frame);
+    return e1000_tx_poll(dev, sb);
 }
 
 static struct result e1000_probe(struct pci_device *pci)
@@ -566,6 +568,7 @@ static struct result e1000_probe(struct pci_device *pci)
 
     netdev->mac_addr = dev->mac_addr;
     netdev->ip_addr = ipv4_addr_new(0, 0, 0, 0);
+    netdev->link_type = NETDEV_LINK_TYPE_ETHERNET;
     netdev->send_frame = e1000_netdev_send_frame;
     netdev->private_data = dev;
 
