@@ -22,16 +22,10 @@ struct ip_ethernet_arp_payload {
 
 static_assert(sizeof(struct ip_ethernet_arp_payload) == 20);
 
-static struct result arp_send_common(u16 opcode, struct ipv4_addr src_ip, struct mac_addr src_mac,
-                                     struct ipv4_addr dest_ip, struct mac_addr dest_mac, struct arena arn)
+static struct result arp_send_common(u16 opcode, struct ipv4_addr dest_ip, struct mac_addr dest_mac,
+                                     struct netdev *netdev, struct send_buf sb, struct arena tmp)
 {
-    struct byte_buf frame_buf = byte_buf_from_array(byte_array_from_arena(ETHERNET_MAX_FRAME_SIZE, &arn));
-
-    struct ethernet_frame_header ether_hdr;
-    ether_hdr.dest = dest_mac;
-    ether_hdr.src = src_mac;
-    ether_hdr.ether_type = net_u16_from_u16(ETHERNET_PTYPE_ARP);
-    byte_buf_append(&frame_buf, byte_view_new(&ether_hdr, sizeof(ether_hdr)));
+    assert(netdev);
 
     struct arp_header arp_hdr;
     arp_hdr.htype = net_u16_from_u16(ARP_HTYPE_ETHERNET);
@@ -39,28 +33,31 @@ static struct result arp_send_common(u16 opcode, struct ipv4_addr src_ip, struct
     arp_hdr.hlen = sizeof(struct mac_addr);
     arp_hdr.plen = sizeof(struct ipv4_addr);
     arp_hdr.opcode = net_u16_from_u16(opcode);
-    byte_buf_append(&frame_buf, byte_view_new(&arp_hdr, sizeof(arp_hdr)));
 
     struct ip_ethernet_arp_payload arp_payload;
-    arp_payload.src_mac = src_mac;
-    arp_payload.src_ip = src_ip;
+    arp_payload.src_mac = netdev->mac_addr;
+    arp_payload.src_ip = netdev->ip_addr;
     arp_payload.dest_mac = dest_mac;
     arp_payload.dest_ip = dest_ip;
-    byte_buf_append(&frame_buf, byte_view_new(&arp_payload, sizeof(arp_payload)));
 
-    assert(frame_buf.len == 14 + 8 + 20);
+    struct byte_buf *buf = send_buf_prepend(&sb, sizeof(arp_hdr) + sizeof(arp_payload));
+
+    byte_buf_append(buf, byte_view_new(&arp_hdr, sizeof(arp_hdr)));
+    byte_buf_append(buf, byte_view_new(&arp_payload, sizeof(arp_payload)));
+
+    assert(buf->len == 8 + 20);
 
     print_dbg(PINFO, STR("Sending ARP packet (0x%hx). src_ip=%s, src_mac=%s, dest_ip=%s, dest_mac=%s\n"), opcode,
-              ipv4_addr_format(src_ip, &arn), mac_addr_format(src_mac, &arn), ipv4_addr_format(dest_ip, &arn),
-              mac_addr_format(dest_mac, &arn));
+              ipv4_addr_format(netdev->ip_addr, &tmp), mac_addr_format(netdev->mac_addr, &tmp),
+              ipv4_addr_format(dest_ip, &tmp), mac_addr_format(dest_mac, &tmp));
 
-    return netdev_send_frame(src_mac, byte_view_from_buf(frame_buf));
+    return netdev_send(dest_mac, netdev, NETDEV_PROTO_ARP, sb);
 }
 
-struct result arp_send_request(struct ipv4_addr src_ip, struct mac_addr src_mac, struct ipv4_addr dest_ip,
-                               struct arena arn)
+struct result arp_send_request(struct ipv4_addr dest_ip, struct netdev *netdev, struct send_buf sb, struct arena tmp)
 {
-    return arp_send_common(ARP_OPCODE_REQUEST, src_ip, src_mac, dest_ip, MAC_ADDR_BROADCAST, arn);
+    assert(netdev);
+    return arp_send_common(ARP_OPCODE_REQUEST, dest_ip, MAC_ADDR_BROADCAST, netdev, sb, tmp);
 }
 
 struct option_mac_addr arp_lookup_mac_addr(struct ipv4_addr ip_addr)
@@ -107,15 +104,15 @@ static struct result_bool arp_table_update_or_insert(struct ipv4_addr ip_addr, s
     return result_bool_error(ENOMEM);
 }
 
-void arp_handle_packet(struct byte_view packet, struct ipv4_addr host_ip, struct mac_addr host_mac, struct arena arn)
+void arp_handle_packet(struct input_packet *pkt, struct send_buf sb, struct arena tmp)
 {
-    if (packet.len < sizeof(struct arp_header) + sizeof(struct ip_ethernet_arp_payload)) {
+    if (pkt->data.len < sizeof(struct arp_header) + sizeof(struct ip_ethernet_arp_payload)) {
         print_dbg(PDBG,
                   STR("Received ARP packet smaller than ARP header with IPv4 over Ethernet payload. Dropping ...\n"));
         return;
     }
 
-    struct arp_header *arp_hdr = byte_view_ptr(packet);
+    struct arp_header *arp_hdr = byte_buf_ptr(pkt->data);
 
     if (u16_from_net_u16(arp_hdr->htype) != ARP_HTYPE_ETHERNET ||
         u16_from_net_u16(arp_hdr->ptype) != ETHERNET_PTYPE_IPV4) {
@@ -132,7 +129,7 @@ void arp_handle_packet(struct byte_view packet, struct ipv4_addr host_ip, struct
     }
 
     struct ip_ethernet_arp_payload *payload =
-        (struct ip_ethernet_arp_payload *)(packet.dat + sizeof(struct arp_header));
+        (struct ip_ethernet_arp_payload *)(pkt->data.dat + sizeof(struct arp_header));
 
     struct option_mac_addr old_mac_opt = arp_lookup_mac_addr(payload->src_ip);
 
@@ -142,13 +139,12 @@ void arp_handle_packet(struct byte_view packet, struct ipv4_addr host_ip, struct
         return;
     }
 
-    print_dbg(PINFO, STR("Updated ARP table with ip_addr=%s, mac_addr=%s (old mac_addr=%s)\n"),
-              ipv4_addr_format(payload->src_ip, &arn), mac_addr_format(payload->src_mac, &arn),
-              result_bool_checked(insert_res) ? mac_addr_format(option_mac_addr_checked(old_mac_opt), &arn) :
+    print_dbg(PINFO, STR("Received ARP packet and updated ARP table with ip_addr=%s, mac_addr=%s (old mac_addr=%s)\n"),
+              ipv4_addr_format(payload->src_ip, &tmp), mac_addr_format(payload->src_mac, &tmp),
+              result_bool_checked(insert_res) ? mac_addr_format(option_mac_addr_checked(old_mac_opt), &tmp) :
                                                 STR("none"));
 
-    // The reply has the `src_*` and `dest_*` fields swapped from the incoming packet and uses the source fields
-    // of the host.
+    // The reply contains the `src_*` fields of the incoming packet as the destination.
     if (u16_from_net_u16(arp_hdr->opcode) == ARP_OPCODE_REQUEST)
-        arp_send_common(ARP_OPCODE_REPLY, host_ip, host_mac, payload->src_ip, payload->src_mac, arn);
+        arp_send_common(ARP_OPCODE_REPLY, payload->src_ip, payload->src_mac, pkt->netdev, sb, tmp);
 }

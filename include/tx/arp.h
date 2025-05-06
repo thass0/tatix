@@ -7,6 +7,7 @@
 #include <tx/byte.h>
 #include <tx/ip.h>
 #include <tx/mac.h>
+#include <tx/netdev.h>
 #include <tx/netorder.h>
 
 #define ARP_OPCODE_REQUEST 1
@@ -25,25 +26,19 @@ struct arp_header {
 
 static_assert(sizeof(struct arp_header) == 8);
 
-// Broadcast an ARP REQUEST packet from the device with MAC address `src_mac`. The `src_ip` IPv4 address is the IPv4
-// address of this computer (the host). The `dest_ip` is the IPv4 address that we want to known the MAC address for.
-// `arn` is used for temporary storage.
-//
-// NOTE: Consider doing an ARP scan (`netdev_arp_scan`) instead of calling this function directly. With
-// `netdev_arp_scan`,  you don't have to care about the `src_mac` MAC address.
-struct result arp_send_request(struct ipv4_addr src_ip, struct mac_addr src_mac, struct ipv4_addr dest_ip,
-                               struct arena arn);
+// Broadcast an ARP REQUEST packet from the device `netdev`. The `dest_ip` is the IPv4 address that we want to known
+// the MAC address for.
+struct result arp_send_request(struct ipv4_addr dest_ip, struct netdev *netdev, struct send_buf sb, struct arena tmp);
 
 // Lookup a MAC address associated with the given IPv4 address in the ARP table. Returns either the MAC address or
 // nothing.
 struct option_mac_addr arp_lookup_mac_addr(struct ipv4_addr ip_addr);
 
 // Handle an ARP packet. Call this function on any incoming packets that were identified as ARP packets. It will
-// update the ARP table and reply to the sender with the `host_ip` and `host_mac` IP and MAC addresses (if a reply was
-// requested).
+// update the ARP table and reply to the sender using the same device that the ARP packet was received on.
 //
 // NOTE: This function WILL NOT check if the destination MAC address in the ARP packet belongs to this host. The
 // caller of this function which receives the packet should ensure that it's correctly destined for this host.
-void arp_handle_packet(struct byte_view packet, struct ipv4_addr host_ip, struct mac_addr host_mac, struct arena arn);
+void arp_handle_packet(struct input_packet *pkt, struct send_buf sb, struct arena tmp);
 
 #endif // __TX_ARP_H__
