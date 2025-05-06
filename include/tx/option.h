@@ -40,5 +40,6 @@
 
 struct_option(sz, sz);
 struct_option(byte_array, struct byte_array);
+struct_option(u16, u16);
 
 #endif // __TX_OPTION_H__

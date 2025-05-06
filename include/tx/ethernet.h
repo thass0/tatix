@@ -7,6 +7,7 @@
 #include <tx/mac.h>
 #include <tx/netdev.h>
 #include <tx/netorder.h>
+#include <tx/option.h>
 
 #define ETHERNET_PTYPE_IPV4 0x0800
 #define ETHERNET_PTYPE_ARP 0x0806
@@ -19,13 +20,32 @@ struct ethernet_frame_header {
     struct mac_addr dest;
     struct mac_addr src;
     net_u16 ether_type;
-    byte payload[];
 };
 
-static_assert(sizeof(struct ethernet_frame_header) == 14);
+static inline struct option_u16 ethernet_type_from_netdev_proto(netdev_proto_t proto)
+{
+    switch (proto) {
+    case NETDEV_PROTO_IPV4:
+        return option_u16_ok(ETHERNET_PTYPE_IPV4);
+    case NETDEV_PROTO_ARP:
+        return option_u16_ok(ETHERNET_PTYPE_ARP);
+    default:
+        return option_u16_none();
+    }
+}
 
-// TODO: This is called by the e1000 in the interrupt handler. It would be better if frames were processed outside
-// of the interrupt handler.
-void ethernet_handle_frame(struct netdev *dev, struct byte_view frame);
+static inline struct option_netdev_proto_t netdev_proto_from_ethernet_type(u16 type)
+{
+    switch (type) {
+    case ETHERNET_PTYPE_IPV4:
+        return option_netdev_proto_t_ok(NETDEV_PROTO_IPV4);
+    case ETHERNET_PTYPE_ARP:
+        return option_netdev_proto_t_ok(NETDEV_PROTO_ARP);
+    default:
+        return option_netdev_proto_t_none();
+    }
+}
+
+static_assert(sizeof(struct ethernet_frame_header) == 14);
 
 #endif // __TX_ETHERNET_H__
