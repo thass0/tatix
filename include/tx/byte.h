@@ -86,6 +86,11 @@ static inline struct byte_buf byte_buf_from_str_buf(struct str_buf sb)
     return byte_buf_new(sb.dat, sb.len, sb.cap);
 }
 
+static inline void *byte_buf_ptr(struct byte_buf bb)
+{
+    return (void *)bb.dat;
+}
+
 // Byte array conversions.
 
 static inline struct byte_array byte_array_from_buf(struct byte_buf bb)
