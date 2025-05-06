@@ -1,6 +1,7 @@
 #include <config.h>
 #include <tx/archive.h>
 #include <tx/arena.h>
+#include <tx/arp.h>
 #include <tx/assert.h>
 #include <tx/base.h>
 #include <tx/buddy.h>
@@ -143,12 +144,41 @@ __noreturn void kernel_init(void)
     print_hello_txt(rfs);
 
     netdev_set_default_ip_addr(ipv4_addr_new(192, 168, 100, 2));
+    res = netdev_init_input_queue();
+    assert(!res.is_error);
 
+    // Probe all PCI devies, including the network device.
     res = pci_probe();
     assert(!res.is_error);
 
-    struct arena arn = arena_new(option_byte_array_checked(kvalloc_alloc(ETHERNET_MAX_FRAME_SIZE, 64)));
-    netdev_arp_scan(ipv4_addr_new(192, 168, 100, 1), arn);
+    struct arena tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
+    struct arena send_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64)));
+    struct send_buf sb = send_buf_new(send_arn);
+
+    struct netdev *netdev = netdev_lookup_ip_addr(ipv4_addr_new(192, 168, 100, 2));
+    assert(netdev);
+    res = arp_send_request(ipv4_addr_new(192, 168, 100, 1), netdev, sb, tmp_arn);
+    assert(!res.is_error);
+
+    struct input_packet *in_packet = NULL;
+
+    while (true) {
+        in_packet = netdev_get_input();
+        if (in_packet) {
+            sb = send_buf_new(send_arn);
+
+            switch (in_packet->proto) {
+            case NETDEV_PROTO_ARP:
+                arp_handle_packet(in_packet, sb, tmp_arn);
+                break;
+            default:
+                print_dbg(PINFO, STR("Received packet with unknown protocol 0x%hx. Dropping ...\n"), in_packet->proto);
+                break;
+            }
+
+            netdev_release_input(in_packet);
+        }
+    }
 
     hlt();
 }
