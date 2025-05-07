@@ -12,6 +12,7 @@
 #include <tx/kvalloc.h>
 #include <tx/net/arp.h>
 #include <tx/net/ethernet.h>
+#include <tx/net/ip.h>
 #include <tx/net/netdev.h>
 #include <tx/paging.h>
 #include <tx/pci.h>
@@ -170,6 +171,9 @@ __noreturn void kernel_init(void)
             switch (in_packet->proto) {
             case NETDEV_PROTO_ARP:
                 arp_handle_packet(in_packet, sb, tmp_arn);
+                break;
+            case NETDEV_PROTO_IPV4:
+                ipv4_handle_packet(in_packet, sb, tmp_arn);
                 break;
             default:
                 print_dbg(PINFO, STR("Received packet with unknown protocol 0x%hx. Dropping ...\n"), in_packet->proto);
