@@ -104,12 +104,12 @@ static struct result_bool arp_table_update_or_insert(struct ipv4_addr ip_addr, s
     return result_bool_error(ENOMEM);
 }
 
-void arp_handle_packet(struct input_packet *pkt, struct send_buf sb, struct arena tmp)
+struct result arp_handle_packet(struct input_packet *pkt, struct send_buf sb, struct arena tmp)
 {
     if (pkt->data.len < sizeof(struct arp_header) + sizeof(struct ip_ethernet_arp_payload)) {
         print_dbg(PDBG,
                   STR("Received ARP packet smaller than ARP header with IPv4 over Ethernet payload. Dropping ...\n"));
-        return;
+        return result_ok();
     }
 
     struct arp_header *arp_hdr = byte_buf_ptr(pkt->data);
@@ -118,7 +118,7 @@ void arp_handle_packet(struct input_packet *pkt, struct send_buf sb, struct aren
         u16_from_net_u16(arp_hdr->ptype) != ETHERNET_PTYPE_IPV4) {
         print_dbg(PDBG, STR("Received ARP packet with unknown htype=0x%hx or ptype=0x%hx. Dropping ...\n"),
                   u16_from_net_u16(arp_hdr->htype), u16_from_net_u16(arp_hdr->ptype));
-        return;
+        return result_ok();
     }
 
     if (arp_hdr->hlen != sizeof(struct mac_addr) || arp_hdr->plen != sizeof(struct ipv4_addr)) {
@@ -136,7 +136,7 @@ void arp_handle_packet(struct input_packet *pkt, struct send_buf sb, struct aren
     struct result_bool insert_res = arp_table_update_or_insert(payload->src_ip, payload->src_mac);
     if (insert_res.is_error) {
         print_dbg(PWARN, STR("Failed to update ARP table: 0x%hx\n"), insert_res.code);
-        return;
+        return result_error(insert_res.code);
     }
 
     print_dbg(PINFO, STR("Received ARP packet and updated ARP table with ip_addr=%s, mac_addr=%s (old mac_addr=%s)\n"),
@@ -146,5 +146,6 @@ void arp_handle_packet(struct input_packet *pkt, struct send_buf sb, struct aren
 
     // The reply contains the `src_*` fields of the incoming packet as the destination.
     if (u16_from_net_u16(arp_hdr->opcode) == ARP_OPCODE_REQUEST)
-        arp_send_common(ARP_OPCODE_REPLY, payload->src_ip, payload->src_mac, pkt->netdev, sb, tmp);
+        return arp_send_common(ARP_OPCODE_REPLY, payload->src_ip, payload->src_mac, pkt->netdev, sb, tmp);
+    return result_ok();
 }

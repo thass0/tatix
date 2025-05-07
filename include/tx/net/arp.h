@@ -39,6 +39,6 @@ struct option_mac_addr arp_lookup_mac_addr(struct ipv4_addr ip_addr);
 //
 // NOTE: This function WILL NOT check if the destination MAC address in the ARP packet belongs to this host. The
 // caller of this function which receives the packet should ensure that it's correctly destined for this host.
-void arp_handle_packet(struct input_packet *pkt, struct send_buf sb, struct arena tmp);
+struct result arp_handle_packet(struct input_packet *pkt, struct send_buf sb, struct arena tmp);
 
 #endif // __TX_NET_ARP_H__
