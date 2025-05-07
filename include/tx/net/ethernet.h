@@ -4,7 +4,7 @@
 #define __TX_ETHERNET_H__
 
 #include <tx/base.h>
-#include <tx/net/mac.h>
+#include <tx/net/mac_addr.h>
 #include <tx/net/netdev.h>
 #include <tx/net/netorder.h>
 #include <tx/option.h>

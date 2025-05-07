@@ -5,8 +5,8 @@
 
 #include <tx/arena.h>
 #include <tx/byte.h>
-#include <tx/net/ip.h>
-#include <tx/net/mac.h>
+#include <tx/net/ip_addr.h>
+#include <tx/net/mac_addr.h>
 #include <tx/net/netdev.h>
 #include <tx/net/netorder.h>
 

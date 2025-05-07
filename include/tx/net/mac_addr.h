@@ -1,7 +1,7 @@
 // MAC address definitions.
 
-#ifndef __TX_MAC_H__
-#define __TX_MAC_H__
+#ifndef __TX_MAC_ADDR_H__
+#define __TX_MAC_ADDR_H__
 
 #include <tx/arena.h>
 #include <tx/base.h>
@@ -53,4 +53,4 @@ static inline struct str mac_addr_format(struct mac_addr addr, struct arena *arn
     return str_from_buf(sbuf);
 }
 
-#endif // __TX_MAC_H__
+#endif // __TX_MAC_ADDR_H__

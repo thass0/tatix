@@ -6,8 +6,8 @@
 #include <tx/arena.h>
 #include <tx/byte.h>
 #include <tx/error.h>
-#include <tx/net/ip.h>
-#include <tx/net/mac.h>
+#include <tx/net/ip_addr.h>
+#include <tx/net/mac_addr.h>
 #include <tx/net/send_buf.h>
 #include <tx/option.h>
 

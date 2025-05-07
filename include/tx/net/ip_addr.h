@@ -1,5 +1,7 @@
-#ifndef __TX_IP_H__
-#define __TX_IP_H__
+// IPv4 address definitions (only version 4).
+
+#ifndef __TX_IP_ADDR_H__
+#define __TX_IP_ADDR_H__
 
 #include <tx/arena.h>
 #include <tx/base.h>
@@ -43,4 +45,4 @@ static inline struct str ipv4_addr_format(struct ipv4_addr addr, struct arena *a
     return str_from_buf(sbuf);
 }
 
-#endif // __TX_IP_H__
+#endif // __TX_IP_ADDR_H__
