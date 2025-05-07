@@ -102,13 +102,8 @@ static void handle_timer_interrupt(struct trap_frame *cpu_state __unused, void *
     return;
 }
 
-__noreturn void kernel_init(void)
+static void init_memory(void)
 {
-    isr_register_handler(0x20, handle_timer_interrupt, NULL);
-    gdt_init();
-    com_init(COM1_PORT);
-    interrupt_init();
-
     // Set up fixed memory regions for paging init.
     assert(KERN_DYN_PADDR > KERN_BASE_PADDR && KERN_DYN_PADDR - KERN_BASE_PADDR == KERN_DYN_VADDR - KERN_BASE_VADDR);
     sz code_len = KERN_DYN_PADDR - KERN_BASE_PADDR;
@@ -121,12 +116,16 @@ __noreturn void kernel_init(void)
     dyn_addrs.pbase = KERN_DYN_PADDR;
     dyn_addrs.len = KERN_DYN_LEN;
 
+    // First, initialize paging.
     struct byte_array dyn = paging_init(code_addrs, dyn_addrs);
 
-    // Initialize the kernel virtual memory allocator.
+    // Then initialize the kernel virtual memory allocator.
     struct result res = kvalloc_init(dyn);
     assert(!res.is_error);
+}
 
+static struct ram_fs *init_ram_fs(void)
+{
     ram_fs_selftest();
 
     // Initialize the RAM file system.
@@ -134,7 +133,19 @@ __noreturn void kernel_init(void)
     rfs_alloc.a_ptr = NULL;
     rfs_alloc.alloc = kvalloc_alloc_wrapper;
     rfs_alloc.free = kvalloc_free_wrapper;
-    struct ram_fs *rfs = ram_fs_new(rfs_alloc);
+    return ram_fs_new(rfs_alloc);
+}
+
+__noreturn void kernel_init(void)
+{
+    isr_register_handler(0x20, handle_timer_interrupt, NULL);
+    gdt_init();
+    com_init(COM1_PORT);
+    interrupt_init();
+
+    init_memory();
+
+    struct ram_fs *rfs = init_ram_fs();
     assert(rfs);
 
     // Extract rootfs archive into the RAM fs.
