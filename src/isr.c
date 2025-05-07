@@ -59,7 +59,7 @@ static void handle_interrupt(struct trap_frame *cpu_state)
 // Catch-all ISR                                                             //
 ///////////////////////////////////////////////////////////////////////////////
 
-static __naked __unused void isr_stub_common(void)
+__naked __unused void isr_stub_common(void)
 {
     __asm__ volatile("push %r15");
     __asm__ volatile("push %r14");
@@ -84,7 +84,7 @@ static __naked __unused void isr_stub_common(void)
     __asm__ volatile("jmp isr_return");
 }
 
-static __naked __unused void isr_return(void)
+__naked __unused void isr_return(void)
 {
     __asm__ volatile("pop %rax");
     __asm__ volatile("pop %rbx");
@@ -176,7 +176,7 @@ static void fmt_cpu_state(struct trap_frame *cpu_state, struct str_buf *buf)
         cpu_state->rsp, cpu_state->ss);
 }
 
-static void __unused interrupt_catch_all(struct trap_frame *cpu_state)
+void __unused interrupt_catch_all(struct trap_frame *cpu_state)
 {
     char underlying[1024];
     struct str_buf buf = str_buf_new(underlying, 0, countof(underlying));
