@@ -15,6 +15,7 @@
 #define SEND_BUF_NUM_PARTS 8
 
 struct send_buf {
+    struct arena orig_arn; // Copy to allow resetting.
     struct arena arn;
     struct byte_buf parts[SEND_BUF_NUM_PARTS];
     sz n_used;
@@ -30,6 +31,9 @@ struct byte_buf *send_buf_prepend(struct send_buf *sb, sz buf_size);
 // Compute the total length of the send buffer's content. I.e., the length of the content appended the to the byte
 // buffer when calling `send_buf_assemble`.
 sz send_buf_total_length(struct send_buf sb);
+
+// Reset the buffer to be completely empty.
+void send_buf_clear(struct send_buf *sb);
 
 // Append the complete content of the send buffer to `buf`.
 struct result send_buf_assemble(struct send_buf sb, struct byte_buf *buf);

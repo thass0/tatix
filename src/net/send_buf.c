@@ -11,6 +11,7 @@
 struct send_buf send_buf_new(struct arena arn)
 {
     struct send_buf sb;
+    sb.orig_arn = arn;
     sb.arn = arn;
     byte_array_set(byte_array_new(&sb.parts, sizeof(sb.parts)), 0);
     sb.n_used = 0;
@@ -39,6 +40,12 @@ sz send_buf_total_length(struct send_buf sb)
         len += sb.parts[i].len;
 
     return len;
+}
+
+void send_buf_clear(struct send_buf *sb)
+{
+    sb->arn = sb->orig_arn;
+    sb->n_used = 0;
 }
 
 struct result send_buf_assemble(struct send_buf sb, struct byte_buf *buf)
