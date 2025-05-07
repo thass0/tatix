@@ -28,7 +28,7 @@ CC := gcc
 CPPFLAGS := -MMD -Iinclude/
 CFLAGS := $(DEBUG_FLAGS) -mgeneral-regs-only -std=gnu99 -ffreestanding -mcmodel=large -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -Wuninitialized -Wmaybe-uninitialized -pedantic
 
-SRCS := $(wildcard $(SRC_DIR)/*)
+SRCS := $(shell find $(SRC_DIR) -type f -name "*.c")
 OBJS := $(patsubst $(SRC_DIR)/%, $(BUILD_DIR)/%.o, $(SRCS))
 DEPS := $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.d, $(filter %.c, $(SRCS)))
 
@@ -91,6 +91,7 @@ define run_nasm
 endef
 
 define run_cc
+	@mkdir -p $(dir $(1))
 	$(call compile_log,CC,$(1))
 	@$(CC) $(3) -c $(2) -o $(1)
 endef
@@ -114,7 +115,7 @@ $(BOOTLOADER_IMAGE): $(BOOTLOADER_OBJS) | $(BUILD_DIR) $(LINKER_CONFIG) bootload
 	$(call run_truncate,$@,-s $(shell expr $(SECTOR_SIZE) \* $(BOOT_SECTOR_COUNT)),)
 
 $(BUILD_DIR)/%.s.o: $(BOOTLOADER_DIR)/%.s | $(BUILD_DIR) $(NASM_CONFIG)
-	$(call run_nasm, $@,$<,-I$(dir $(NASM_CONFIG)) -I$(BOOTLOADER_DIR))
+	$(call run_nasm,$@,$<,-I$(dir $(NASM_CONFIG)) -I$(BOOTLOADER_DIR))
 
 $(BUILD_DIR)/%.c.o: $(BOOTLOADER_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
 	$(call run_cc,$@,$<,$(CPPFLAGS) -I$(dir $(HEADER_CONFIG)) $(CFLAGS))
