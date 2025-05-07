@@ -1,7 +1,7 @@
 // Generic network device interface.
 
-#ifndef __TX_NETDEV_H__
-#define __TX_NETDEV_H__
+#ifndef __TX_NET_NETDEV_H__
+#define __TX_NET_NETDEV_H__
 
 #include <tx/arena.h>
 #include <tx/byte.h>
@@ -85,4 +85,4 @@ struct input_packet *netdev_get_input(void);
 // Remove the given packet from the input queue. This frees up the entry to store a newly received packet in it.
 void netdev_release_input(struct input_packet *pkt);
 
-#endif // __TX_NETDEV_H__
+#endif // __TX_NET_NETDEV_H__

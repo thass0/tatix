@@ -1,7 +1,7 @@
 // Ethernet frame definitions (as specified by IEEE 802.3).
 
-#ifndef __TX_ETHERNET_H__
-#define __TX_ETHERNET_H__
+#ifndef __TX_NET_ETHERNET_H__
+#define __TX_NET_ETHERNET_H__
 
 #include <tx/base.h>
 #include <tx/net/mac_addr.h>
@@ -48,4 +48,4 @@ static inline struct option_netdev_proto_t netdev_proto_from_ethernet_type(u16 t
 
 static_assert(sizeof(struct ethernet_frame_header) == 14);
 
-#endif // __TX_ETHERNET_H__
+#endif // __TX_NET_ETHERNET_H__

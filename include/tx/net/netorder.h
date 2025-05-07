@@ -1,7 +1,7 @@
 // Definitions representing network byte order (big-endian) data.
 
-#ifndef __TX_NETORDER_H__
-#define __TX_NETORDER_H__
+#ifndef __TX_NET_NETORDER_H__
+#define __TX_NET_NETORDER_H__
 
 #include <tx/base.h>
 
@@ -112,4 +112,4 @@ static inline net_u64 net_u64_from_u64(u64 value)
 }
 #endif
 
-#endif // __TX_NETORDER_H__
+#endif // __TX_NET_NETORDER_H__

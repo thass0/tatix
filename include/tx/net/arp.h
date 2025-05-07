@@ -1,7 +1,7 @@
 // Address Resolution Protocol (ARP) implementation for IPv4v4 address resolution.
 
-#ifndef __TX_ARP_H__
-#define __TX_ARP_H__
+#ifndef __TX_NET_ARP_H__
+#define __TX_NET_ARP_H__
 
 #include <tx/arena.h>
 #include <tx/byte.h>
@@ -41,4 +41,4 @@ struct option_mac_addr arp_lookup_mac_addr(struct ipv4_addr ip_addr);
 // caller of this function which receives the packet should ensure that it's correctly destined for this host.
 void arp_handle_packet(struct input_packet *pkt, struct send_buf sb, struct arena tmp);
 
-#endif // __TX_ARP_H__
+#endif // __TX_NET_ARP_H__

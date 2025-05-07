@@ -5,8 +5,8 @@
 // structure allows constructing each protocol header exactly once without copying it again until the final packet is
 // copied into the memory of a network driver.
 
-#ifndef __TX_SEND_BUF_H__
-#define __TX_SEND_BUF_H__
+#ifndef __TX_NET_SEND_BUF_H__
+#define __TX_NET_SEND_BUF_H__
 
 #include <tx/arena.h>
 #include <tx/base.h>
@@ -34,4 +34,4 @@ sz send_buf_total_length(struct send_buf sb);
 // Append the complete content of the send buffer to `buf`.
 struct result send_buf_assemble(struct send_buf sb, struct byte_buf *buf);
 
-#endif // __TX_SEND_BUF_H__
+#endif // __TX_NET_SEND_BUF_H__
