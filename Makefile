@@ -7,13 +7,12 @@
 .PHONY = clean boot
 
 ifneq ($(DEBUG),)
-    DEBUG_FLAGS := -g
+    DEBUG_FLAGS := -ggdb
 else
 	DEBUG := 0
 endif
 
 ifneq ($(GDB),)
-	DEBUG_FLAGS := -g
     QEMU_DEBUG_FLAGS := -s -S
 endif
 
