@@ -60,7 +60,7 @@ static inline struct result fmt_append_hex(u64 x, enum fmt_hex_alpha alpha, stru
     char *end = tmp + countof(tmp);
     char *beg = end;
 
-    const char *a;
+    const char *a = NULL;
     switch (alpha) {
     case HEX_ALPHA_LOWER:
         a = "0123456789abcdef";
