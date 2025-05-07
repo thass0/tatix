@@ -45,4 +45,14 @@ static inline struct str ipv4_addr_format(struct ipv4_addr addr, struct arena *a
     return str_from_buf(sbuf);
 }
 
+static inline struct ipv4_addr ipv4_addr_mask(struct ipv4_addr addr, struct ipv4_addr mask)
+{
+    struct ipv4_addr ret;
+    ret.addr[0] = addr.addr[0] & mask.addr[0];
+    ret.addr[1] = addr.addr[1] & mask.addr[1];
+    ret.addr[2] = addr.addr[2] & mask.addr[2];
+    ret.addr[3] = addr.addr[3] & mask.addr[3];
+    return ret;
+}
+
 #endif // __TX_NET_IP_ADDR_H__
