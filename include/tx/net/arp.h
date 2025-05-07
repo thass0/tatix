@@ -5,10 +5,10 @@
 
 #include <tx/arena.h>
 #include <tx/byte.h>
-#include <tx/ip.h>
-#include <tx/mac.h>
-#include <tx/netdev.h>
-#include <tx/netorder.h>
+#include <tx/net/ip.h>
+#include <tx/net/mac.h>
+#include <tx/net/netdev.h>
+#include <tx/net/netorder.h>
 
 #define ARP_OPCODE_REQUEST 1
 #define ARP_OPCODE_REPLY 2

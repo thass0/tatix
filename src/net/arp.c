@@ -1,8 +1,8 @@
 // ARP implementation for Ethernet over IPv4.
 
-#include <tx/arp.h>
-#include <tx/ethernet.h>
-#include <tx/netdev.h>
+#include <tx/net/arp.h>
+#include <tx/net/ethernet.h>
+#include <tx/net/netdev.h>
 
 struct arp_table_ent {
     bool is_used;

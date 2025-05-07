@@ -6,10 +6,10 @@
 #include <tx/arena.h>
 #include <tx/byte.h>
 #include <tx/error.h>
-#include <tx/ip.h>
-#include <tx/mac.h>
+#include <tx/net/ip.h>
+#include <tx/net/mac.h>
+#include <tx/net/send_buf.h>
 #include <tx/option.h>
-#include <tx/send_buf.h>
 
 // NOTE: The idea behind the `NETDEV_*` constants is that they are independent of any specific protocol. This means
 // that numbers used by specific protocols must be converted to the `NETDEV_*` numbers. E.g., the Ethernet type field

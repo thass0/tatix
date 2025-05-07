@@ -4,9 +4,9 @@
 #define __TX_ETHERNET_H__
 
 #include <tx/base.h>
-#include <tx/mac.h>
-#include <tx/netdev.h>
-#include <tx/netorder.h>
+#include <tx/net/mac.h>
+#include <tx/net/netdev.h>
+#include <tx/net/netorder.h>
 #include <tx/option.h>
 
 #define ETHERNET_PTYPE_IPV4 0x0800

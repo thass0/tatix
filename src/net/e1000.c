@@ -5,12 +5,12 @@
 #include <tx/byte.h>
 #include <tx/isr.h>
 #include <tx/kvalloc.h>
-#include <tx/netdev.h>
+#include <tx/net/netdev.h>
+#include <tx/net/send_buf.h>
 #include <tx/paging.h>
 #include <tx/pci.h>
 #include <tx/pic.h>
 #include <tx/print.h>
-#include <tx/send_buf.h>
 
 // The 8254x PCI/PCI-X Family of Gigabit Ethernet Controllers Software Developer’s Manual (2009 version) was used as a
 // source for this driver References to sections are with respect to this document. A copy of the manual used can be

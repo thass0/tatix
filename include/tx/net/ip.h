@@ -5,7 +5,7 @@
 #include <tx/base.h>
 #include <tx/error.h>
 #include <tx/fmt.h>
-#include <tx/netorder.h>
+#include <tx/net/netorder.h>
 #include <tx/string.h>
 
 struct ipv4_addr {

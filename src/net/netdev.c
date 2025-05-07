@@ -1,8 +1,8 @@
-#include <tx/arp.h>
 #include <tx/asm.h>
-#include <tx/ethernet.h>
 #include <tx/kvalloc.h>
-#include <tx/netdev.h>
+#include <tx/net/arp.h>
+#include <tx/net/ethernet.h>
+#include <tx/net/netdev.h>
 #include <tx/print.h>
 
 ///////////////////////////////////////////////////////////////////////////////

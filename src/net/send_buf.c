@@ -1,4 +1,4 @@
-#include <tx/send_buf.h>
+#include <tx/net/send_buf.h>
 
 // NOTE: The complete content of the send buffer can be computed at any time by appending the content in the parts in
 // reverse order. Thus, to prepend data to a send buffer, simply get the next part from the array of parts and append
