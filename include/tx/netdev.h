@@ -35,8 +35,8 @@ typedef struct result (*send_frame_func_t)(struct netdev *dev, struct send_buf s
 struct netdev {
     struct mac_addr mac_addr;
     struct ipv4_addr ip_addr;
-    send_frame_func_t send_frame;
     netdev_link_type_t link_type;
+    send_frame_func_t send_frame;
     void *private_data;
 };
 
@@ -50,9 +50,9 @@ struct input_packet {
 // Set a default IP address to use for all new devices.
 void netdev_set_default_ip_addr(struct ipv4_addr ip_addr);
 
-// Register a `struct netdev` network device with the `netdev` subsystem. The `mac_addr` field in the given structure
-// `dev` will be used to look up the device. `send_frame` will be called to send a frame over the device. `private_data`
-// could, for example, be the driver-specific structure of a network driver that it needs to function. The `ip_addr`
+// Register a `struct netdev` network device with the `netdev` subsystem. The `mac_addr` and `ip_addr` fields can both
+// be used to look up the device. `send_frame` will be called to send a frame using the device. `private_data`
+// could, for example, be a driver-specific structure that the network driver needs to function. The `ip_addr`
 // field must be 0.0.0.0, indicating that the default IP address can be assigned.
 //
 // The memory behind the `dev` pointer passed to this function is owned by the driver.
