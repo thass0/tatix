@@ -39,7 +39,7 @@ static inline void *arena_alloc_aligned(struct arena *arn, sz n_bytes, sz align)
     sz padding = -(uptr)arn->beg & (align - 1);
     sz available = arn->end - arn->beg - padding;
     if (available < 0 || n_bytes > available)
-        crash("Out of memory");
+        crash("Out of memory\n");
     void *p = arn->beg + padding;
     arn->beg += padding + n_bytes;
     byte_array_set(byte_array_new(p, n_bytes), 0);
