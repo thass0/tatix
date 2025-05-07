@@ -61,8 +61,8 @@ struct result netdev_register_device(struct netdev *dev)
 
 struct netdev *netdev_lookup_ip_addr(struct ipv4_addr addr)
 {
-    // NOTE: IP addresses aren't necessarily unique. We will handle the case of multiple IP addresses when it arises
-    // for the first time.
+    // NOTE: IP addresses aren't necessarily unique. We will handle the case of multiple IP addresses when it properly
+    // arises for the first time (hence the warning).
     sz n_matches = 0;
     struct netdev *last_match = NULL;
 
@@ -73,7 +73,13 @@ struct netdev *netdev_lookup_ip_addr(struct ipv4_addr addr)
         }
     }
 
-    assert(n_matches <= 1);
+    if (n_matches > 1) {
+        byte backing[32];
+        struct arena tmp = arena_new(byte_array_new(backing, sizeof(backing)));
+        print_dbg(PWARN, STR("Found more than one device for IP address %s. Returning the last one\n"),
+                  ipv4_addr_format(addr, &tmp));
+    }
+
     return last_match;
 }
 
