@@ -4,7 +4,7 @@
 # Variable definitions                                                         #
 ################################################################################
 
-.PHONY = clean boot fmt
+.PHONY = clean boot
 
 ifneq ($(DEBUG),)
     DEBUG_FLAGS := -g
@@ -181,9 +181,6 @@ boot: $(DISK_IMAGE)
 	    -netdev tap,id=net0,ifname=vm0,script=no,downscript=no -device e1000,netdev=net0 \
 		-object filter-dump,id=dump0,netdev=net0,file=.packets.pcap \
 		$(QEMU_DEBUG_FLAGS)
-
-fmt:
-	clang-format -i --style=file $(SRCS) $(wildcard include/*.h)
 
 clean:
 	@$(RM) -r $(BUILD_DIR)
