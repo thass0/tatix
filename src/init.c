@@ -136,6 +136,68 @@ static struct ram_fs *init_ram_fs(void)
     return ram_fs_new(rfs_alloc);
 }
 
+void init_net(void)
+{
+    struct ipv4_addr host_ip = ipv4_addr_new(192, 168, 100, 2);
+
+    // This is the default route for all IP addresses that are outside of the local network (see below).
+    // These packets are sent to 192.168.100.1 (the VM host) which should act like a router.
+    struct ipv4_route_entry default_route;
+    default_route.dest = ipv4_addr_new(0, 0, 0, 0);
+    default_route.mask = ipv4_addr_new(0, 0, 0, 0);
+    default_route.gateway = ipv4_addr_new(192, 168, 100, 1);
+    default_route.interface = host_ip;
+    ipv4_route_add(default_route);
+
+    // This is a route to all local IP addresses (192.168.100.xxx). Other hosts on the virtual network
+    // with this host and the VM host can be reached this way.
+    struct ipv4_route_entry local_route;
+    local_route.dest = ipv4_addr_new(192, 168, 100, 0);
+    local_route.mask = ipv4_addr_new(255, 255, 255, 0);
+    local_route.gateway = host_ip;
+    local_route.interface = host_ip;
+    ipv4_route_add(local_route);
+
+    // Initialize the `netdev` subsystem.
+    netdev_set_default_ip_addr(host_ip);
+    assert(!netdev_init_input_queue().is_error);
+}
+
+void net_listen(void)
+{
+    struct arena tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
+    struct arena send_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64)));
+    struct send_buf sb = send_buf_new(send_arn);
+
+    struct result res = result_ok();
+    struct input_packet *in_packet = NULL;
+
+    while (true) {
+        in_packet = netdev_get_input();
+        if (in_packet) {
+            sb = send_buf_new(send_arn);
+
+            switch (in_packet->proto) {
+            case NETDEV_PROTO_ARP:
+                res = arp_handle_packet(in_packet, sb, tmp_arn);
+                break;
+            case NETDEV_PROTO_IPV4:
+                res = ipv4_handle_packet(in_packet, sb, tmp_arn);
+                break;
+            default:
+                print_dbg(PINFO, STR("Received packet with unknown protocol 0x%hx. Dropping ...\n"), in_packet->proto);
+                break;
+            }
+
+            // Release the packet if the handler returned a sucess. Otherwise, leave the packet in the queue
+            // so that it can be handled again.
+            // TODO: Limit the number of retries.
+            if (!res.is_error)
+                netdev_release_input(in_packet);
+        }
+    }
+}
+
 __noreturn void kernel_init(void)
 {
     isr_register_handler(0x20, handle_timer_interrupt, NULL);
@@ -150,50 +212,18 @@ __noreturn void kernel_init(void)
 
     // Extract rootfs archive into the RAM fs.
     struct byte_view rootfs_archive = byte_view_new(_rootfs_archive_start, _rootfs_archive_end - _rootfs_archive_start);
-    res = archive_extract(rootfs_archive, rfs);
+    struct result res = archive_extract(rootfs_archive, rfs);
     assert(!res.is_error);
 
     print_hello_txt(rfs);
 
-    netdev_set_default_ip_addr(ipv4_addr_new(192, 168, 100, 2));
-    res = netdev_init_input_queue();
-    assert(!res.is_error);
+    init_net();
 
     // Probe all PCI devies, including the network device.
     res = pci_probe();
     assert(!res.is_error);
 
-    struct arena tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
-    struct arena send_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64)));
-    struct send_buf sb = send_buf_new(send_arn);
-
-    struct netdev *netdev = netdev_lookup_ip_addr(ipv4_addr_new(192, 168, 100, 2));
-    assert(netdev);
-    res = arp_send_request(ipv4_addr_new(192, 168, 100, 1), netdev, sb, tmp_arn);
-    assert(!res.is_error);
-
-    struct input_packet *in_packet = NULL;
-
-    while (true) {
-        in_packet = netdev_get_input();
-        if (in_packet) {
-            sb = send_buf_new(send_arn);
-
-            switch (in_packet->proto) {
-            case NETDEV_PROTO_ARP:
-                arp_handle_packet(in_packet, sb, tmp_arn);
-                break;
-            case NETDEV_PROTO_IPV4:
-                ipv4_handle_packet(in_packet, sb, tmp_arn);
-                break;
-            default:
-                print_dbg(PINFO, STR("Received packet with unknown protocol 0x%hx. Dropping ...\n"), in_packet->proto);
-                break;
-            }
-
-            netdev_release_input(in_packet);
-        }
-    }
+    net_listen();
 
     hlt();
 }
