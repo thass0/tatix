@@ -125,7 +125,7 @@ $(BUILD_DIR)/%.c.o: $(BOOTLOADER_DIR)/%.c | $(BUILD_DIR) $(HEADER_CONFIG)
 ################################################################################
 
 $(KERNEL_ELF): $(OBJS) $(ROOTFS_OBJ) | $(BUILD_DIR) $(LINKER_CONFIG) $(LINKER_PRINT_INFO) kernel.ld
-	$(call run_ld,$@,$^,-L$(BUILD_DIR) $(DEBUG_FLAGS) -T kernel.ld)
+	$(call run_ld,$@,$^,-L$(BUILD_DIR) -T kernel.ld)
 
 # To recompile if headers change:
 -include $(DEPS)
