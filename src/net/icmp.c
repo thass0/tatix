@@ -18,6 +18,27 @@ static inline bool icmpv4_checksum_is_ok(struct byte_view message)
     return internet_checksum(message).inner == 0;
 }
 
+struct result icmpv4_send_echo(struct ipv4_addr dest_addr, struct send_buf sb, struct arena arn)
+{
+    struct icmpv4_header icmp_hdr;
+    icmp_hdr.type = ICMPV4_TYPE_ECHO;
+    icmp_hdr.code = 0;
+    icmp_hdr.checksum = net_u16_from_u16(0);
+
+    struct byte_buf *reply_buf = send_buf_prepend(&sb, sizeof(icmp_hdr) + 4);
+    if (!reply_buf)
+        return result_error(ENOMEM);
+
+    assert(byte_buf_append(reply_buf, byte_view_new(&icmp_hdr, sizeof(icmp_hdr))) == sizeof(icmp_hdr));
+    assert(byte_buf_append_n(reply_buf, 4, 0) == 4);
+
+    // Patch-in the checksum at the right place.
+    net_u16 *dat = byte_buf_ptr(*reply_buf);
+    dat[1] = internet_checksum(byte_view_from_buf(*reply_buf));
+
+    return ipv4_send_packet(dest_addr, IPV4_PROTOCOL_ICMP, sb, arn);
+}
+
 static struct result icmpv4_handle_echo_request(struct ipv4_addr reply_to_addr, struct icmpv4_header *hdr,
                                                 struct byte_view data, struct send_buf sb, struct arena arn)
 {
@@ -33,14 +54,14 @@ static struct result icmpv4_handle_echo_request(struct ipv4_addr reply_to_addr, 
         return result_ok();
     }
 
-    struct byte_buf *reply_buf = send_buf_prepend(&sb, sizeof(struct icmpv4_header) + data.len);
-    if (!reply_buf)
-        return result_error(ENOMEM);
-
     struct icmpv4_header icmp_hdr;
     icmp_hdr.type = ICMPV4_TYPE_ECHO_REPLY;
     icmp_hdr.code = 0;
     icmp_hdr.checksum = net_u16_from_u16(0);
+
+    struct byte_buf *reply_buf = send_buf_prepend(&sb, sizeof(icmp_hdr) + data.len);
+    if (!reply_buf)
+        return result_error(ENOMEM);
 
     // We have allocated the reply buffer to be large enough to fit these two appends so they shouldn't fail.
     assert(byte_buf_append(reply_buf, byte_view_new(&icmp_hdr, sizeof(icmp_hdr))) == sizeof(icmp_hdr));
@@ -75,6 +96,9 @@ struct result icmpv4_handle_message(struct ipv4_addr src_addr, struct byte_view 
     switch (icmp_hdr->type) {
     case ICMPV4_TYPE_ECHO:
         return icmpv4_handle_echo_request(src_addr, icmp_hdr, data, sb, arn);
+    case ICMPV4_TYPE_ECHO_REPLY:
+        print_dbg(PINFO, STR("Received ICMPv4 reply from %s\n"), ipv4_addr_format(src_addr, &arn));
+        return result_ok();
     default:
         print_dbg(PDBG, STR("Received ICMPv4 message with unknown type 0x%hhx. Dropping ...\n"), icmp_hdr->type);
         return result_ok();
