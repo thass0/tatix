@@ -20,6 +20,13 @@ static inline void cpuid(u32 leaf /* eax */, u32 subleaf /* ecx */, u32 *eax, u3
     *edx = d;
 }
 
+static inline u64 rdtsc(void)
+{
+    u32 lo, hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((u64)hi << 32) | (u64)lo;
+}
+
 static inline void outb(u16 port, u8 val)
 {
     __asm__ volatile("outb %b0, %w1" : : "a"(val), "Nd"(port) : "memory");

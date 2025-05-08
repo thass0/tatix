@@ -18,6 +18,7 @@
 #include <tx/pci.h>
 #include <tx/print.h>
 #include <tx/ramfs.h>
+#include <tx/time.h>
 
 extern char _rootfs_archive_start[];
 extern char _rootfs_archive_end[];
@@ -204,6 +205,7 @@ __noreturn void kernel_init(void)
     gdt_init();
     com_init(COM1_PORT);
     interrupt_init();
+    time_init();
 
     init_memory();
 
