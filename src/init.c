@@ -12,25 +12,26 @@
 #include <tx/kvalloc.h>
 #include <tx/net/arp.h>
 #include <tx/net/ethernet.h>
+#include <tx/net/icmp.h>
 #include <tx/net/ip.h>
 #include <tx/net/netdev.h>
 #include <tx/paging.h>
 #include <tx/pci.h>
 #include <tx/print.h>
 #include <tx/ramfs.h>
+#include <tx/sched.h>
 #include <tx/time.h>
 
 extern char _rootfs_archive_start[];
 extern char _rootfs_archive_end[];
 
-#define INIT_KERNEL_STACK_SIZE 0x4000
-static byte init_kernel_stack[INIT_KERNEL_STACK_SIZE] __used;
+static byte init_kernel_stack[TASK_STACK_SIZE] __used;
 
 __noreturn void kernel_init(void);
 
 __noreturn __naked void _kernel_init(void)
 {
-    __asm__ volatile("movl $init_kernel_stack + " TOSTRING(INIT_KERNEL_STACK_SIZE) " - 1, %esp\n"
+    __asm__ volatile("movl $init_kernel_stack + " TOSTRING(TASK_STACK_SIZE) " - 1, %esp\n"
                      "call kernel_init\n");
 }
 
@@ -164,11 +165,15 @@ void init_net(void)
     assert(!netdev_init_input_queue().is_error);
 }
 
-void net_listen(void)
+struct task_net_receive_ctx {
+    struct arena tmp_arn;
+    struct send_buf sb;
+};
+
+void task_net_receive(void *ctx_ptr)
 {
-    struct arena tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
-    struct arena send_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64)));
-    struct send_buf sb = send_buf_new(send_arn);
+    assert(ctx_ptr);
+    struct task_net_receive_ctx *ctx = ctx_ptr;
 
     struct result res = result_ok();
     struct input_packet *in_packet = NULL;
@@ -176,14 +181,14 @@ void net_listen(void)
     while (true) {
         in_packet = netdev_get_input();
         if (in_packet) {
-            sb = send_buf_new(send_arn);
+            send_buf_clear(&ctx->sb);
 
             switch (in_packet->proto) {
             case NETDEV_PROTO_ARP:
-                res = arp_handle_packet(in_packet, sb, tmp_arn);
+                res = arp_handle_packet(in_packet, ctx->sb, ctx->tmp_arn);
                 break;
             case NETDEV_PROTO_IPV4:
-                res = ipv4_handle_packet(in_packet, sb, tmp_arn);
+                res = ipv4_handle_packet(in_packet, ctx->sb, ctx->tmp_arn);
                 break;
             default:
                 print_dbg(PINFO, STR("Received packet with unknown protocol 0x%hx. Dropping ...\n"), in_packet->proto);
@@ -196,7 +201,24 @@ void net_listen(void)
             if (!res.is_error)
                 netdev_release_input(in_packet);
         }
+        sleep_ms(time_ms_new(500));
     }
+}
+
+void task_net_ping(void *ctx_ptr __unused)
+{
+    struct result res = result_ok();
+    struct arena tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
+    struct send_buf sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64))));
+
+    for (i32 i = 0; i < 100; i++) {
+        res = icmpv4_send_echo(ipv4_addr_new(192, 168, 100, 1), sb, tmp_arn);
+        if (!res.is_error || res.code != EAGAIN)
+            break;
+        sleep_ms(time_ms_new(500));
+    }
+
+    assert(!res.is_error);
 }
 
 __noreturn void kernel_init(void)
@@ -208,6 +230,8 @@ __noreturn void kernel_init(void)
     time_init();
 
     init_memory();
+
+    sched_init();
 
     struct ram_fs *rfs = init_ram_fs();
     assert(rfs);
@@ -225,7 +249,15 @@ __noreturn void kernel_init(void)
     res = pci_probe();
     assert(!res.is_error);
 
-    net_listen();
+    struct task_net_receive_ctx recv_ctx;
+    recv_ctx.tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
+    recv_ctx.sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64))));
+
+    sched_create_task(task_net_ping, NULL);
+    sched_create_task(task_net_receive, &recv_ctx);
+
+    while (true)
+        sleep_ms(time_ms_new(1000));
 
     hlt();
 }
