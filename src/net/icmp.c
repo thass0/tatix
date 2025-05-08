@@ -25,12 +25,13 @@ struct result icmpv4_send_echo(struct ipv4_addr dest_addr, struct send_buf sb, s
     icmp_hdr.code = 0;
     icmp_hdr.checksum = net_u16_from_u16(0);
 
-    struct byte_buf *reply_buf = send_buf_prepend(&sb, sizeof(icmp_hdr) + 4);
+    struct byte_buf *reply_buf = send_buf_prepend(&sb, sizeof(icmp_hdr) + 4 + 40);
     if (!reply_buf)
         return result_error(ENOMEM);
 
     assert(byte_buf_append(reply_buf, byte_view_new(&icmp_hdr, sizeof(icmp_hdr))) == sizeof(icmp_hdr));
     assert(byte_buf_append_n(reply_buf, 4, 0) == 4);
+    assert(byte_buf_append_n(reply_buf, 40, 0xb0) == 40);
 
     // Patch-in the checksum at the right place.
     net_u16 *dat = byte_buf_ptr(*reply_buf);
