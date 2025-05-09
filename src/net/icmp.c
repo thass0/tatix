@@ -37,10 +37,12 @@ struct result icmpv4_send_echo(struct ipv4_addr dest_addr, struct send_buf sb, s
     net_u16 *dat = byte_buf_ptr(*reply_buf);
     dat[1] = internet_checksum(byte_view_from_buf(*reply_buf));
 
+    print_dbg(PDBG, STR("Sending ICMPv4 echo message to dest_addr=%s\n"), ipv4_addr_format(dest_addr, &arn));
+
     return ipv4_send_packet(dest_addr, IPV4_PROTOCOL_ICMP, sb, arn);
 }
 
-static struct result icmpv4_handle_echo_request(struct ipv4_addr reply_to_addr, struct icmpv4_header *hdr,
+static struct result icmpv4_handle_echo_request(struct ipv4_addr dest_addr, struct icmpv4_header *hdr,
                                                 struct byte_view data, struct send_buf sb, struct arena arn)
 {
     if (data.len < 4) {
@@ -73,7 +75,9 @@ static struct result icmpv4_handle_echo_request(struct ipv4_addr reply_to_addr, 
     net_u16 *dat = byte_buf_ptr(*reply_buf);
     dat[1] = internet_checksum(byte_view_from_buf(*reply_buf));
 
-    return ipv4_send_packet(reply_to_addr, IPV4_PROTOCOL_ICMP, sb, arn);
+    print_dbg(PDBG, STR("Sending ICMPv4 echo reply to dest_addr=%s\n"), ipv4_addr_format(dest_addr, &arn));
+
+    return ipv4_send_packet(dest_addr, IPV4_PROTOCOL_ICMP, sb, arn);
 }
 
 struct result icmpv4_handle_message(struct ipv4_addr src_addr, struct byte_view message, struct send_buf sb,
@@ -96,9 +100,10 @@ struct result icmpv4_handle_message(struct ipv4_addr src_addr, struct byte_view 
 
     switch (icmp_hdr->type) {
     case ICMPV4_TYPE_ECHO:
+        print_dbg(PDBG, STR("Received ICMPv4 echo message from %s\n"), ipv4_addr_format(src_addr, &arn));
         return icmpv4_handle_echo_request(src_addr, icmp_hdr, data, sb, arn);
     case ICMPV4_TYPE_ECHO_REPLY:
-        print_dbg(PINFO, STR("Received ICMPv4 reply from %s\n"), ipv4_addr_format(src_addr, &arn));
+        print_dbg(PDBG, STR("Received ICMPv4 echo reply from %s\n"), ipv4_addr_format(src_addr, &arn));
         return result_ok();
     default:
         print_dbg(PDBG, STR("Received ICMPv4 message with unknown type 0x%hhx. Dropping ...\n"), icmp_hdr->type);

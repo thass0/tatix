@@ -47,7 +47,7 @@ static struct result arp_send_common(u16 opcode, struct ipv4_addr dest_ip, struc
 
     assert(buf->len == 8 + 20);
 
-    print_dbg(PINFO, STR("Sending ARP packet (0x%hx). src_ip=%s, src_mac=%s, dest_ip=%s, dest_mac=%s\n"), opcode,
+    print_dbg(PDBG, STR("Sending ARP packet (0x%hx). src_ip=%s, src_mac=%s, dest_ip=%s, dest_mac=%s\n"), opcode,
               ipv4_addr_format(netdev->ip_addr, &tmp), mac_addr_format(netdev->mac_addr, &tmp),
               ipv4_addr_format(dest_ip, &tmp), mac_addr_format(dest_mac, &tmp));
 
@@ -139,7 +139,7 @@ struct result arp_handle_packet(struct input_packet *pkt, struct send_buf sb, st
         return result_error(insert_res.code);
     }
 
-    print_dbg(PINFO, STR("Received ARP packet and updated ARP table with ip_addr=%s, mac_addr=%s (old mac_addr=%s)\n"),
+    print_dbg(PDBG, STR("Received ARP packet and updated ARP table with ip_addr=%s, mac_addr=%s (old mac_addr=%s)\n"),
               ipv4_addr_format(payload->src_ip, &tmp), mac_addr_format(payload->src_mac, &tmp),
               result_bool_checked(insert_res) ? mac_addr_format(option_mac_addr_checked(old_mac_opt), &tmp) :
                                                 STR("none"));

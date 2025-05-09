@@ -238,6 +238,7 @@ struct result ipv4_send_packet(struct ipv4_addr dest_ip, u8 proto, struct send_b
 
     struct option_mac_addr gateway_mac_opt = arp_lookup_mac_addr(gateway_ip);
     if (gateway_mac_opt.is_none) {
+        print_dbg(PDBG, STR("Missing ARP entry for gateway_ip=%s\n"), ipv4_addr_format(gateway_ip, &arn));
         // Drop all the content that would have been sent inside the IP datagram and tell the caller to try again
         // hoping that next time the ARP entry will be there.
         send_buf_clear(&sb);
@@ -250,6 +251,10 @@ struct result ipv4_send_packet(struct ipv4_addr dest_ip, u8 proto, struct send_b
     struct result res = ipv4_prepend_header(netdev->ip_addr, dest_ip, proto, &sb);
     if (res.is_error)
         return res;
+
+    print_dbg(PDBG, STR("Sending IPv4 packet netdev=%s gateway_ip=%s (%s delivery)\n"),
+              mac_addr_format(netdev->mac_addr, &arn), ipv4_addr_format(gateway_ip, &arn),
+              ipv4_addr_is_equal(route->gateway, route->interface) ? STR("direct") : STR("indirect"));
 
     return netdev_send(option_mac_addr_checked(gateway_mac_opt), netdev, NETDEV_PROTO_IPV4, sb);
 }
