@@ -201,7 +201,7 @@ void task_net_receive(void *ctx_ptr)
             if (!res.is_error)
                 netdev_release_input(in_packet);
         }
-        sleep_ms(time_ms_new(500));
+        sleep_ms(time_ms_new(10));
     }
 }
 
@@ -211,11 +211,11 @@ void task_net_ping(void *ctx_ptr __unused)
     struct arena tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
     struct send_buf sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64))));
 
-    for (i32 i = 0; i < 100; i++) {
-        res = icmpv4_send_echo(ipv4_addr_new(192, 168, 100, 1), sb, tmp_arn);
+    for (i32 i = 0; i < 5; i++) {
+        res = icmpv4_send_echo(ipv4_addr_new(8, 8, 8, 8), sb, tmp_arn);
         if (!res.is_error || res.code != EAGAIN)
             break;
-        sleep_ms(time_ms_new(500));
+        sleep_ms(time_ms_new(2000));
     }
 
     assert(!res.is_error);
