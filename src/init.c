@@ -212,7 +212,7 @@ void task_net_ping(void *ctx_ptr __unused)
     struct send_buf sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64))));
 
     for (i32 i = 0; i < 5; i++) {
-        res = icmpv4_send_echo(ipv4_addr_new(8, 8, 8, 8), sb, tmp_arn);
+        res = icmpv4_send_echo(ipv4_addr_new(8, 8, 8, 8), 0xcafe, 0xcafe, sb, tmp_arn);
         if (!res.is_error || res.code != EAGAIN)
             break;
         sleep_ms(time_ms_new(2000));
