@@ -2,6 +2,11 @@
 
 source $(dirname $0)/vm_config.env
 
+if [ -z "$ETHER" ]; then
+	echo "Missing environment variable ETHER"
+	exit -1
+fi
+
 set -ex
 
 sudo ip link add name $BRIDGE type bridge || true
@@ -23,6 +28,10 @@ sudo sysctl -w net.ipv4.ip_forward=1
 sudo iptables -t nat -A POSTROUTING -o $ETHER -j MASQUERADE
 sudo iptables -A FORWARD -i $BRIDGE -j ACCEPT
 sudo iptables -A FORWARD -o $BRIDGE -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+# Forward ICMP messages to the VM:
+sudo iptables -A FORWARD -d $VM_IP -i $ETHER -j ACCEPT
+sudo iptables -t nat -A PREROUTING -i $ETHER -p icmp -j DNAT --to-destination $VM_IP
 
 echo "Network setup complete."
 echo "Bridge: $BRIDGE ($BRIDGE_IP)"
