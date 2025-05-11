@@ -45,6 +45,7 @@ static inline struct str ipv4_addr_format(struct ipv4_addr addr, struct arena *a
     return str_from_buf(sbuf);
 }
 
+// Apply `mask` to `addr` and return the result.
 static inline struct ipv4_addr ipv4_addr_mask(struct ipv4_addr addr, struct ipv4_addr mask)
 {
     struct ipv4_addr ret;
@@ -54,5 +55,22 @@ static inline struct ipv4_addr ipv4_addr_mask(struct ipv4_addr addr, struct ipv4
     ret.addr[3] = addr.addr[3] & mask.addr[3];
     return ret;
 }
+
+// An IPv4 address with its subnet mask as returned by `ipv4_addr_parse`.
+struct ipv4_addr_parsed {
+    struct ipv4_addr addr;
+    struct ipv4_addr mask;
+};
+
+struct_result(ipv4_addr_parsed, struct ipv4_addr_parsed);
+struct_option(ipv4_addr_parsed, struct ipv4_addr_parsed);
+
+// Parse an IPv4 address. The format of the IPv4 address is `d.d.d.d[/p]` where each `d` is a
+// decimal number in the range 0 to 255 (inclusive). The optional prefix length `p` is a decimal
+// number in the range 1 to 32 (inclusive).
+struct result_ipv4_addr_parsed ipv4_addr_parse(struct str str);
+
+// Run a self-test on the `ipv4_addr_parse` function.
+void ipv4_test_addr_parse(struct arena arn);
 
 #endif // __TX_NET_IP_ADDR_H__

@@ -14,6 +14,7 @@
 #include <tx/net/ethernet.h>
 #include <tx/net/icmp.h>
 #include <tx/net/ip.h>
+#include <tx/net/ip_addr.h>
 #include <tx/net/netdev.h>
 #include <tx/paging.h>
 #include <tx/pci.h>
@@ -83,6 +84,11 @@ void ram_fs_selftest(void)
     struct byte_array test_arn_mem = option_byte_array_checked(kvalloc_alloc(5 * BIT(20), alignof(void *)));
     struct arena test_arn = arena_new(test_arn_mem);
     ram_fs_run_tests(test_arn);
+}
+
+void ipv4_addr_selftest(void)
+{
+    ipv4_test_addr_parse(arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64))));
 }
 
 void print_hello_txt(struct ram_fs *rfs)
@@ -243,6 +249,7 @@ __noreturn void kernel_init(void)
 
     print_hello_txt(rfs);
 
+    ipv4_addr_selftest();
     init_net();
 
     // Probe all PCI devies, including the network device.
