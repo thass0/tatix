@@ -25,6 +25,11 @@ static inline struct str str_from_byte_buf(struct byte_buf bb)
     return str_new((char *)bb.dat, bb.len);
 }
 
+static inline struct str str_from_byte_view(struct byte_view bv)
+{
+    return str_new((char *)bv.dat, bv.len);
+}
+
 static inline bool str_is_equal(struct str a, struct str b)
 {
     bool not_equal = false;
@@ -36,6 +41,24 @@ static inline bool str_is_equal(struct str a, struct str b)
         b.dat++;
     }
     return !not_equal;
+}
+
+static inline bool str_has_prefix(struct str str, struct str prefix)
+{
+    if (str.len < prefix.len)
+        return false;
+    struct str must_match = str_new(str.dat, prefix.len);
+    return str_is_equal(must_match, prefix);
+}
+
+static inline bool str_consume_prefix(struct str *str, struct str prefix)
+{
+    assert(str);
+    if (!str_has_prefix(*str, prefix))
+        return false;
+    str->dat += prefix.len;
+    str->len -= prefix.len;
+    return true;
 }
 
 static inline struct option_sz str_find_char(struct str s, char ch)

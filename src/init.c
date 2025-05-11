@@ -20,6 +20,7 @@
 #include <tx/pci.h>
 #include <tx/print.h>
 #include <tx/ramfs.h>
+#include <tx/rtcfg.h>
 #include <tx/sched.h>
 #include <tx/time.h>
 
@@ -144,24 +145,27 @@ static struct ram_fs *init_ram_fs(void)
     return ram_fs_new(rfs_alloc);
 }
 
-void init_net(void)
+void init_net(struct runtime_config *cfg, struct arena arn)
 {
-    struct ipv4_addr host_ip = ipv4_addr_new(192, 168, 100, 2);
+    struct ipv4_addr host_ip = option_ipv4_addr_checked(cfg->host_ip);
+    struct ipv4_addr default_gateway_ip = option_ipv4_addr_checked(cfg->default_gateway_ip);
+    struct ipv4_addr local_ip = option_ipv4_addr_checked(cfg->local_ip);
+    struct ipv4_addr local_ip_mask = option_ipv4_addr_checked(cfg->local_ip_mask);
 
-    // This is the default route for all IP addresses that are outside of the local network (see below).
-    // These packets are sent to 192.168.100.1 (the VM host) which should act like a router.
+    // This is the default route for all IP addresses that are outside of the local network (see
+    // below).
     struct ipv4_route_entry default_route;
     default_route.dest = ipv4_addr_new(0, 0, 0, 0);
     default_route.mask = ipv4_addr_new(0, 0, 0, 0);
-    default_route.gateway = ipv4_addr_new(192, 168, 100, 1);
+    default_route.gateway = default_gateway_ip;
     default_route.interface = host_ip;
     ipv4_route_add(default_route);
 
-    // This is a route to all local IP addresses (192.168.100.xxx). Other hosts on the virtual network
-    // with this host and the VM host can be reached this way.
+    // This is a route to all local IP addresses. Other hosts on the virtual network with this host
+    // and the VM host can be reached this way.
     struct ipv4_route_entry local_route;
-    local_route.dest = ipv4_addr_new(192, 168, 100, 0);
-    local_route.mask = ipv4_addr_new(255, 255, 255, 0);
+    local_route.dest = local_ip;
+    local_route.mask = local_ip_mask;
     local_route.gateway = host_ip;
     local_route.interface = host_ip;
     ipv4_route_add(local_route);
@@ -169,6 +173,10 @@ void init_net(void)
     // Initialize the `netdev` subsystem.
     netdev_set_default_ip_addr(host_ip);
     assert(!netdev_init_input_queue().is_error);
+
+    print_dbg(PINFO, STR("Initialized networking: host=%s default_gateway=%s local=%s/%ld\n"),
+              ipv4_addr_format(host_ip, &arn), ipv4_addr_format(default_gateway_ip, &arn),
+              ipv4_addr_format(local_ip, &arn), ipv4_mask_prefix_length(local_ip_mask));
 }
 
 struct task_net_receive_ctx {
@@ -236,6 +244,7 @@ __noreturn void kernel_init(void)
     time_init();
 
     init_memory();
+    struct arena arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
 
     sched_init();
 
@@ -247,10 +256,14 @@ __noreturn void kernel_init(void)
     struct result res = archive_extract(rootfs_archive, rfs);
     assert(!res.is_error);
 
+    struct result_runtime_config rtcfg_res = rtcfg_read_config(rfs, STR("/config.txt"), arn);
+    assert(!rtcfg_res.is_error);
+    struct runtime_config *rtcfg = result_runtime_config_checked(rtcfg_res);
+
     print_hello_txt(rfs);
 
     ipv4_addr_selftest();
-    init_net();
+    init_net(rtcfg, arn);
 
     // Probe all PCI devies, including the network device.
     res = pci_probe();
