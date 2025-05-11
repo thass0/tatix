@@ -1,0 +1,15 @@
+# This is the runtime configuration for Tatix. You can insert comments by starting a line with '#'.
+# Each configuration option has the format:
+#
+#   [NAME]=[VALUE]
+#
+# Where [NAME] will be in snake case. The format of [VALUE] depends on the option, but it can't
+# contain any newlines.
+
+# IP address of the host (i.e., our IP address)
+host_ip=192.168.100.2
+# IP address range of the local network
+local_ip=192.168.100.0/24
+# Gateway IP address for all datagrams with destinations outside the local network.
+default_gateway_ip=192.168.100.1
+

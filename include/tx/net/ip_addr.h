@@ -8,6 +8,7 @@
 #include <tx/error.h>
 #include <tx/fmt.h>
 #include <tx/net/netorder.h>
+#include <tx/option.h>
 #include <tx/string.h>
 
 struct ipv4_addr {
@@ -15,6 +16,8 @@ struct ipv4_addr {
 } __packed;
 
 static_assert(sizeof(struct ipv4_addr) == 4);
+
+struct_option(ipv4_addr, struct ipv4_addr);
 
 // Create a new IPv4 address from the given bytes. The first argument is the first byte in the IPv4 address. This means
 // that `ipv4_addr_new(192, 168, 100, 1)` represents the IPv4 address 192.168.100.1.
@@ -54,6 +57,24 @@ static inline struct ipv4_addr ipv4_addr_mask(struct ipv4_addr addr, struct ipv4
     ret.addr[2] = addr.addr[2] & mask.addr[2];
     ret.addr[3] = addr.addr[3] & mask.addr[3];
     return ret;
+}
+
+// Get the prefix length of a subnet mask.
+static inline sz ipv4_mask_prefix_length(struct ipv4_addr mask)
+{
+    u32 raw = ((u32)mask.addr[0] << 24) | ((u32)mask.addr[1] << 16) | ((u32)mask.addr[2] << 8) | (u32)mask.addr[3];
+    assert(raw); // Mask of all zeros doesn't make sense. Now IP address would match it.
+    u32 inv = ~raw;
+    sz prefix_length = 32;
+    while (inv) {
+        prefix_length--;
+        inv = inv >> 1;
+    }
+    // This assertion hold for all subnet masks because they are made up of all ones in the
+    // most significant bits and all zeros in the lower bits.
+    assert(~raw + 1 == BIT(32 - prefix_length));
+    assert(prefix_length > 0);
+    return prefix_length;
 }
 
 // An IPv4 address with its subnet mask as returned by `ipv4_addr_parse`.
