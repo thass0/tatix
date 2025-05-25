@@ -24,6 +24,8 @@ struct result ipv4_handle_packet(struct input_packet *pkt, struct send_buf sb, s
 struct result ipv4_send_packet(struct ipv4_addr dest_ip, u8 proto, struct send_buf sb, struct arena arn);
 
 net_u16 internet_checksum(struct byte_view data);
+net_u16 internet_checksum_iterate(net_u16 checksum, struct byte_view data);
+net_u16 internet_checksum_finalize(net_u16 checksum);
 
 struct result ipv4_route_add(struct ipv4_route_entry ent);
 

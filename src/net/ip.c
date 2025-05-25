@@ -32,11 +32,11 @@ static_assert(sizeof(struct ipv4_header) == 20);
 // NOTE: The internet checksum will always be computed over data that's in network byte order. The properties of the
 // internet checksum allow it that despite computing the checksum in host byte order, the result is still in network
 // byte order.
-net_u16 internet_checksum(struct byte_view data)
+net_u16 internet_checksum_iterate(net_u16 checksum, struct byte_view data)
 {
     // Refer to RFC 1071 for this algorithm. https://datatracker.ietf.org/doc/html/rfc1071
 
-    u32 sum = 0;
+    u32 sum = checksum.inner;
     u16 *ptr = byte_view_ptr(data);
     sz len = data.len;
 
@@ -52,7 +52,17 @@ net_u16 internet_checksum(struct byte_view data)
     while (sum >> 16)
         sum = (sum & 0xffff) + (sum >> 16);
 
-    return (net_u16){ ~sum };
+    return (net_u16){ sum };
+}
+
+net_u16 internet_checksum_finalize(net_u16 sum)
+{
+    return (net_u16){ ~sum.inner };
+}
+
+net_u16 internet_checksum(struct byte_view data)
+{
+    return internet_checksum_finalize(internet_checksum_iterate(net_u16_from_u16(0), data));
 }
 
 static inline bool ipv4_checksum_is_ok(struct ipv4_header *hdr)
