@@ -10,6 +10,7 @@
 #include <tx/net/send_buf.h>
 
 #define IPV4_PROTOCOL_ICMP 1
+#define IPV4_PROTOCOL_TCP 6
 
 struct ipv4_route_entry {
     struct ipv4_addr dest; // Destination IP address (not necessarily the same network as this host).
