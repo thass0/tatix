@@ -191,6 +191,15 @@ static struct ipv4_route_entry *ipv4_route_get_entry(struct ipv4_addr dest_ip)
     return &global_route_table[best_match_index];
 }
 
+struct result_ipv4_addr ipv4_route_interface_addr(struct ipv4_addr dest_ip)
+{
+    struct ipv4_route_entry *route = ipv4_route_get_entry(dest_ip);
+    if (!route)
+        return result_ipv4_addr_error(EHOSTUNREACH);
+
+    return result_ipv4_addr_ok(route->interface);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Send packets                                                              //
 ///////////////////////////////////////////////////////////////////////////////

@@ -29,4 +29,12 @@ net_u16 internet_checksum_finalize(net_u16 checksum);
 
 struct result ipv4_route_add(struct ipv4_route_entry ent);
 
+// Return the outward-facing IP address of the interface that is used to reach `dest_ip`. This function performs
+// a lookup in the routing table and returns the `interface` field from the entry matching `dest_ip` if one exists.
+//
+// TCP (and UDP and possibly others) computes an end-to-end checksum that includes fields from the IP header. The TCP
+// implementation uses this function to find out what the source IP address field will be in the outgoing datagram.
+// It needs to know this to compute the end-to-end checksum.
+struct result_ipv4_addr ipv4_route_interface_addr(struct ipv4_addr dest_ip);
+
 #endif // __TX_NET_IP_H__
