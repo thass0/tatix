@@ -17,6 +17,7 @@ struct ipv4_addr {
 
 static_assert(sizeof(struct ipv4_addr) == 4);
 
+struct_result(ipv4_addr, struct ipv4_addr);
 struct_option(ipv4_addr, struct ipv4_addr);
 
 // Create a new IPv4 address from the given bytes. The first argument is the first byte in the IPv4 address. This means
