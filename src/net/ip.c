@@ -3,6 +3,7 @@
 #include <tx/net/icmp.h>
 #include <tx/net/ip.h>
 #include <tx/net/netdev.h>
+#include <tx/net/tcp.h>
 
 struct ipv4_header {
 #if SYSTEM_BYTE_ORDER == NET_BYTE_ORDER
@@ -122,6 +123,15 @@ struct result ipv4_handle_packet(struct input_packet *pkt, struct send_buf sb, s
     switch (ip_hdr->protocol) {
     case IPV4_PROTOCOL_ICMP:
         return icmpv4_handle_message(ip_hdr->src_addr, payload, sb, arn);
+    case IPV4_PROTOCOL_TCP: {
+        struct tcp_ip_pseudo_header pseudo_hdr;
+        pseudo_hdr.src_addr = ip_hdr->src_addr;
+        pseudo_hdr.dest_addr = ip_hdr->dest_addr;
+        pseudo_hdr.zero = 0;
+        pseudo_hdr.protocol = ip_hdr->protocol;
+        pseudo_hdr.tcp_length = net_u16_from_u16(u16_from_net_u16(ip_hdr->total_length) - sizeof(struct ipv4_header));
+        return tcp_handle_packet(pseudo_hdr, payload, sb, arn);
+    }
     default:
         print_dbg(PWARN, STR("Received IPv4 datagram with unknown protocol %hhu. Dropping ...\n"), ip_hdr->protocol);
         return result_ok();

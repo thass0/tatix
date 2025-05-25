@@ -16,6 +16,7 @@
 #include <tx/net/ip.h>
 #include <tx/net/ip_addr.h>
 #include <tx/net/netdev.h>
+#include <tx/net/tcp.h>
 #include <tx/paging.h>
 #include <tx/pci.h>
 #include <tx/print.h>
@@ -173,6 +174,8 @@ void init_net(struct runtime_config *cfg, struct arena arn)
     // Initialize the `netdev` subsystem.
     netdev_set_default_ip_addr(host_ip);
     assert(!netdev_init_input_queue().is_error);
+
+    tcp_init();
 
     print_dbg(PINFO, STR("Initialized networking: host=%s default_gateway=%s local=%s/%ld\n"),
               ipv4_addr_format(host_ip, &arn), ipv4_addr_format(default_gateway_ip, &arn),
