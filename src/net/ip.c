@@ -5,13 +5,13 @@
 #include <tx/net/netdev.h>
 
 struct ipv4_header {
-#if SYSTEM_BYTE_ORDER == ORDER_LITTLE_ENDIAN
-    u8 ihl : 4; // IHL is length of the IPv4 header in 32-bit words.
-    u8 version : 4;
-#else // SYSTEM_BYTE_ORDER != ORDER_LITTLE_ENDIAN
+#if SYSTEM_BYTE_ORDER == NET_BYTE_ORDER
     u8 version : 4;
     u8 ihl : 4; // IHL is length of the IPv4 header in 32-bit words.
-#endif // SYSTEM_BYTE_ORDER != ORDER_LITTLE_ENDIAN
+#else // SYSTEM_BYTE_ORDER != NET_BYTE_ORDER
+    u8 ihl : 4; // IHL is length of the IPv4 header in 32-bit words.
+    u8 version : 4;
+#endif // SYSTEM_BYTE_ORDER != NET_BYTE_ORDER
     u8 ds_ecn;
     net_u16 total_length; // Length of IPv4 datagram in bytes (including the header).
     net_u16 ident;
