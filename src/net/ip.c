@@ -117,8 +117,10 @@ struct result ipv4_handle_packet(struct input_packet *pkt, struct send_buf sb, s
         return result_ok();
     }
 
-    struct byte_view payload =
-        byte_view_new(pkt->data.dat + sizeof(struct ipv4_header), pkt->data.len - sizeof(struct ipv4_header));
+    // NOTE: It's important that we use the `total_length` field from the header here so that we cut
+    // off any padding from the end.
+    struct byte_view payload = byte_view_new(pkt->data.dat + sizeof(struct ipv4_header),
+                                             u16_from_net_u16(ip_hdr->total_length) - sizeof(struct ipv4_header));
 
     switch (ip_hdr->protocol) {
     case IPV4_PROTOCOL_ICMP:
