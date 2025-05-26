@@ -5,7 +5,6 @@
 #include <tx/kvalloc.h>
 #include <tx/net/ip.h>
 #include <tx/net/netorder.h>
-#include <tx/pool.h>
 #include <tx/print.h>
 
 struct tcp_header {
@@ -38,33 +37,64 @@ static_assert(sizeof(struct tcp_header) == 20);
 ///////////////////////////////////////////////////////////////////////////////
 
 enum tcp_conn_state {
-    TCP_CONN_CLOSED,
     TCP_CONN_STATE_SYN_RECEIVED,
     TCP_CONN_STATE_ESTABLISHED,
 };
 
 struct tcp_conn {
+    bool is_used;
+    struct ipv4_addr host_addr;
+    struct ipv4_addr peer_addr;
     u16 host_port;
     u16 peer_port;
-    u16 host_addr;
-    u16 peer_addr;
     u32 seq_num;
-    u32 ack_sum;
+    u32 ack_num;
     u16 window_size;
     enum tcp_conn_state state;
 };
 
+// If we need to handle more connections at the same time, we could also allocate this array dynamically. The main
+// reason for using an array is that it's simple to search (without requiring much pointer chasing like linked lists
+// do).
 #define TCP_CONN_MAX_NUM 64
-static struct pool global_tcp_conn_pool;
-static bool global_tcp_initialized;
+static struct tcp_conn global_tcp_conn_table[TCP_CONN_MAX_NUM];
 
-void tcp_init(void)
+struct tcp_conn *tcp_alloc_conn(void)
 {
-    assert(!global_tcp_initialized);
-    struct byte_array mem =
-        option_byte_array_checked(kvalloc_alloc(TCP_CONN_MAX_NUM * sizeof(struct tcp_conn), alignof(struct tcp_conn)));
-    global_tcp_conn_pool = pool_new(mem, TCP_CONN_MAX_NUM);
-    global_tcp_initialized = true;
+    for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
+        struct tcp_conn *conn = &global_tcp_conn_table[i];
+        if (!conn->is_used) {
+            conn->is_used = true;
+            return conn;
+        }
+    }
+
+    return NULL;
+}
+
+struct tcp_conn *tcp_lookup_conn(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port, u16 peer_port)
+{
+    for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
+        struct tcp_conn *conn = &global_tcp_conn_table[i];
+        if (!conn->is_used)
+            continue;
+        if (ipv4_addr_is_equal(host_addr, conn->host_addr) && ipv4_addr_is_equal(peer_addr, conn->peer_addr) &&
+            host_port == conn->host_port && peer_port == conn->peer_port)
+            return conn;
+    }
+
+    return NULL;
+}
+
+static struct str tcp_fmt_conn(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port, u16 peer_port,
+                               struct arena *arn)
+{
+    assert(arn);
+    struct str_buf sbuf = str_buf_from_byte_array(byte_array_from_arena(128, arn));
+    assert(!fmt(&sbuf, STR("%s:%hu %s:%hu"), ipv4_addr_format(host_addr, arn), host_port,
+                ipv4_addr_format(peer_addr, arn), peer_port)
+                .is_error);
+    return str_from_buf(sbuf);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -79,55 +109,138 @@ static bool tcp_checksum_is_ok(struct tcp_ip_pseudo_header pseudo_hdr, struct by
     return internet_checksum_finalize(checksum).inner == 0;
 }
 
-static struct result tcp_handle_receive_syn(struct ipv4_addr src_addr, struct tcp_header *hdr, struct send_buf sb,
-                                            struct arena tmp)
+static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, struct send_buf sb, struct arena arn)
 {
-    assert(hdr);
+    assert(conn);
 
-    struct result_ipv4_addr interface_ip_res = ipv4_route_interface_addr(src_addr);
-    if (interface_ip_res.is_error)
-        return result_error(interface_ip_res.code);
-    struct ipv4_addr interface_ip = result_ipv4_addr_checked(interface_ip_res);
+    // We need this to compute the checksum over the pseudo header because the pseudo header contains information
+    // from the IP layer.
+    struct result_ipv4_addr interface_addr_res = ipv4_route_interface_addr(conn->peer_addr);
+    if (interface_addr_res.is_error)
+        return result_error(interface_addr_res.code);
+    struct ipv4_addr interface_addr = result_ipv4_addr_checked(interface_addr_res);
 
-    struct tcp_header out_hdr;
-    out_hdr.src_port = hdr->dest_port;
-    out_hdr.dest_port = hdr->src_port;
-    out_hdr.seq_num = net_u32_from_u32(42);
-    out_hdr.ack_num = net_u32_from_u32(u32_from_net_u32(hdr->seq_num) + 1);
-    out_hdr.header_len = TCP_HEADER_LEN_NO_OPT;
-    out_hdr.reserved = 0;
-    out_hdr.flags = TCP_HDR_FLAG_SYN | TCP_HDR_FLAG_ACK;
-    out_hdr.window_size = hdr->window_size;
-    out_hdr.checksum = net_u16_from_u16(0);
-    out_hdr.urgent = net_u16_from_u16(0);
+    struct tcp_header hdr;
+    hdr.src_port = net_u16_from_u16(conn->host_port);
+    hdr.dest_port = net_u16_from_u16(conn->peer_port);
+    hdr.seq_num = net_u32_from_u32(conn->seq_num);
+    hdr.ack_num = net_u32_from_u32(conn->ack_num);
+    hdr.header_len = TCP_HEADER_LEN_NO_OPT;
+    hdr.reserved = 0;
+    hdr.flags = flags;
+    hdr.window_size = net_u16_from_u16(conn->window_size);
+    hdr.checksum = net_u16_from_u16(0);
+    hdr.urgent = net_u16_from_u16(0);
 
     struct tcp_ip_pseudo_header pseudo_hdr;
-    pseudo_hdr.src_addr = interface_ip;
-    pseudo_hdr.dest_addr = src_addr;
+    pseudo_hdr.src_addr = interface_addr;
+    pseudo_hdr.dest_addr = conn->peer_addr;
     pseudo_hdr.zero = 0;
     pseudo_hdr.protocol = IPV4_PROTOCOL_TCP;
-    pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(out_hdr));
+    pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(hdr));
 
     net_u16 checksum = net_u16_from_u16(0);
-    checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&out_hdr, sizeof(out_hdr)));
+    checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&hdr, sizeof(hdr)));
     checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&pseudo_hdr, sizeof(pseudo_hdr)));
-    out_hdr.checksum = internet_checksum_finalize(checksum);
-    assert(tcp_checksum_is_ok(pseudo_hdr, byte_view_new((void *)&out_hdr, sizeof(out_hdr))));
 
-    struct byte_buf *buf = send_buf_prepend(&sb, sizeof(out_hdr));
+    hdr.checksum = internet_checksum_finalize(checksum);
+
+    assert(tcp_checksum_is_ok(pseudo_hdr, byte_view_new((void *)&hdr, sizeof(hdr))));
+
+    struct byte_buf *buf = send_buf_prepend(&sb, sizeof(hdr));
     if (!buf)
         return result_error(ENOMEM);
 
-    assert(byte_buf_append(buf, byte_view_new((void *)&out_hdr, sizeof(out_hdr))) == sizeof(out_hdr));
+    assert(byte_buf_append(buf, byte_view_new((void *)&hdr, sizeof(hdr))) == sizeof(hdr));
 
-    return ipv4_send_packet(src_addr, IPV4_PROTOCOL_TCP, sb, tmp);
+    return ipv4_send_packet(conn->peer_addr, IPV4_PROTOCOL_TCP, sb, arn);
+}
+
+static struct result tcp_handle_receive_syn(struct ipv4_addr host_addr, struct ipv4_addr peer_addr,
+                                            struct tcp_header *hdr, struct send_buf sb, struct arena arn)
+{
+    assert(hdr);
+
+    u16 host_port = u16_from_net_u16(hdr->dest_port);
+    u16 peer_port = u16_from_net_u16(hdr->src_port);
+
+    struct tcp_conn *conn = tcp_lookup_conn(host_addr, peer_addr, host_port, peer_port);
+    if (conn) {
+        print_dbg(PERROR, STR("Received SYN from peer that's already connected (%s). Dropping ...\n"),
+                  tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
+        return result_ok();
+    }
+
+    conn = tcp_alloc_conn();
+    if (!conn) {
+        print_dbg(PERROR, STR("Failed to allocate new TCP connection for %s. Dropping ...\n"),
+                  tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
+        return result_ok();
+    }
+
+    conn->host_addr = host_addr;
+    conn->peer_addr = peer_addr;
+    conn->host_port = host_port;
+    conn->peer_port = peer_port;
+    conn->seq_num = 0; // TODO: Choose a random value.
+    conn->ack_num = u32_from_net_u32(hdr->seq_num) + 1; // A SYN consumes a single sequence number.
+    conn->window_size = u16_from_net_u16(hdr->window_size);
+    conn->state = TCP_CONN_STATE_SYN_RECEIVED;
+
+    print_dbg(PINFO, STR("Created new connection after receiving SYN: %s\n"),
+              tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
+
+    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK | TCP_HDR_FLAG_SYN, sb, arn);
+}
+
+static struct result tcp_handle_receive_segment(struct ipv4_addr host_addr, struct ipv4_addr peer_addr,
+                                                struct tcp_header *hdr, struct byte_view payload, struct send_buf sb,
+                                                struct arena arn)
+{
+    u16 host_port = u16_from_net_u16(hdr->dest_port);
+    u16 peer_port = u16_from_net_u16(hdr->src_port);
+
+    struct tcp_conn *conn = tcp_lookup_conn(host_addr, peer_addr, host_port, peer_port);
+    if (!conn) {
+        print_dbg(PDBG, STR("Received TCP segment by peer without connection (%s). Dropping ...\n"),
+                  tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
+        return result_ok();
+    }
+
+    if (conn->state == TCP_CONN_STATE_SYN_RECEIVED && u32_from_net_u32(hdr->ack_num) > conn->seq_num) {
+        print_dbg(PINFO, STR("Moving connection %s to ESTABLISHED state\n"),
+                  tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
+        conn->state = TCP_CONN_STATE_ESTABLISHED;
+    }
+
+    if (conn->state != TCP_CONN_STATE_ESTABLISHED) {
+        print_dbg(
+            PDBG,
+            STR("Received TCP segment by peer with a connection that's not in the ESTABLISHED state (%s). Dropping ...\n"),
+            tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
+        return result_ok();
+    }
+
+    if (payload.len == 0) {
+        print_dbg(PINFO, STR("Received TCP segment without payload. No need to respond (%s).\n"),
+                  tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
+        return result_ok();
+    }
+
+    // TODO: Process data from the segment ...
+
+    conn->ack_num = u32_from_net_u32(hdr->seq_num) + payload.len;
+    conn->seq_num = u32_from_net_u32(hdr->ack_num); // TODO: Update this to be the right sequence number.
+
+    print_dbg(PINFO, STR("ACK'ing TCP segment ack_num=%u for %s\n"), conn->ack_num,
+              tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
+
+    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK, sb, arn);
 }
 
 struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment, struct send_buf sb,
                                 struct arena tmp)
 {
-    assert(global_tcp_initialized);
-
     if (segment.len < sizeof(struct tcp_header)) {
         print_dbg(PDBG, STR("Received TCP segment smaller than the TCP header. Dropping ...\n"));
         return result_ok();
@@ -140,8 +253,6 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
         crash("Bad checksum\n");
         return result_ok();
     }
-
-    print_dbg(PINFO, STR("TCP header: header_len=%hhd flags=0x%hhx\n"), tcp_hdr->header_len, tcp_hdr->flags);
 
     if (tcp_hdr->header_len < TCP_HEADER_LEN_NO_OPT) {
         print_dbg(PDBG,
@@ -156,14 +267,16 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
                   tcp_hdr->header_len);
     }
 
-    struct byte_view data =
+    struct byte_view payload =
         byte_view_new(segment.dat + sizeof(struct tcp_header), segment.len - sizeof(struct tcp_header));
 
     if (tcp_hdr->flags & TCP_HDR_FLAG_SYN) {
-        return tcp_handle_receive_syn(pseudo_hdr.src_addr, tcp_hdr, sb, tmp);
+        // Respond with a passive open to an active open by a peer. We assume this is the only way to open a
+        // connection for now.
+        return tcp_handle_receive_syn(pseudo_hdr.dest_addr, pseudo_hdr.src_addr, tcp_hdr, sb, tmp);
+    } else {
+        return tcp_handle_receive_segment(pseudo_hdr.dest_addr, pseudo_hdr.src_addr, tcp_hdr, payload, sb, tmp);
     }
-
-    print_dbg(PDBG, STR("Received TCP segment and the checksum is OK!!!\n"));
 
     return result_ok();
 }
