@@ -16,6 +16,7 @@
 #include <tx/net/ip.h>
 #include <tx/net/ip_addr.h>
 #include <tx/net/netdev.h>
+#include <tx/net/tcp.h>
 #include <tx/paging.h>
 #include <tx/pci.h>
 #include <tx/print.h>
@@ -235,6 +236,20 @@ void task_net_ping(void *ctx_ptr __unused)
     assert(!res.is_error);
 }
 
+void task_net_hello(void *ctx_ptr __unused)
+{
+    struct arena tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
+    struct send_buf sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64))));
+
+    struct tcp_conn *conn = NULL;
+    while (!(conn = tcp_conn_listen_accept(ipv4_addr_new(192, 168, 100, 2), 4242, tmp_arn)))
+        sleep_ms(time_ms_new(500));
+    assert(conn);
+
+    tcp_conn_send(conn, byte_view_from_str(STR("Hello and welcome to TATIX\n")), sb, tmp_arn);
+    tcp_conn_close(&conn);
+}
+
 __noreturn void kernel_init(void)
 {
     isr_register_handler(0x20, handle_timer_interrupt, NULL);
@@ -275,6 +290,7 @@ __noreturn void kernel_init(void)
 
     sched_create_task(task_net_ping, NULL);
     sched_create_task(task_net_receive, &recv_ctx);
+    sched_create_task(task_net_hello, NULL);
 
     while (true)
         sleep_ms(time_ms_new(1000));
