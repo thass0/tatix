@@ -246,7 +246,7 @@ void task_net_hello(void *ctx_ptr __unused)
         sleep_ms(time_ms_new(500));
     assert(conn);
 
-    tcp_conn_send(conn, byte_view_from_str(STR("Hello and welcome to TATIX\n")), sb, tmp_arn);
+    tcp_conn_send(conn, byte_view_from_str(STR("Hello and welcome to Tatix\n")), sb, tmp_arn);
     tcp_conn_close(&conn);
 }
 
