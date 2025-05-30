@@ -163,15 +163,8 @@ static struct str tcp_fmt_conn(struct ipv4_addr host_addr, struct ipv4_addr peer
 // Handle incoming segments                                                  //
 ///////////////////////////////////////////////////////////////////////////////
 
-static bool tcp_checksum_is_ok(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment)
-{
-    net_u16 checksum = net_u16_from_u16(0);
-    checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&pseudo_hdr, sizeof(pseudo_hdr)));
-    checksum = internet_checksum_iterate(checksum, segment);
-    return internet_checksum_finalize(checksum).inner == 0;
-}
-
-static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, struct send_buf sb, struct arena arn)
+static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, struct byte_view payload, struct send_buf sb,
+                                      struct arena arn)
 {
     assert(conn);
 
@@ -199,20 +192,27 @@ static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, struct se
     pseudo_hdr.dest_addr = conn->peer_addr;
     pseudo_hdr.zero = 0;
     pseudo_hdr.protocol = IPV4_PROTOCOL_TCP;
-    pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(hdr));
+    pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(hdr) + payload.len);
 
     net_u16 checksum = net_u16_from_u16(0);
     checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&hdr, sizeof(hdr)));
     checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&pseudo_hdr, sizeof(pseudo_hdr)));
+    checksum = internet_checksum_iterate(checksum, payload);
 
     hdr.checksum = internet_checksum_finalize(checksum);
 
-    assert(tcp_checksum_is_ok(pseudo_hdr, byte_view_new((void *)&hdr, sizeof(hdr))));
+    struct byte_buf *buf = NULL;
 
-    struct byte_buf *buf = send_buf_prepend(&sb, sizeof(hdr));
+    if (payload.len > 0) {
+        buf = send_buf_prepend(&sb, payload.len);
+        if (!buf)
+            return result_error(ENOMEM);
+        assert(byte_buf_append(buf, payload) == payload.len);
+    }
+
+    buf = send_buf_prepend(&sb, sizeof(hdr));
     if (!buf)
         return result_error(ENOMEM);
-
     assert(byte_buf_append(buf, byte_view_new((void *)&hdr, sizeof(hdr))) == sizeof(hdr));
 
     return ipv4_send_packet(conn->peer_addr, IPV4_PROTOCOL_TCP, sb, arn);
@@ -266,7 +266,7 @@ static struct result tcp_handle_receive_syn(struct ipv4_addr host_addr, struct i
     print_dbg(PINFO, STR("Created new connection after receiving SYN: %s\n"),
               tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
 
-    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK | TCP_HDR_FLAG_SYN, sb, arn);
+    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK | TCP_HDR_FLAG_SYN, byte_view_new(NULL, 0), sb, arn);
 }
 
 static struct result tcp_handle_receive_fin(struct ipv4_addr host_addr, struct ipv4_addr peer_addr,
@@ -300,7 +300,7 @@ static struct result tcp_handle_receive_fin(struct ipv4_addr host_addr, struct i
     print_dbg(PINFO, STR("Closing connection after receiving FIN: %s\n"),
               tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
 
-    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK | TCP_HDR_FLAG_FIN, sb, arn);
+    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK | TCP_HDR_FLAG_FIN, byte_view_new(NULL, 0), sb, arn);
 }
 
 static struct result tcp_handle_receive_segment(struct ipv4_addr host_addr, struct ipv4_addr peer_addr,
@@ -359,7 +359,15 @@ static struct result tcp_handle_receive_segment(struct ipv4_addr host_addr, stru
     print_dbg(PINFO, STR("ACK'ing TCP segment ack_num=%u for %s\n"), conn->ack_num,
               tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
 
-    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK, sb, arn);
+    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK, byte_view_new(NULL, 0), sb, arn);
+}
+
+static bool tcp_checksum_is_ok(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment)
+{
+    net_u16 checksum = net_u16_from_u16(0);
+    checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&pseudo_hdr, sizeof(pseudo_hdr)));
+    checksum = internet_checksum_iterate(checksum, segment);
+    return internet_checksum_finalize(checksum).inner == 0;
 }
 
 struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment, struct send_buf sb,
@@ -447,11 +455,8 @@ struct tcp_conn *tcp_conn_listen_accept(struct ipv4_addr addr, u16 port, struct 
 // Send `payload` to the other side of the connection `conn`.
 struct result tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, struct send_buf sb, struct arena tmp)
 {
-    (void)conn;
-    (void)payload;
-    (void)sb;
-    (void)tmp;
-    crash("We're not here yet!\n");
+    assert(conn);
+    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK, payload, sb, tmp);
 }
 
 // Close the connection `*conn`. `conn` will be set to NULL since it's stale now.
