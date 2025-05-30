@@ -27,6 +27,7 @@ struct tcp_header {
 
 #define TCP_HEADER_LEN_NO_OPT 5
 
+#define TCP_HDR_FLAG_FIN BIT(0)
 #define TCP_HDR_FLAG_SYN BIT(1)
 #define TCP_HDR_FLAG_ACK BIT(4)
 
@@ -39,6 +40,7 @@ static_assert(sizeof(struct tcp_header) == 20);
 enum tcp_conn_state {
     TCP_CONN_STATE_SYN_RECEIVED,
     TCP_CONN_STATE_ESTABLISHED,
+    TCP_CONN_STATE_CLOSING, // We are waiting for the other side to ACK a FIN that we sent it.
 };
 
 struct tcp_conn {
@@ -70,6 +72,15 @@ struct tcp_conn *tcp_alloc_conn(void)
     }
 
     return NULL;
+}
+
+void tcp_free_conn(struct tcp_conn *conn)
+{
+    assert(conn);
+    // Since we are reusing these, we want to make sure we don't accidentally reuse old data. Thus we set each
+    // structure to an easy to recognize bit pattern.
+    byte_array_set(byte_array_new((void *)conn, sizeof(*conn)), 0xee);
+    conn->is_used = false;
 }
 
 struct tcp_conn *tcp_lookup_conn(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port, u16 peer_port)
@@ -193,6 +204,33 @@ static struct result tcp_handle_receive_syn(struct ipv4_addr host_addr, struct i
     return tcp_send_segment(conn, TCP_HDR_FLAG_ACK | TCP_HDR_FLAG_SYN, sb, arn);
 }
 
+static struct result tcp_handle_receive_fin(struct ipv4_addr host_addr, struct ipv4_addr peer_addr,
+                                            struct tcp_header *hdr, struct send_buf sb, struct arena arn)
+{
+    assert(hdr);
+
+    u16 host_port = u16_from_net_u16(hdr->dest_port);
+    u16 peer_port = u16_from_net_u16(hdr->src_port);
+
+    struct tcp_conn *conn = tcp_lookup_conn(host_addr, peer_addr, host_port, peer_port);
+    if (!conn) {
+        print_dbg(PERROR, STR("Received FIN from peer that's not connected (%s). Dropping ...\n"),
+                  tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
+        return result_ok();
+    }
+
+    conn->ack_num = u32_from_net_u32(hdr->seq_num) + 1; // A FIN consumes a single sequence number.
+    conn->state = TCP_CONN_STATE_CLOSING;
+
+    // TODO: Don't got to state CLOSING right away. Instead, ACK the FIN that just came in an tell the application
+    // that the stream has ended. Only send our own FIN when the application has closed the connection.
+
+    print_dbg(PINFO, STR("Closing connection after receiving FIN: %s\n"),
+              tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
+
+    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK | TCP_HDR_FLAG_FIN, sb, arn);
+}
+
 static struct result tcp_handle_receive_segment(struct ipv4_addr host_addr, struct ipv4_addr peer_addr,
                                                 struct tcp_header *hdr, struct byte_view payload, struct send_buf sb,
                                                 struct arena arn)
@@ -213,6 +251,13 @@ static struct result tcp_handle_receive_segment(struct ipv4_addr host_addr, stru
         conn->state = TCP_CONN_STATE_ESTABLISHED;
     }
 
+    if (conn->state == TCP_CONN_STATE_CLOSING && u32_from_net_u32(hdr->ack_num) > conn->seq_num) {
+        print_dbg(PINFO, STR("Close of connection %s has been ACK'ed. Deleting the connection.\n"),
+                  tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
+        tcp_free_conn(conn);
+        return result_ok();
+    }
+
     if (conn->state != TCP_CONN_STATE_ESTABLISHED) {
         print_dbg(
             PDBG,
@@ -221,16 +266,16 @@ static struct result tcp_handle_receive_segment(struct ipv4_addr host_addr, stru
         return result_ok();
     }
 
+    conn->ack_num = u32_from_net_u32(hdr->seq_num) + payload.len;
+    conn->seq_num = u32_from_net_u32(hdr->ack_num); // TODO: Update this to be the right sequence number.
+
+    // TODO: Process data from the segment ...
+
     if (payload.len == 0) {
         print_dbg(PINFO, STR("Received TCP segment without payload. No need to respond (%s).\n"),
                   tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
         return result_ok();
     }
-
-    // TODO: Process data from the segment ...
-
-    conn->ack_num = u32_from_net_u32(hdr->seq_num) + payload.len;
-    conn->seq_num = u32_from_net_u32(hdr->ack_num); // TODO: Update this to be the right sequence number.
 
     print_dbg(PINFO, STR("ACK'ing TCP segment ack_num=%u for %s\n"), conn->ack_num,
               tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &arn));
@@ -274,6 +319,8 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
         // Respond with a passive open to an active open by a peer. We assume this is the only way to open a
         // connection for now.
         return tcp_handle_receive_syn(pseudo_hdr.dest_addr, pseudo_hdr.src_addr, tcp_hdr, sb, tmp);
+    } else if (tcp_hdr->flags & TCP_HDR_FLAG_FIN) {
+        return tcp_handle_receive_fin(pseudo_hdr.dest_addr, pseudo_hdr.src_addr, tcp_hdr, sb, tmp);
     } else {
         return tcp_handle_receive_segment(pseudo_hdr.dest_addr, pseudo_hdr.src_addr, tcp_hdr, payload, sb, tmp);
     }
