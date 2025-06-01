@@ -247,7 +247,7 @@ void task_net_hello(void *ctx_ptr __unused)
     assert(conn);
 
     tcp_conn_send(conn, byte_view_from_str(STR("Hello and welcome to Tatix\n")), sb, tmp_arn);
-    tcp_conn_close(&conn);
+    tcp_conn_close(&conn, sb, tmp_arn);
 }
 
 __noreturn void kernel_init(void)
