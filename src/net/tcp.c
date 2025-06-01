@@ -129,7 +129,7 @@ static struct str tcp_fmt_conn(struct ipv4_addr host_addr, struct ipv4_addr peer
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Handle incoming segments                                                  //
+// Transmit outgoing segments                                                //
 ///////////////////////////////////////////////////////////////////////////////
 
 static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
@@ -206,6 +206,41 @@ static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, struct by
                                 conn->ack_num, conn->window_size, flags, payload, sb, arn);
 }
 
+///////////////////////////////////////////////////////////////////////////////
+// Handle incoming segments                                                  //
+///////////////////////////////////////////////////////////////////////////////
+
+static struct result tcp_handle_receive_listen(struct tcp_conn *conn, struct ipv4_addr peer_addr, u16 peer_port,
+                                               struct tcp_header *hdr, struct byte_view payload, struct send_buf sb,
+                                               struct arena tmp)
+{
+    assert(conn);
+    assert(hdr);
+    assert(conn->state == TCP_CONN_STATE_LISTEN);
+
+    if (!(hdr->flags & TCP_HDR_FLAG_SYN))
+        return result_ok(); // We don't care about receiving anything but SYNs when in the LISTEN state.
+
+    // When in LISTEN state, the connection doesn't known about the peer yet. So the peer fields must be wildcards.
+    assert(ipv4_addr_is_equal(conn->peer_addr, ipv4_addr_new(0, 0, 0, 0)));
+    assert(conn->peer_port == 0);
+    conn->peer_addr = peer_addr;
+    conn->peer_port = peer_port;
+
+    conn->state = TCP_CONN_STATE_SYN_RCVD;
+    conn->window_size = u16_from_net_u16(hdr->window_size); // TODO: Choose a proper window size.
+    conn->ack_num = u32_from_net_u32(hdr->seq_num) + payload.len +
+                    1; // The SYN in the incoming header has consumed one sequence number.
+    // The outgoing sequence number doesn't need to change because we don't have any payload to send.
+
+    print_dbg(
+        PDBG,
+        STR("Received SYN for a connection in the LISTEN state (%s). Responding with SYN + ACK. The connection is now in the SYN_RCVD state.\n"),
+        tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+
+    return tcp_send_segment(conn, TCP_HDR_FLAG_SYN | TCP_HDR_FLAG_ACK, byte_view_new(NULL, 0), sb, tmp);
+}
+
 static bool tcp_checksum_is_ok(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment)
 {
     net_u16 checksum = net_u16_from_u16(0);
@@ -244,7 +279,7 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
     }
 
     struct byte_view payload =
-        byte_view_new(segment.dat + sizeof(struct tcp_header), segment.len - sizeof(struct tcp_header));
+        byte_view_new(segment.dat + tcp_hdr->header_len * 4, segment.len - tcp_hdr->header_len * 4);
 
     struct ipv4_addr host_addr = pseudo_hdr.dest_addr;
     struct ipv4_addr peer_addr = pseudo_hdr.src_addr;
@@ -263,7 +298,7 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
 
     switch (conn->state) {
     case TCP_CONN_STATE_LISTEN:
-        crash("TODO: Handle LISTEN");
+        return tcp_handle_receive_listen(conn, peer_addr, peer_port, tcp_hdr, payload, sb, tmp);
     case TCP_CONN_STATE_SYN_RCVD:
         crash("TODO: Handle SYN_RCVD");
     case TCP_CONN_STATE_ESTABLISHED:
