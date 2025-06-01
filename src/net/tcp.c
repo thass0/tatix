@@ -241,6 +241,28 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *conn, struct ipv
     return tcp_send_segment(conn, TCP_HDR_FLAG_SYN | TCP_HDR_FLAG_ACK, byte_view_new(NULL, 0), sb, tmp);
 }
 
+static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct tcp_header *hdr,
+                                                 struct byte_view payload, struct send_buf sb, struct arena tmp)
+{
+    assert(conn);
+    assert(hdr);
+    assert(conn->state == TCP_CONN_STATE_SYN_RCVD);
+
+    // We always send a SYN before moving to the SYN_RCVD state. We don't care about anything at this point but an
+    // ACK for the SYN.
+    if (!(hdr->flags & TCP_HDR_FLAG_ACK))
+        return result_ok();
+
+    conn->state = TCP_CONN_STATE_ESTABLISHED;
+    conn->seq_num = u32_from_net_u32(hdr->ack_num);
+
+    print_dbg(PDBG,
+              STR("Received ACK for a connection in the SYN_RCVD state (%s). The connection is ESTABLISHED now.\n"),
+              tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+
+    return result_ok();
+}
+
 static bool tcp_checksum_is_ok(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment)
 {
     net_u16 checksum = net_u16_from_u16(0);
@@ -300,7 +322,7 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
     case TCP_CONN_STATE_LISTEN:
         return tcp_handle_receive_listen(conn, peer_addr, peer_port, tcp_hdr, payload, sb, tmp);
     case TCP_CONN_STATE_SYN_RCVD:
-        crash("TODO: Handle SYN_RCVD");
+        return tcp_handle_receive_syn_rcvd(conn, tcp_hdr, payload, sb, tmp);
     case TCP_CONN_STATE_ESTABLISHED:
         crash("TODO: Handle ESTABLISHED");
     case TCP_CONN_STATE_CLOSE_WAIT:
