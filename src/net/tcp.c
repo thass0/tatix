@@ -56,10 +56,17 @@ struct tcp_conn {
     struct ipv4_addr peer_addr;
     u16 host_port;
     u16 peer_port;
-    u32 seq_num;
-    u32 ack_num;
-    u16 window_size;
     enum tcp_conn_state state;
+
+    // Transmission
+    u32 send_unack; // SND.UNA
+    u32 send_next; // SND.NXT
+    u16 send_window; // SND.WND
+    u32 iss; // Initial send sequence number (ISS).
+
+    // Reception
+    u32 recv_next; // RCV.NXT
+    u16 recv_window; // RCV.WND
 };
 
 // If we need to handle more connections at the same time, we could also allocate this array dynamically. The main
@@ -133,6 +140,19 @@ static struct str tcp_fmt_conn(struct ipv4_addr host_addr, struct ipv4_addr peer
     return str_from_buf(sbuf);
 }
 
+static bool seq_gt(u32 a, u32 b)
+{
+    return (i64)a - (i64)b > 0;
+}
+
+static inline void tcp_conn_update_unack(struct tcp_conn *conn, u32 ack_num)
+{
+    assert(conn);
+
+    if (seq_gt(ack_num, conn->send_unack))
+        conn->send_unack = ack_num;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Transmit outgoing segments                                                //
 ///////////////////////////////////////////////////////////////////////////////
@@ -203,12 +223,41 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
     return ipv4_send_packet(peer_addr, IPV4_PROTOCOL_TCP, sb, tmp);
 }
 
-static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, struct byte_view payload, struct send_buf sb,
-                                      struct arena arn)
+static struct result_sz tcp_send_segment(struct tcp_conn *conn, u8 flags, struct byte_view payload, struct send_buf sb,
+                                         struct arena arn)
 {
     assert(conn);
-    return tcp_send_segment_raw(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, conn->seq_num,
-                                conn->ack_num, conn->window_size, flags, payload, sb, arn);
+
+    // This is correct even if `send_next > send_window + send_unack` because C uses modular arithmetic for
+    // unsigned types.
+    u32 avail_window = (conn->send_window + conn->send_unack) - conn->send_next;
+    sz n_send = MIN((sz)avail_window, payload.len);
+    struct byte_view effective_payload = byte_view_new(payload.dat, n_send);
+
+    struct result res = tcp_send_segment_raw(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port,
+                                             conn->send_next, conn->recv_next, conn->recv_window, flags,
+                                             effective_payload, sb, arn);
+    if (res.is_error)
+        return result_sz_error(res.code);
+
+    // By advancing `send_next`, we increase the number of bytes in flight.
+    conn->send_next += (u32)n_send;
+    if (flags & TCP_HDR_FLAG_SYN)
+        conn->send_next++;
+    if (flags & TCP_HDR_FLAG_FIN)
+        conn->send_next++;
+
+    return result_sz_ok(n_send);
+}
+
+static inline struct result tcp_send_segment_empty(struct tcp_conn *conn, u8 flags, struct send_buf sb,
+                                                   struct arena arn)
+{
+    assert(conn);
+    struct result_sz res = tcp_send_segment(conn, flags, byte_view_new(NULL, 0), sb, arn);
+    if (res.is_error)
+        return result_error(res.code);
+    return result_ok();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -233,9 +282,9 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *conn, struct ipv
     conn->peer_port = peer_port;
 
     conn->state = TCP_CONN_STATE_SYN_RCVD;
-    conn->window_size = u16_from_net_u16(hdr->window_size); // TODO: Choose a proper window size.
-    conn->ack_num = u32_from_net_u32(hdr->seq_num) + payload.len +
-                    1; // The SYN in the incoming header has consumed one sequence number.
+    // The SYN in the incoming header has consumed one sequence number.
+    conn->recv_next = u32_from_net_u32(hdr->seq_num) + payload.len + 1;
+
     // The outgoing sequence number doesn't need to change because we don't have any payload to send.
 
     print_dbg(
@@ -243,7 +292,7 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *conn, struct ipv
         STR("Received SYN for a connection in the LISTEN state (%s). Responding with SYN + ACK. The connection is in the SYN_RCVD state now.\n"),
         tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
 
-    return tcp_send_segment(conn, TCP_HDR_FLAG_SYN | TCP_HDR_FLAG_ACK, byte_view_new(NULL, 0), sb, tmp);
+    return tcp_send_segment_empty(conn, TCP_HDR_FLAG_SYN | TCP_HDR_FLAG_ACK, sb, tmp);
 }
 
 static void tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct tcp_header *hdr, struct arena tmp)
@@ -258,7 +307,9 @@ static void tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct tcp_header
         return;
 
     conn->state = TCP_CONN_STATE_ESTABLISHED;
-    conn->seq_num = u32_from_net_u32(hdr->ack_num);
+
+    tcp_conn_update_unack(conn, u32_from_net_u32(hdr->ack_num));
+    conn->send_window = u16_from_net_u16(hdr->window_size);
 
     print_dbg(
         PDBG,
@@ -275,31 +326,41 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
 
     if ((hdr->flags & TCP_HDR_FLAG_FIN) && (hdr->flags & TCP_HDR_FLAG_ACK)) {
         conn->state = TCP_CONN_STATE_TIME_WAIT;
-        conn->seq_num = u32_from_net_u32(hdr->ack_num);
-        conn->ack_num =
-            u32_from_net_u32(hdr->seq_num) + payload.len + 1; // The incoming FIN consumed one sequence number.
+
+        tcp_conn_update_unack(conn, u32_from_net_u32(hdr->ack_num));
+        conn->send_window = u16_from_net_u16(hdr->window_size);
+
+        // TODO: Receive logic.
+        // The incoming FIN consumed one sequence number.
+        conn->recv_next = u32_from_net_u32(hdr->seq_num) + payload.len + 1;
 
         print_dbg(
             PDBG,
             STR("Received FIN + ACK for a connection in the FIN_WAIT_1 state (%s). Responding with ACK. The connection is in the TIME_WAIT state now.\n"),
             tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
 
-        return tcp_send_segment(conn, TCP_HDR_FLAG_ACK, byte_view_new(NULL, 0), sb, tmp);
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_FIN) {
         conn->state = TCP_CONN_STATE_CLOSING;
-        conn->seq_num = u32_from_net_u32(hdr->ack_num);
-        conn->ack_num =
-            u32_from_net_u32(hdr->seq_num) + payload.len + 1; // The incoming FIN consumed one sequence number.
+
+        // TODO: Receive logic.
+        // The incoming FIN consumed one sequence number.
+        conn->recv_next = u32_from_net_u32(hdr->seq_num) + payload.len + 1;
+        conn->send_window = u16_from_net_u16(hdr->window_size);
 
         print_dbg(
             PDBG,
             STR("Received FIN for a connection in the FIN_WAIT_1 state (%s). Responding with ACK. The connection is in the CLOSING state now.\n"),
             tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
 
-        return tcp_send_segment(conn, TCP_HDR_FLAG_ACK, byte_view_new(NULL, 0), sb, tmp);
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_ACK) {
         conn->state = TCP_CONN_STATE_FIN_WAIT_2;
-        conn->seq_num = u32_from_net_u32(hdr->ack_num);
+
+        print_dbg(PINFO, STR("DEBUGGING: hdr->ack_num=%u conn->send_next=%u conn->send_unack=%u\n"),
+                  u32_from_net_u32(hdr->ack_num), conn->send_next, conn->send_unack);
+        tcp_conn_update_unack(conn, u32_from_net_u32(hdr->ack_num));
+        conn->send_window = u16_from_net_u16(hdr->window_size);
 
         print_dbg(
             PDBG,
@@ -324,15 +385,20 @@ static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct
         return result_ok(); // Nothing but FINs is of interest in this state.
 
     conn->state = TCP_CONN_STATE_TIME_WAIT;
-    conn->seq_num = u32_from_net_u32(hdr->ack_num);
-    conn->ack_num = u32_from_net_u32(hdr->seq_num) + payload.len + 1; // The incoming FIN consumed one sequence number.
+    // TODO: Receive logic.
+    // The incoming FIN consumed one sequence number.
+    conn->recv_next = u32_from_net_u32(hdr->seq_num) + payload.len + 1;
+
+    if (hdr->flags & TCP_HDR_FLAG_ACK)
+        tcp_conn_update_unack(conn, u32_from_net_u32(hdr->ack_num));
+    conn->send_window = u16_from_net_u16(hdr->window_size);
 
     print_dbg(
         PDBG,
         STR("Received FIN for a connection in the FIN_WAIT_2 state (%s). Responding with ACK. The connection is in the TIME_WAIT state now.\n"),
         tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
 
-    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK, byte_view_new(NULL, 0), sb, tmp);
+    return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
 }
 
 static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header *hdr, struct arena tmp)
@@ -345,7 +411,9 @@ static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header 
         return; // Nothing but ACKs is of interest in this state.
 
     conn->state = TCP_CONN_STATE_TIME_WAIT;
-    conn->seq_num = u32_from_net_u32(hdr->ack_num);
+
+    tcp_conn_update_unack(conn, u32_from_net_u32(hdr->ack_num));
+    conn->send_window = u16_from_net_u16(hdr->window_size);
 
     print_dbg(
         PDBG,
@@ -467,10 +535,16 @@ struct tcp_conn *tcp_conn_listen_accept(struct ipv4_addr addr, u16 port, struct 
         conn->peer_addr = ipv4_addr_new(0, 0, 0, 0);
         conn->host_port = port;
         conn->peer_port = 0;
-        conn->seq_num = result_u32_checked(isn_res);
-        conn->ack_num = 0;
-        conn->window_size = 0; // TODO: Properly choose a window size.
         conn->state = TCP_CONN_STATE_LISTEN;
+
+        // TODO: Receive logic.
+        conn->recv_next = 0;
+        conn->recv_window = 0x1000;
+
+        conn->iss = result_u32_checked(isn_res);
+        conn->send_unack = conn->iss;
+        conn->send_next = conn->iss;
+        conn->send_window = 0;
 
         print_dbg(PINFO, STR("New connection in LISTEN state on addr=%s port=%hu ...\n"), ipv4_addr_format(addr, &tmp),
                   port);
@@ -484,13 +558,12 @@ struct tcp_conn *tcp_conn_listen_accept(struct ipv4_addr addr, u16 port, struct 
     return NULL;
 }
 
-// Send `payload` to the other side of the connection `conn`.
-struct result tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, struct send_buf sb, struct arena tmp)
+// Send `payload` to the other side of the connection `conn`. The return value indicates the number of bytes we were
+// able to transmit.
+struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, struct send_buf sb, struct arena tmp)
 {
     assert(conn);
-    struct result res = tcp_send_segment(conn, TCP_HDR_FLAG_ACK, payload, sb, tmp);
-    conn->seq_num += payload.len;
-    return res;
+    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK, payload, sb, tmp);
 }
 
 // Close the connection `*conn`. `conn` will be set to NULL since it's stale now.
@@ -508,5 +581,5 @@ struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct send_buf sb, str
     *conn_ptr = NULL;
 
     // TODO: I don't get why we need to send an ACK here ...
-    return tcp_send_segment(conn, TCP_HDR_FLAG_FIN | TCP_HDR_FLAG_ACK, byte_view_new(NULL, 0), sb, tmp);
+    return tcp_send_segment_empty(conn, TCP_HDR_FLAG_FIN | TCP_HDR_FLAG_ACK, sb, tmp);
 }

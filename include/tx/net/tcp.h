@@ -37,8 +37,9 @@ struct tcp_conn; // Ha, you can't even see what's inside!
 // Listen for incoming connections on addr:port and accept the first client that tries to connect.
 struct tcp_conn *tcp_conn_listen_accept(struct ipv4_addr addr, u16 port, struct arena tmp);
 
-// Send `payload` to the other side of the connection `conn`.
-struct result tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, struct send_buf sb, struct arena tmp);
+// Send `payload` to the other side of the connection `conn`. The return value indicates the number of bytes we were
+// able to transmit.
+struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, struct send_buf sb, struct arena tmp);
 
 // Close the connection `*conn`. `conn` will be set to NULL since it's stale now.
 struct result tcp_conn_close(struct tcp_conn **conn, struct send_buf sb, struct arena tmp);
