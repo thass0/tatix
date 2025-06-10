@@ -1,5 +1,6 @@
 #include <tx/net/tcp.h>
 
+#include <tx/asm.h>
 #include <tx/assert.h>
 #include <tx/byte.h>
 #include <tx/kvalloc.h>
@@ -435,6 +436,15 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
 // User interface                                                            //
 ///////////////////////////////////////////////////////////////////////////////
 
+static struct result_u32 tcp_generate_isn(void)
+{
+    u64 isn_raw;
+    bool success = rdrand_u64(&isn_raw);
+    if (!success)
+        return result_u32_error(EIO);
+    return result_u32_ok((u32)isn_raw);
+}
+
 struct tcp_conn *tcp_conn_listen_accept(struct ipv4_addr addr, u16 port, struct arena tmp)
 {
     struct tcp_conn *conn = tcp_lookup_conn(addr, ipv4_addr_new(0, 0, 0, 0), port, 0);
@@ -447,11 +457,17 @@ struct tcp_conn *tcp_conn_listen_accept(struct ipv4_addr addr, u16 port, struct 
             return NULL;
         }
 
+        struct result_u32 isn_res = tcp_generate_isn();
+        if (isn_res.is_error) {
+            tcp_free_conn(conn);
+            return NULL;
+        }
+
         conn->host_addr = addr;
         conn->peer_addr = ipv4_addr_new(0, 0, 0, 0);
         conn->host_port = port;
         conn->peer_port = 0;
-        conn->seq_num = 0; // TODO: Properly choose a randomized sequence number.
+        conn->seq_num = result_u32_checked(isn_res);
         conn->ack_num = 0;
         conn->window_size = 0; // TODO: Properly choose a window size.
         conn->state = TCP_CONN_STATE_LISTEN;

@@ -27,6 +27,27 @@ static inline u64 rdtsc(void)
     return ((u64)hi << 32) | (u64)lo;
 }
 
+static inline bool rdrand_u64(u64 *result)
+{
+    if (!result)
+        return false;
+
+    u8 success;
+
+    for (int i = 0; i < 10; i++) {
+        __asm__ volatile("rdrand %0\n\t"
+                         "setc %1"
+                         : "=r"(*result), "=qm"(success)
+                         :
+                         : "cc");
+
+        if (success)
+            return true;
+    }
+
+    return false;
+}
+
 static inline void outb(u16 port, u8 val)
 {
     __asm__ volatile("outb %b0, %w1" : : "a"(val), "Nd"(port) : "memory");
