@@ -24,6 +24,7 @@
 #include <tx/rtcfg.h>
 #include <tx/sched.h>
 #include <tx/time.h>
+#include <tx/web.h>
 
 extern char _rootfs_archive_start[];
 extern char _rootfs_archive_end[];
@@ -236,18 +237,17 @@ void task_net_ping(void *ctx_ptr __unused)
     assert(!res.is_error);
 }
 
-void task_net_hello(void *ctx_ptr __unused)
+struct web_listen_ctx {
+    struct ipv4_addr addr;
+    u16 port;
+    struct ram_fs_node *root;
+};
+
+void task_web_listen(void *ctx_ptr)
 {
-    struct arena tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
-    struct send_buf sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64))));
-
-    struct tcp_conn *conn = NULL;
-    while (!(conn = tcp_conn_listen_accept(ipv4_addr_new(192, 168, 100, 2), 4242, tmp_arn)))
-        sleep_ms(time_ms_new(500));
-    assert(conn);
-
-    tcp_conn_send(conn, byte_view_from_str(STR("Hello and welcome to Tatix\n")), sb, tmp_arn);
-    tcp_conn_close(&conn, sb, tmp_arn);
+    assert(ctx_ptr);
+    struct web_listen_ctx *ctx = ctx_ptr;
+    web_listen(ctx->addr, ctx->port, ctx->root);
 }
 
 __noreturn void kernel_init(void)
@@ -288,9 +288,14 @@ __noreturn void kernel_init(void)
     recv_ctx.tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
     recv_ctx.sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64))));
 
+    struct web_listen_ctx web_listen_ctx;
+    web_listen_ctx.addr = option_ipv4_addr_checked(rtcfg->host_ip);
+    web_listen_ctx.port = 4242;
+    web_listen_ctx.root = rfs->root;
+
     sched_create_task(task_net_ping, NULL);
     sched_create_task(task_net_receive, &recv_ctx);
-    sched_create_task(task_net_hello, NULL);
+    sched_create_task(task_web_listen, &web_listen_ctx);
 
     while (true)
         sleep_ms(time_ms_new(1000));

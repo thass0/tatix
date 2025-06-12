@@ -558,15 +558,19 @@ struct tcp_conn *tcp_conn_listen_accept(struct ipv4_addr addr, u16 port, struct 
     return NULL;
 }
 
-// Send `payload` to the other side of the connection `conn`. The return value indicates the number of bytes we were
-// able to transmit.
 struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, struct send_buf sb, struct arena tmp)
 {
     assert(conn);
     return tcp_send_segment(conn, TCP_HDR_FLAG_ACK, payload, sb, tmp);
 }
 
-// Close the connection `*conn`. `conn` will be set to NULL since it's stale now.
+struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf)
+{
+    (void)conn;
+    (void)buf;
+    return result_sz_ok(0);
+}
+
 struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct send_buf sb, struct arena tmp)
 {
     assert(conn_ptr);
