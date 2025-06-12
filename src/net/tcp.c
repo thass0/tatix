@@ -7,6 +7,7 @@
 #include <tx/net/ip.h>
 #include <tx/net/netorder.h>
 #include <tx/print.h>
+#include <tx/time.h>
 
 struct tcp_header {
     net_u16 src_port;
@@ -172,6 +173,8 @@ enum tcp_conn_state {
     TCP_CONN_STATE_TIME_WAIT,
 };
 
+#define TCP_CONN_TIME_WAIT_MS 100 /* This is low so we can re-use connections quickly. */
+
 struct tcp_conn {
     bool is_used;
     struct ipv4_addr host_addr;
@@ -190,6 +193,10 @@ struct tcp_conn {
     u32 recv_next; // RCV.NXT
     u16 recv_window; // RCV.WND
     struct circ_buf recv_buf;
+
+    // Set when the connection is put in the TIME_WAIT state. The connection is deleted when `TCP_CONN_TIME_WAIT_MS`
+    // has passed (see `tcp_purge_old_conn` and calls sites of this function).
+    struct time_ms time_wait_start;
 };
 
 // If we need to handle more connections at the same time, we could also allocate this array dynamically. The main
@@ -197,19 +204,6 @@ struct tcp_conn {
 // do).
 #define TCP_CONN_MAX_NUM 64
 static struct tcp_conn global_tcp_conn_table[TCP_CONN_MAX_NUM];
-
-static struct tcp_conn *tcp_alloc_conn(void)
-{
-    for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
-        struct tcp_conn *conn = &global_tcp_conn_table[i];
-        if (!conn->is_used) {
-            conn->is_used = true;
-            return conn;
-        }
-    }
-
-    return NULL;
-}
 
 static void tcp_free_conn(struct tcp_conn *conn)
 {
@@ -221,6 +215,35 @@ static void tcp_free_conn(struct tcp_conn *conn)
     // structure to an easy to recognize bit pattern.
     byte_array_set(byte_array_new((void *)conn, sizeof(*conn)), 0xee);
     conn->is_used = false;
+}
+
+static inline void tcp_purge_old_conn(void)
+{
+    for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
+        struct tcp_conn *conn = &global_tcp_conn_table[i];
+
+        if (conn->is_used && conn->state == TCP_CONN_STATE_TIME_WAIT) {
+            if (time_current_ms().ms >= conn->time_wait_start.ms) {
+                tcp_free_conn(conn);
+            }
+        }
+    }
+}
+
+static struct tcp_conn *tcp_alloc_conn(void)
+{
+    tcp_purge_old_conn();
+
+    for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
+        struct tcp_conn *conn = &global_tcp_conn_table[i];
+
+        if (!conn->is_used) {
+            conn->is_used = true;
+            return conn;
+        }
+    }
+
+    return NULL;
 }
 
 static bool ipv4_addr_wildcard_compare(struct ipv4_addr a, struct ipv4_addr b)
@@ -241,6 +264,8 @@ static bool port_wildcard_compare(u16 a, u16 b)
 static struct tcp_conn *tcp_lookup_conn(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
                                         u16 peer_port)
 {
+    tcp_purge_old_conn();
+
     for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
         struct tcp_conn *conn = &global_tcp_conn_table[i];
         if (!conn->is_used)
@@ -524,6 +549,7 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
 
     if ((hdr->flags & TCP_HDR_FLAG_FIN) && (hdr->flags & TCP_HDR_FLAG_ACK)) {
         conn->state = TCP_CONN_STATE_TIME_WAIT;
+        conn->time_wait_start = time_current_ms();
         tcp_conn_update_send_state(conn, hdr);
         tcp_conn_update_recv_state(conn, hdr, payload, tmp);
 
@@ -572,6 +598,7 @@ static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct
         return result_ok(); // Nothing but FINs is of interest in this state.
 
     conn->state = TCP_CONN_STATE_TIME_WAIT;
+    conn->time_wait_start = time_current_ms();
     tcp_conn_update_send_state(conn, hdr);
     tcp_conn_update_recv_state(conn, hdr, payload, tmp);
 
@@ -593,6 +620,7 @@ static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header 
         return; // Nothing but ACKs is of interest in this state.
 
     conn->state = TCP_CONN_STATE_TIME_WAIT;
+    conn->time_wait_start = time_current_ms();
     tcp_conn_update_send_state(conn, hdr);
 
     print_dbg(
@@ -731,6 +759,8 @@ struct tcp_conn *tcp_conn_listen_accept(struct ipv4_addr addr, u16 port, struct 
         conn->send_next = conn->iss;
         conn->send_window = 0;
 
+        conn->time_wait_start = time_ms_new(0);
+
         print_dbg(PINFO, STR("New connection in LISTEN state on addr=%s port=%hu ...\n"), ipv4_addr_format(addr, &tmp),
                   port);
 
@@ -772,9 +802,11 @@ struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct send_buf sb, str
     assert(conn->state == TCP_CONN_STATE_ESTABLISHED); // If this doesn't hold, we made a mistake in the user API.
 
     conn->state = TCP_CONN_STATE_FIN_WAIT_1;
-    // No need to change the outgoing sequence number because there is no payload to send.
-
     *conn_ptr = NULL;
+
+    // The user can't access the connection any more at this point. But it isn't deallocated until all ACKs have
+    // completed and the TIME_WAIT period has passed. The connections in the TIME_WAIT state are purged periodically
+    // when looking up or allocating connections.
 
     // TODO: I don't get why we need to send an ACK here ...
     return tcp_send_segment_empty(conn, TCP_HDR_FLAG_FIN | TCP_HDR_FLAG_ACK, sb, tmp);
