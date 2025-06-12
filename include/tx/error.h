@@ -47,6 +47,7 @@ struct_result(ptr, ptr);
 struct_result(u32, u32);
 struct_result(u16, u16);
 struct_result(u8, u8);
+struct_result(byte, byte);
 struct_result(bool, bool);
 
 #endif // __TX_ERROR_H__
