@@ -36,6 +36,128 @@ struct tcp_header {
 static_assert(sizeof(struct tcp_header) == 20);
 
 ///////////////////////////////////////////////////////////////////////////////
+// Circular buffer implementation                                            //
+///////////////////////////////////////////////////////////////////////////////
+
+struct circ_buf {
+    struct byte_array data;
+    sz head;
+    sz tail;
+};
+
+static inline bool circ_buf_is_empty(struct circ_buf *buf)
+{
+    assert(buf);
+    return buf->head == buf->tail;
+}
+
+static inline bool circ_buf_is_full(struct circ_buf *buf)
+{
+    assert(buf);
+    return (buf->head + 1) % buf->data.len == buf->tail;
+}
+
+static inline sz circ_buf_count(struct circ_buf *buf)
+{
+    assert(buf);
+    return (buf->head - buf->tail + buf->data.len) % buf->data.len;
+}
+
+static inline sz circ_buf_space(struct circ_buf *buf)
+{
+    assert(buf);
+    return buf->data.len - 1 - circ_buf_count(buf);
+}
+
+static struct result circ_buf_alloc(struct circ_buf *buf, sz capacity)
+{
+    assert(buf);
+    assert(capacity > 0);
+
+    struct option_byte_array mem_opt = kvalloc_alloc(capacity, 1);
+    if (mem_opt.is_none)
+        return result_error(ENOMEM);
+
+    buf->data = option_byte_array_checked(mem_opt);
+    buf->head = 0;
+    buf->tail = 0;
+
+    return result_ok();
+}
+
+static void circ_buf_free(struct circ_buf *buf)
+{
+    assert(buf);
+
+    kvalloc_free(buf->data);
+    buf->data = byte_array_new(NULL, 0);
+}
+
+static struct result circ_buf_push_byte(struct circ_buf *buf, byte b)
+{
+    assert(buf);
+
+    if (circ_buf_is_full(buf))
+        return result_error(EAGAIN);
+
+    buf->data.dat[buf->head] = b;
+    buf->head = (buf->head + 1) % buf->data.len;
+    return result_ok();
+}
+
+static struct result_byte circ_buf_pop_byte(struct circ_buf *buf)
+{
+    assert(buf);
+
+    if (circ_buf_is_empty(buf))
+        return result_byte_error(EAGAIN);
+
+    byte b = buf->data.dat[buf->tail];
+    buf->tail = (buf->tail + 1) % buf->data.len;
+    return result_byte_ok(b);
+}
+
+static struct result circ_buf_write(struct circ_buf *buf, struct byte_view data)
+{
+    assert(buf);
+
+    if (data.len > circ_buf_space(buf))
+        return result_error(EAGAIN);
+
+    for (sz i = 0; i < data.len; i++) {
+        struct result res = circ_buf_push_byte(buf, data.dat[i]);
+        if (res.is_error)
+            return res;
+    }
+
+    return result_ok();
+}
+
+static sz circ_buf_read(struct circ_buf *buf, struct byte_buf *dest)
+{
+    assert(buf);
+    assert(dest);
+
+    sz bytes_read = 0;
+    sz available = circ_buf_count(buf);
+    sz space = dest->cap - dest->len;
+    sz to_read = MIN(available, space);
+
+    for (sz i = 0; i < to_read; i++) {
+        struct result_byte res = circ_buf_pop_byte(buf);
+        if (res.is_error)
+            break;
+
+        if (byte_buf_append_n(dest, 1, result_byte_checked(res)) != 1)
+            break;
+
+        bytes_read++;
+    }
+
+    return bytes_read;
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Manage connections                                                        //
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -67,6 +189,7 @@ struct tcp_conn {
     // Reception
     u32 recv_next; // RCV.NXT
     u16 recv_window; // RCV.WND
+    struct circ_buf recv_buf;
 };
 
 // If we need to handle more connections at the same time, we could also allocate this array dynamically. The main
@@ -91,6 +214,9 @@ static struct tcp_conn *tcp_alloc_conn(void)
 static void tcp_free_conn(struct tcp_conn *conn)
 {
     assert(conn);
+
+    circ_buf_free(&conn->recv_buf);
+
     // Since we are reusing these, we want to make sure we don't accidentally reuse old data. Thus we set each
     // structure to an easy to recognize bit pattern.
     byte_array_set(byte_array_new((void *)conn, sizeof(*conn)), 0xee);
@@ -145,12 +271,58 @@ static bool seq_gt(u32 a, u32 b)
     return (i64)a - (i64)b > 0;
 }
 
-static inline void tcp_conn_update_unack(struct tcp_conn *conn, u32 ack_num)
+static void tcp_conn_update_send_state(struct tcp_conn *conn, struct tcp_header *hdr)
 {
     assert(conn);
 
-    if (seq_gt(ack_num, conn->send_unack))
-        conn->send_unack = ack_num;
+    if (hdr->flags & TCP_HDR_FLAG_ACK) {
+        u32 ack_num = u32_from_net_u32(hdr->ack_num);
+        if (seq_gt(ack_num, conn->send_unack))
+            conn->send_unack = ack_num;
+    }
+
+    conn->send_window = u16_from_net_u16(hdr->window_size);
+}
+
+static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *hdr, struct byte_view payload,
+                                     struct arena tmp)
+{
+    assert(conn);
+    assert(hdr);
+
+    u32 seq_num = u32_from_net_u32(hdr->seq_num);
+
+    if (payload.len > 0) {
+        if (seq_num != conn->recv_next) {
+            // We can support out-of-order delivery at a later time.
+            print_dbg(PDBG, STR("Out-of-order segment received: expected seq=%u, got seq=%u (%s). Dropping ...\n"),
+                      conn->recv_next, seq_num,
+                      tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            return 0;
+        }
+
+        struct result write_res = circ_buf_write(&conn->recv_buf, payload);
+        if (write_res.is_error) {
+            assert(write_res.code == EAGAIN);
+            print_dbg(PWARN, STR("Not enough space in receive buffer to receive incoming segment (%s). Dropping ...\n"),
+                      tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            return 0;
+        }
+
+        conn->recv_next += payload.len;
+    }
+
+    if (hdr->flags & TCP_HDR_FLAG_FIN) {
+        if (seq_num + payload.len != conn->recv_next) {
+            print_dbg(PDBG, STR("FIN received with unexpected sequence number (%s). Dropping ...\n"),
+                      tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            return payload.len;
+        }
+
+        conn->recv_next++; // The incoming FIN consumed one sequence number.
+    }
+
+    return payload.len;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -265,8 +437,7 @@ static inline struct result tcp_send_segment_empty(struct tcp_conn *conn, u8 fla
 ///////////////////////////////////////////////////////////////////////////////
 
 static struct result tcp_handle_receive_listen(struct tcp_conn *conn, struct ipv4_addr peer_addr, u16 peer_port,
-                                               struct tcp_header *hdr, struct byte_view payload, struct send_buf sb,
-                                               struct arena tmp)
+                                               struct tcp_header *hdr, struct send_buf sb, struct arena tmp)
 {
     assert(conn);
     assert(hdr);
@@ -282,10 +453,9 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *conn, struct ipv
     conn->peer_port = peer_port;
 
     conn->state = TCP_CONN_STATE_SYN_RCVD;
-    // The SYN in the incoming header has consumed one sequence number.
-    conn->recv_next = u32_from_net_u32(hdr->seq_num) + payload.len + 1;
-
-    // The outgoing sequence number doesn't need to change because we don't have any payload to send.
+    // The `recv_next` field is zero initially because we didn't know the ISN chosen by our peer. But now we do, so we
+    // can set it. The SYN in the incoming header has consumed one sequence number, so we add one.
+    conn->recv_next = u32_from_net_u32(hdr->seq_num) + 1;
 
     print_dbg(
         PDBG,
@@ -307,14 +477,42 @@ static void tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct tcp_header
         return;
 
     conn->state = TCP_CONN_STATE_ESTABLISHED;
-
-    tcp_conn_update_unack(conn, u32_from_net_u32(hdr->ack_num));
-    conn->send_window = u16_from_net_u16(hdr->window_size);
+    tcp_conn_update_send_state(conn, hdr);
 
     print_dbg(
         PDBG,
         STR("Received ACK for a connection in the SYN_RCVD state (%s). Not responding. The connection is ESTABLISHED now.\n"),
         tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+}
+
+static struct result tcp_handle_receive_established(struct tcp_conn *conn, struct tcp_header *hdr,
+                                                    struct byte_view payload, struct send_buf sb, struct arena tmp)
+{
+    assert(conn);
+    assert(hdr);
+    assert(conn->state == TCP_CONN_STATE_ESTABLISHED);
+
+    tcp_conn_update_send_state(conn, hdr);
+    sz n_received = tcp_conn_update_recv_state(conn, hdr, payload, tmp);
+
+    if (hdr->flags & TCP_HDR_FLAG_FIN) {
+        conn->state = TCP_CONN_STATE_CLOSE_WAIT;
+
+        print_dbg(
+            PDBG,
+            STR("Received FIN for a connection in the ESTABLISHED state (%s). Responding with ACK. The connection is in the CLOSE_WAIT state now.\n"),
+            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
+    }
+
+    if (n_received > 0) {
+        print_dbg(PDBG, STR("Received %ld bytes of data for connection %s. Responding with ACK.\n"), n_received,
+                  tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
+    }
+
+    return result_ok();
 }
 
 static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct tcp_header *hdr,
@@ -326,13 +524,8 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
 
     if ((hdr->flags & TCP_HDR_FLAG_FIN) && (hdr->flags & TCP_HDR_FLAG_ACK)) {
         conn->state = TCP_CONN_STATE_TIME_WAIT;
-
-        tcp_conn_update_unack(conn, u32_from_net_u32(hdr->ack_num));
-        conn->send_window = u16_from_net_u16(hdr->window_size);
-
-        // TODO: Receive logic.
-        // The incoming FIN consumed one sequence number.
-        conn->recv_next = u32_from_net_u32(hdr->seq_num) + payload.len + 1;
+        tcp_conn_update_send_state(conn, hdr);
+        tcp_conn_update_recv_state(conn, hdr, payload, tmp);
 
         print_dbg(
             PDBG,
@@ -342,11 +535,8 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
         return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_FIN) {
         conn->state = TCP_CONN_STATE_CLOSING;
-
-        // TODO: Receive logic.
-        // The incoming FIN consumed one sequence number.
-        conn->recv_next = u32_from_net_u32(hdr->seq_num) + payload.len + 1;
-        conn->send_window = u16_from_net_u16(hdr->window_size);
+        tcp_conn_update_send_state(conn, hdr);
+        tcp_conn_update_recv_state(conn, hdr, payload, tmp);
 
         print_dbg(
             PDBG,
@@ -356,11 +546,8 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
         return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_ACK) {
         conn->state = TCP_CONN_STATE_FIN_WAIT_2;
-
-        print_dbg(PINFO, STR("DEBUGGING: hdr->ack_num=%u conn->send_next=%u conn->send_unack=%u\n"),
-                  u32_from_net_u32(hdr->ack_num), conn->send_next, conn->send_unack);
-        tcp_conn_update_unack(conn, u32_from_net_u32(hdr->ack_num));
-        conn->send_window = u16_from_net_u16(hdr->window_size);
+        tcp_conn_update_send_state(conn, hdr);
+        tcp_conn_update_recv_state(conn, hdr, payload, tmp);
 
         print_dbg(
             PDBG,
@@ -385,13 +572,8 @@ static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct
         return result_ok(); // Nothing but FINs is of interest in this state.
 
     conn->state = TCP_CONN_STATE_TIME_WAIT;
-    // TODO: Receive logic.
-    // The incoming FIN consumed one sequence number.
-    conn->recv_next = u32_from_net_u32(hdr->seq_num) + payload.len + 1;
-
-    if (hdr->flags & TCP_HDR_FLAG_ACK)
-        tcp_conn_update_unack(conn, u32_from_net_u32(hdr->ack_num));
-    conn->send_window = u16_from_net_u16(hdr->window_size);
+    tcp_conn_update_send_state(conn, hdr);
+    tcp_conn_update_recv_state(conn, hdr, payload, tmp);
 
     print_dbg(
         PDBG,
@@ -411,9 +593,7 @@ static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header 
         return; // Nothing but ACKs is of interest in this state.
 
     conn->state = TCP_CONN_STATE_TIME_WAIT;
-
-    tcp_conn_update_unack(conn, u32_from_net_u32(hdr->ack_num));
-    conn->send_window = u16_from_net_u16(hdr->window_size);
+    tcp_conn_update_send_state(conn, hdr);
 
     print_dbg(
         PDBG,
@@ -478,12 +658,12 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
 
     switch (conn->state) {
     case TCP_CONN_STATE_LISTEN:
-        return tcp_handle_receive_listen(conn, peer_addr, peer_port, tcp_hdr, payload, sb, tmp);
+        return tcp_handle_receive_listen(conn, peer_addr, peer_port, tcp_hdr, sb, tmp);
     case TCP_CONN_STATE_SYN_RCVD:
         tcp_handle_receive_syn_rcvd(conn, tcp_hdr, tmp);
         return result_ok();
     case TCP_CONN_STATE_ESTABLISHED:
-        crash("TODO: Handle ESTABLISHED");
+        return tcp_handle_receive_established(conn, tcp_hdr, payload, sb, tmp);
     case TCP_CONN_STATE_CLOSE_WAIT:
         crash("TODO: Handle CLOSE_WAIT");
     case TCP_CONN_STATE_FIN_WAIT_1:
@@ -537,9 +717,14 @@ struct tcp_conn *tcp_conn_listen_accept(struct ipv4_addr addr, u16 port, struct 
         conn->peer_port = 0;
         conn->state = TCP_CONN_STATE_LISTEN;
 
-        // TODO: Receive logic.
+        struct result buf_alloc_res = circ_buf_alloc(&conn->recv_buf, 0x2000);
+        if (buf_alloc_res.is_error) {
+            tcp_free_conn(conn);
+            return NULL;
+        }
+
         conn->recv_next = 0;
-        conn->recv_window = 0x1000;
+        conn->recv_window = (u16)circ_buf_space(&conn->recv_buf);
 
         conn->iss = result_u32_checked(isn_res);
         conn->send_unack = conn->iss;
@@ -566,9 +751,16 @@ struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, 
 
 struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf)
 {
-    (void)conn;
-    (void)buf;
-    return result_sz_ok(0);
+    assert(conn);
+    assert(buf);
+
+    sz avail = circ_buf_count(&conn->recv_buf);
+    if (!avail)
+        return result_sz_ok(0);
+
+    circ_buf_read(&conn->recv_buf, buf);
+
+    return result_sz_ok(avail);
 }
 
 struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct send_buf sb, struct arena tmp)
