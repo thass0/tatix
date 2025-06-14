@@ -1,4 +1,5 @@
 #include <tx/archive.h>
+#include <tx/ramfs.h>
 
 u64 djb2_hash(struct byte_view bv)
 {
@@ -54,7 +55,7 @@ struct result archive_extract(struct byte_view archive, struct ram_fs *rfs)
         if (djb2_hash(path_and_data) != index_ent->hash)
             return result_error(EINVAL);
 
-        struct result_ram_fs_node node_res = ram_fs_create_file(rfs, path, true);
+        struct result_ram_fs_node node_res = ram_fs_create_file(rfs->root, path, true);
         if (node_res.is_error)
             return result_error(node_res.code);
 
