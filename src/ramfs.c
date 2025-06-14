@@ -384,11 +384,14 @@ struct result_sz ram_fs_write(struct ram_fs_node *rfs_node, struct byte_view bvi
     if (bview.len + offset > rfs_node->data.cap) {
         // The write operation exceeds the capacity of the file. We need to reallocate the data.
         sz new_data_cap = 2 * rfs_node->data.cap;
+        while (new_data_cap < bview.len + offset)
+            new_data_cap *= 2;
         void *new_data = alloc_alloc(rfs_node->fs->data_alloc, new_data_cap, alignof(void *));
         if (!new_data)
             return result_sz_error(ENOMEM);
         struct byte_buf new_data_buf = byte_buf_new(new_data, 0, new_data_cap);
         byte_buf_append(&new_data_buf, byte_view_from_buf(rfs_node->data));
+        alloc_free(rfs_node->fs->data_alloc, rfs_node->data.dat, rfs_node->data.cap);
         rfs_node->data = new_data_buf;
     }
 
@@ -904,7 +907,9 @@ static void test_ram_fs_write(struct arena arn)
     file_node->type = RAM_FS_TYPE_FILE;
     file_node->name = STR("file");
     file_node->fs = rfs;
-    file_node->data = byte_buf_from_array(byte_array_from_arena(13, &arn));
+    void *data = alloc_alloc(rfs->data_alloc, 13, alignof(void *));
+    assert(data);
+    file_node->data = byte_buf_new(data, 0, 13);
 
     rfs->root->first = file_node;
 
