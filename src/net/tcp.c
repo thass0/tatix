@@ -629,6 +629,29 @@ static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header 
         tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
 }
 
+static struct result tcp_handle_receive_time_wait(struct tcp_conn *conn, struct tcp_header *hdr,
+                                                  struct byte_view payload, struct send_buf sb, struct arena tmp)
+{
+    assert(conn);
+    assert(hdr);
+    assert(conn->state == TCP_CONN_STATE_TIME_WAIT);
+
+    // No user will ever see that data that we receive here. The only purpose of updating the send and receive states
+    // at this point is to make sure that we ACK everything that the peer sent us when returning from this function.
+    tcp_conn_update_send_state(conn, hdr);
+    tcp_conn_update_recv_state(conn, hdr, payload, tmp);
+
+    if (!(hdr->flags & TCP_HDR_FLAG_FIN))
+        return result_ok();
+
+    print_dbg(
+        PDBG,
+        STR("Received FIN for a connection in the TIME_WAIT state (%s). Responding with ACK. The connection remains in the TIME_WAIT state.\n"),
+        tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+
+    return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
+}
+
 static bool tcp_checksum_is_ok(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment)
 {
     net_u16 checksum = net_u16_from_u16(0);
@@ -701,6 +724,8 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
     case TCP_CONN_STATE_CLOSING:
         tcp_handle_receive_closing(conn, tcp_hdr, tmp);
         return result_ok();
+    case TCP_CONN_STATE_TIME_WAIT:
+        return tcp_handle_receive_time_wait(conn, tcp_hdr, payload, sb, tmp);
     default:
         print_dbg(PERROR, STR("Unknown connection state %d for %s.\n"), conn->state,
                   tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &tmp));
