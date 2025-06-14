@@ -34,8 +34,13 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
 
 struct tcp_conn; // Ha, you can't even see what's inside!
 
-// Listen for incoming connections on addr:port and accept the first client that tries to connect.
-struct tcp_conn *tcp_conn_listen_accept(struct ipv4_addr addr, u16 port, struct arena tmp);
+// Create a connection to listen for incoming connections. If a segment destined for the given IP address and port
+// arrives, a new connection will be established. Call `tcp_conn_accept` on the connection returned from this function
+// to access these connections.
+struct tcp_conn *tcp_conn_listen(struct ipv4_addr addr, u16 port, struct arena tmp);
+
+// Get a handle to a connection that was listened for by `listen_conn` (if any).
+struct tcp_conn *tcp_conn_accept(struct tcp_conn *listen_conn);
 
 // Send `payload` to the other side of the connection `conn`. The return value indicates the number of bytes we were
 // able to transmit.
