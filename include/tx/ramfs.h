@@ -46,20 +46,17 @@ struct ram_fs {
 // nodes and data. Returns `NULL` if it failed to set up the RAM fs instance.
 struct ram_fs *ram_fs_new(struct alloc alloc);
 
-// Create an empty directory in the `rfs` file system instance. `dirname` is the path to the new directory.
-// If `recursive` is `true`, missing parent directories will be created automatically. Returns the node
-// of the new directory or an error.
-struct result_ram_fs_node ram_fs_create_dir(struct ram_fs *rfs, struct str dirname, bool recursive);
+// Create an empty directory in the `root` node. `dirname` is the path to the new directory. If `recursive` is
+// `true`, missing parent directories will be created automatically. Returns the node of the new directory or an error.
+struct result_ram_fs_node ram_fs_create_dir(struct ram_fs_node *root, struct str dirname, bool recursive);
 
-// Create an empty file in the `rfs` file system instance. `filename` is the path to the new file.
-// If `recursive` is `true`, missing parent directories will be created automatically. Returns the node
-// of the new file or an error. This node can directly be used to write to or read from the file, without
-// the need to open it again.
-struct result_ram_fs_node ram_fs_create_file(struct ram_fs *rfs, struct str filename, bool recursive);
+// Create an empty file in the `root` node. `filename` is the path to the new file. If `recursive` is `true`, missing
+// parent directories will be created automatically. Returns the node of the new file or an error. This node can
+// directly be used to write to or read from the file, without the need to open it again.
+struct result_ram_fs_node ram_fs_create_file(struct ram_fs_node *root, struct str filename, bool recursive);
 
-// Open the file under the path `filename` in the `rfs` file system instance. Returns the node of
-// the file or an error.
-struct result_ram_fs_node ram_fs_open(struct ram_fs *rfs, struct str filename);
+// Open the file under the path `filename` relative to `node`. Returns the node of the file or an error.
+struct result_ram_fs_node ram_fs_open(struct ram_fs_node *root, struct str filename);
 
 // Read from the file behind `rfs_node`. Data is read into `bbuf` starting at `offset` until `bbuf`
 // is full or the end of the file is reached. Returns the number of bytes read or an error.

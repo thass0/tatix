@@ -98,7 +98,7 @@ void print_hello_txt(struct ram_fs *rfs)
 {
     assert(rfs);
 
-    struct result_ram_fs_node node_res = ram_fs_open(rfs, STR("/hello.txt"));
+    struct result_ram_fs_node node_res = ram_fs_open(rfs->root, STR("/hello.txt"));
     assert(!node_res.is_error);
     struct ram_fs_node *node = result_ram_fs_node_checked(node_res);
     struct byte_buf bbuf = byte_buf_from_array(option_byte_array_checked(kvalloc_alloc(500, alignof(void *))));

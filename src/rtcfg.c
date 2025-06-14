@@ -80,7 +80,7 @@ struct result_runtime_config rtcfg_read_config(struct ram_fs *rfs, struct str cf
 {
     assert(rfs);
 
-    struct result_ram_fs_node cfg_file_res = ram_fs_open(rfs, cfg_filename);
+    struct result_ram_fs_node cfg_file_res = ram_fs_open(rfs->root, cfg_filename);
     if (cfg_file_res.is_error)
         return result_runtime_config_error(cfg_file_res.code);
     struct ram_fs_node *cfg_file = result_ram_fs_node_checked(cfg_file_res);
