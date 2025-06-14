@@ -4,6 +4,7 @@
 #include <tx/assert.h>
 #include <tx/byte.h>
 #include <tx/kvalloc.h>
+#include <tx/list.h>
 #include <tx/net/ip.h>
 #include <tx/net/netorder.h>
 #include <tx/print.h>
@@ -61,6 +62,7 @@ static inline bool circ_buf_is_full(struct circ_buf *buf)
 static inline sz circ_buf_count(struct circ_buf *buf)
 {
     assert(buf);
+    assert(buf->data.len);
     return (buf->head - buf->tail + buf->data.len) % buf->data.len;
 }
 
@@ -174,6 +176,7 @@ enum tcp_conn_state {
 };
 
 #define TCP_CONN_TIME_WAIT_MS 100 /* This is low so we can re-use connections quickly. */
+#define TCP_CONN_RECV_WINDOW_SIZE 0x2000
 
 struct tcp_conn {
     bool is_used;
@@ -182,6 +185,8 @@ struct tcp_conn {
     u16 host_port;
     u16 peer_port;
     enum tcp_conn_state state;
+
+    struct dlist accept_queue;
 
     // Transmission
     u32 send_unack; // SND.UNA
@@ -210,6 +215,7 @@ static void tcp_free_conn(struct tcp_conn *conn)
     assert(conn);
 
     circ_buf_free(&conn->recv_buf);
+    dlist_remove(&conn->accept_queue);
 
     // Since we are reusing these, we want to make sure we don't accidentally reuse old data. Thus we set each
     // structure to an easy to recognize bit pattern.
@@ -262,7 +268,7 @@ static bool port_wildcard_compare(u16 a, u16 b)
 }
 
 static struct tcp_conn *tcp_lookup_conn(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
-                                        u16 peer_port)
+                                        u16 peer_port, bool use_peer_wildcards)
 {
     tcp_purge_old_conn();
 
@@ -271,10 +277,16 @@ static struct tcp_conn *tcp_lookup_conn(struct ipv4_addr host_addr, struct ipv4_
         if (!conn->is_used)
             continue;
 
-        if (ipv4_addr_wildcard_compare(host_addr, conn->host_addr) &&
-            ipv4_addr_wildcard_compare(peer_addr, conn->peer_addr) &&
-            port_wildcard_compare(host_port, conn->host_port) && port_wildcard_compare(peer_port, conn->peer_port))
-            return conn;
+        if (use_peer_wildcards) {
+            if (ipv4_addr_is_equal(host_addr, conn->host_addr) &&
+                ipv4_addr_wildcard_compare(peer_addr, conn->peer_addr) && host_port == conn->host_port &&
+                port_wildcard_compare(peer_port, conn->peer_port))
+                return conn;
+        } else {
+            if (ipv4_addr_is_equal(host_addr, conn->host_addr) && ipv4_addr_is_equal(peer_addr, conn->peer_addr) &&
+                host_port == conn->host_port && peer_port == conn->peer_port)
+                return conn;
+        }
     }
 
     return NULL;
@@ -289,6 +301,51 @@ static struct str tcp_fmt_conn(struct ipv4_addr host_addr, struct ipv4_addr peer
                 ipv4_addr_format(peer_addr, arn), peer_port)
                 .is_error);
     return str_from_buf(sbuf);
+}
+
+static struct result_u32 tcp_generate_isn(void)
+{
+    u64 isn_raw;
+    bool success = rdrand_u64(&isn_raw);
+    if (!success)
+        return result_u32_error(EIO);
+    return result_u32_ok((u32)isn_raw);
+}
+
+static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 host_port, enum tcp_conn_state state)
+{
+    struct tcp_conn *conn = tcp_alloc_conn();
+    if (!conn)
+        return NULL;
+
+    struct result_u32 isn_res = tcp_generate_isn();
+    if (isn_res.is_error) {
+        tcp_free_conn(conn);
+        return NULL;
+    }
+
+    conn->host_addr = host_addr;
+    conn->peer_addr = ipv4_addr_new(0, 0, 0, 0);
+    conn->host_port = host_port;
+    conn->peer_port = 0;
+    conn->state = state;
+
+    dlist_init_empty(&conn->accept_queue);
+
+    conn->recv_next = 0;
+    conn->recv_window = TCP_CONN_RECV_WINDOW_SIZE;
+    conn->recv_buf.data = byte_array_new(NULL, 0);
+    conn->recv_buf.head = 0;
+    conn->recv_buf.tail = 0;
+
+    conn->iss = result_u32_checked(isn_res);
+    conn->send_unack = conn->iss;
+    conn->send_next = conn->iss;
+    conn->send_window = 0;
+
+    conn->time_wait_start = time_ms_new(0);
+
+    return conn;
 }
 
 static bool seq_gt(u32 a, u32 b)
@@ -461,36 +518,48 @@ static inline struct result tcp_send_segment_empty(struct tcp_conn *conn, u8 fla
 // Handle incoming segments                                                  //
 ///////////////////////////////////////////////////////////////////////////////
 
-static struct result tcp_handle_receive_listen(struct tcp_conn *conn, struct ipv4_addr peer_addr, u16 peer_port,
+static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, struct ipv4_addr peer_addr, u16 peer_port,
                                                struct tcp_header *hdr, struct send_buf sb, struct arena tmp)
 {
-    assert(conn);
+    assert(listen_conn);
     assert(hdr);
-    assert(conn->state == TCP_CONN_STATE_LISTEN);
+    assert(listen_conn->state == TCP_CONN_STATE_LISTEN);
 
     if (!(hdr->flags & TCP_HDR_FLAG_SYN))
         return result_ok(); // We don't care about receiving anything but SYNs when in the LISTEN state.
 
     // When in LISTEN state, the connection doesn't known about the peer yet. So the peer fields must be wildcards.
-    assert(ipv4_addr_is_equal(conn->peer_addr, ipv4_addr_new(0, 0, 0, 0)));
-    assert(conn->peer_port == 0);
+    assert(ipv4_addr_is_equal(listen_conn->peer_addr, ipv4_addr_new(0, 0, 0, 0)));
+    assert(listen_conn->peer_port == 0);
+
+    // A new connection is created now so that `listen_conn` can remain in the LISTEN state to accept new connections.
+    // The new connection will be moved through the states of the TCP handshake until it's in the ESTABLISHED state.
+
+    struct tcp_conn *conn =
+        tcp_conn_alloc_and_init(listen_conn->host_addr, listen_conn->host_port, TCP_CONN_STATE_SYN_RCVD);
+    if (!conn) {
+        print_dbg(PDBG, STR("Failed to allocate and initialize new SYN_RCVD TCP connection (%s).\n"),
+                  tcp_fmt_conn(listen_conn->host_addr, peer_addr, listen_conn->host_port, peer_port, &tmp));
+        return result_error(ENOMEM);
+    }
+
+    dlist_insert(&listen_conn->accept_queue, &conn->accept_queue);
+
     conn->peer_addr = peer_addr;
     conn->peer_port = peer_port;
-
-    conn->state = TCP_CONN_STATE_SYN_RCVD;
-    // The `recv_next` field is zero initially because we didn't know the ISN chosen by our peer. But now we do, so we
-    // can set it. The SYN in the incoming header has consumed one sequence number, so we add one.
+    // The SYN in the incoming header has consumed one sequence number so we add one to the ISN send by our peer.
     conn->recv_next = u32_from_net_u32(hdr->seq_num) + 1;
 
     print_dbg(
         PDBG,
-        STR("Received SYN for a connection in the LISTEN state (%s). Responding with SYN + ACK. The connection is in the SYN_RCVD state now.\n"),
+        STR("Received SYN for a connection in the LISTEN state (%s). Responding with SYN + ACK. Created a new connection in the SYN_RCVD state.\n"),
         tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
 
     return tcp_send_segment_empty(conn, TCP_HDR_FLAG_SYN | TCP_HDR_FLAG_ACK, sb, tmp);
 }
 
-static void tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct tcp_header *hdr, struct arena tmp)
+static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct tcp_header *hdr, struct send_buf sb,
+                                                 struct arena tmp)
 {
     assert(conn);
     assert(hdr);
@@ -499,15 +568,29 @@ static void tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct tcp_header
     // We always send a SYN before moving to the SYN_RCVD state. We don't care about anything at this point but an
     // ACK for the SYN.
     if (!(hdr->flags & TCP_HDR_FLAG_ACK))
-        return;
+        return result_ok();
 
     conn->state = TCP_CONN_STATE_ESTABLISHED;
     tcp_conn_update_send_state(conn, hdr);
+
+    // We start receiving data in the ESTABLISHED state so we need to allocate a buffer at this point.
+    struct result buf_alloc_res = circ_buf_alloc(&conn->recv_buf, conn->recv_window);
+    if (buf_alloc_res.is_error) {
+        print_dbg(
+            PWARN,
+            STR("Failed to allocate receive buffer for a connection (%s). Resetting and deleting the connection.\n"),
+            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+        tcp_send_segment_empty(conn, TCP_HDR_FLAG_RST, sb, tmp);
+        tcp_free_conn(conn);
+        return result_error(ENOMEM);
+    }
 
     print_dbg(
         PDBG,
         STR("Received ACK for a connection in the SYN_RCVD state (%s). Not responding. The connection is ESTABLISHED now.\n"),
         tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+
+    return result_ok();
 }
 
 static struct result tcp_handle_receive_established(struct tcp_conn *conn, struct tcp_header *hdr,
@@ -697,7 +780,12 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
     u16 host_port = u16_from_net_u16(tcp_hdr->dest_port);
     u16 peer_port = u16_from_net_u16(tcp_hdr->src_port);
 
-    struct tcp_conn *conn = tcp_lookup_conn(host_addr, peer_addr, host_port, peer_port);
+    // TODO: It's somewhat wasteful to run the `tcp_lookup_conn` function twice.
+    struct tcp_conn *conn = tcp_lookup_conn(host_addr, peer_addr, host_port, peer_port, false);
+
+    // Try again if we weren't able to find a connection but this time consider wildcard matches.
+    if (!conn)
+        conn = tcp_lookup_conn(host_addr, peer_addr, host_port, peer_port, true);
 
     if (!conn) {
         print_dbg(PDBG, STR("Could not find a connection for TCP segment from peer (%s). Sending a reset.\n"),
@@ -711,8 +799,7 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
     case TCP_CONN_STATE_LISTEN:
         return tcp_handle_receive_listen(conn, peer_addr, peer_port, tcp_hdr, sb, tmp);
     case TCP_CONN_STATE_SYN_RCVD:
-        tcp_handle_receive_syn_rcvd(conn, tcp_hdr, tmp);
-        return result_ok();
+        return tcp_handle_receive_syn_rcvd(conn, tcp_hdr, sb, tmp);
     case TCP_CONN_STATE_ESTABLISHED:
         return tcp_handle_receive_established(conn, tcp_hdr, payload, sb, tmp);
     case TCP_CONN_STATE_CLOSE_WAIT:
@@ -737,65 +824,42 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
 // User interface                                                            //
 ///////////////////////////////////////////////////////////////////////////////
 
-static struct result_u32 tcp_generate_isn(void)
+struct tcp_conn *tcp_conn_listen(struct ipv4_addr addr, u16 port, struct arena tmp)
 {
-    u64 isn_raw;
-    bool success = rdrand_u64(&isn_raw);
-    if (!success)
-        return result_u32_error(EIO);
-    return result_u32_ok((u32)isn_raw);
-}
+    struct tcp_conn *conn = tcp_lookup_conn(addr, ipv4_addr_new(0, 0, 0, 0), port, 0, true);
 
-struct tcp_conn *tcp_conn_listen_accept(struct ipv4_addr addr, u16 port, struct arena tmp)
-{
-    struct tcp_conn *conn = tcp_lookup_conn(addr, ipv4_addr_new(0, 0, 0, 0), port, 0);
+    if (conn && conn->state == TCP_CONN_STATE_LISTEN)
+        return NULL;
 
+    conn = tcp_conn_alloc_and_init(addr, port, TCP_CONN_STATE_LISTEN);
     if (!conn) {
-        conn = tcp_alloc_conn();
-        if (!conn) {
-            print_dbg(PERROR, STR("Failed to allocate new TCP connection (addr=%s, port=%hu).\n"),
-                      ipv4_addr_format(addr, &tmp), port);
-            return NULL;
-        }
-
-        struct result_u32 isn_res = tcp_generate_isn();
-        if (isn_res.is_error) {
-            tcp_free_conn(conn);
-            return NULL;
-        }
-
-        conn->host_addr = addr;
-        conn->peer_addr = ipv4_addr_new(0, 0, 0, 0);
-        conn->host_port = port;
-        conn->peer_port = 0;
-        conn->state = TCP_CONN_STATE_LISTEN;
-
-        struct result buf_alloc_res = circ_buf_alloc(&conn->recv_buf, 0x2000);
-        if (buf_alloc_res.is_error) {
-            tcp_free_conn(conn);
-            return NULL;
-        }
-
-        conn->recv_next = 0;
-        conn->recv_window = (u16)circ_buf_space(&conn->recv_buf);
-
-        conn->iss = result_u32_checked(isn_res);
-        conn->send_unack = conn->iss;
-        conn->send_next = conn->iss;
-        conn->send_window = 0;
-
-        conn->time_wait_start = time_ms_new(0);
-
-        print_dbg(PINFO, STR("New connection in LISTEN state on addr=%s port=%hu ...\n"), ipv4_addr_format(addr, &tmp),
-                  port);
-
+        print_dbg(PERROR, STR("Failed to allocate and initialize new LISTEN TCP connection (%s:%hu).\n"),
+                  ipv4_addr_format(addr, &tmp), port);
         return NULL;
     }
 
-    if (conn->state == TCP_CONN_STATE_ESTABLISHED)
-        return conn;
+    print_dbg(PINFO, STR("New connection in LISTEN state on %s:%hu ...\n"), ipv4_addr_format(addr, &tmp), port);
 
-    return NULL;
+    return conn;
+}
+
+struct tcp_conn *tcp_conn_accept(struct tcp_conn *listen_conn)
+{
+    assert(listen_conn);
+
+    struct tcp_conn *conn = __container_of(listen_conn->accept_queue.next, struct tcp_conn, accept_queue);
+
+    if (!conn)
+        return NULL;
+
+    // Depending on the timing, the user may call accept when a SYN has been received but before the handshake was
+    // completed. In that case the connection is in the SYN_RCVD state, but it's not ready to receive data.
+    if (conn->state != TCP_CONN_STATE_ESTABLISHED)
+        return NULL;
+
+    dlist_remove(&conn->accept_queue);
+
+    return conn;
 }
 
 struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, struct send_buf sb, struct arena tmp)
@@ -824,15 +888,25 @@ struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct send_buf sb, str
     assert(*conn_ptr);
 
     struct tcp_conn *conn = *conn_ptr;
-    assert(conn->state == TCP_CONN_STATE_ESTABLISHED); // If this doesn't hold, we made a mistake in the user API.
-
-    conn->state = TCP_CONN_STATE_FIN_WAIT_1;
     *conn_ptr = NULL;
 
-    // The user can't access the connection any more at this point. But it isn't deallocated until all ACKs have
-    // completed and the TIME_WAIT period has passed. The connections in the TIME_WAIT state are purged periodically
-    // when looking up or allocating connections.
+    if (conn->state == TCP_CONN_STATE_LISTEN || conn->state == TCP_CONN_STATE_SYN_RCVD) {
+        tcp_free_conn(conn);
+        return result_ok();
+    }
 
-    // TODO: I don't get why we need to send an ACK here ...
-    return tcp_send_segment_empty(conn, TCP_HDR_FLAG_FIN | TCP_HDR_FLAG_ACK, sb, tmp);
+    if (conn->state == TCP_CONN_STATE_ESTABLISHED) {
+        conn->state = TCP_CONN_STATE_FIN_WAIT_1;
+
+        // The user can't access the connection any more at this point. But it isn't deallocated until all ACKs have
+        // completed and the TIME_WAIT period has passed. The connections in the TIME_WAIT state are purged periodically
+        // when looking up or allocating connections.
+
+        // TODO: I don't get why we need to send an ACK here ... (but connections don't close correctly without it).
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_FIN | TCP_HDR_FLAG_ACK, sb, tmp);
+    }
+
+    // All other states mean that a close operation is already in progress so we don't need to act.
+
+    return result_ok();
 }
