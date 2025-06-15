@@ -288,10 +288,15 @@ __noreturn void kernel_init(void)
     recv_ctx.tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
     recv_ctx.sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64))));
 
+    struct result_ram_fs_node web_res = ram_fs_open(rfs->root, STR("/web/"));
+    assert(!web_res.is_error);
+    struct ram_fs_node *web_dir = result_ram_fs_node_checked(web_res);
+    assert(web_dir->type == RAM_FS_TYPE_DIR);
+
     struct web_listen_ctx web_listen_ctx;
     web_listen_ctx.addr = option_ipv4_addr_checked(rtcfg->host_ip);
     web_listen_ctx.port = 4242;
-    web_listen_ctx.root = rfs->root;
+    web_listen_ctx.root = web_dir;
 
     sched_create_task(task_net_ping, NULL);
     sched_create_task(task_net_receive, &recv_ctx);
