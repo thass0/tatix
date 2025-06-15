@@ -7,6 +7,7 @@
 #define __TX_ERRORDEF_H__
 
 #include <tx/base.h>
+#include <tx/stringdef.h>
 
 // Many languages now feature results and options as ways of returning a value
 // that indicates either a success and a valid return value, or an error along
@@ -75,5 +76,35 @@ static inline struct result result_ok(void)
 #define ENAMETOOLONG 36
 #define ENOBUFS 105
 #define EHOSTUNREACH 113
+
+static inline struct str error_code_str(u16 code)
+{
+    switch (code) {
+    case ENOENT:
+        return STR("No such file or directory (ENOENT)");
+    case EIO:
+        return STR("Input/output error (EIO)");
+    case EAGAIN:
+        return STR("Resource temporarily unavailable (EAGAIN)");
+    case ENOMEM:
+        return STR("Cannot allocate memory (ENOMEM)");
+    case EEXIST:
+        return STR("File exists (EEXIST)");
+    case ENODEV:
+        return STR("No such device (ENODEV)");
+    case ENOTDIR:
+        return STR("Not a directory (ENOTDIR)");
+    case EINVAL:
+        return STR("Invalid argument (EINVAL)");
+    case ENAMETOOLONG:
+        return STR("File name too long (ENAMETOOLONG)");
+    case ENOBUFS:
+        return STR("No buffer space available (ENOBUFS)");
+    case EHOSTUNREACH:
+        return STR("No route to host (EHOSTUNREACH)");
+    default:
+        return STR("Unknown error");
+    }
+}
 
 #endif // __TX_ERRORDEF_H__

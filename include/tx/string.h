@@ -72,6 +72,15 @@ static inline struct option_sz str_find_char(struct str s, char ch)
     return option_sz_none();
 }
 
+static inline struct option_sz str_find_char_reverse(struct str s, char ch)
+{
+    for (sz i = s.len; i > 0; i--) {
+        if (s.dat[i - 1] == ch)
+            return option_sz_ok(i - 1);
+    }
+    return option_sz_none();
+}
+
 static inline struct result str_buf_append(struct str_buf *buf, struct str s)
 {
     if (!buf)
