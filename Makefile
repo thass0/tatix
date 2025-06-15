@@ -25,6 +25,8 @@ else
 	PERF_FLAGS :=
 endif
 
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "Commit unknown")
+
 CONFIG := config.mk
 include $(CONFIG)
 
@@ -167,8 +169,11 @@ $(LINKER_CONFIG): $(CONFIG)
 $(NASM_CONFIG): $(CONFIG)
 	@./scripts/make_config.sh -f nasm -o $@ $<
 
+# For the C sources, we also expose the current Git commit digest as a string literal.
 $(HEADER_CONFIG): $(CONFIG)
 	@./scripts/make_config.sh -f header -o $@ $<
+	@echo "#define GIT_COMMIT \"$(GIT_COMMIT)\"" >> $@
+
 
 $(LINKER_PRINT_INFO): $(OBJS) | $(BUILD_DIR)
 	@echo "/* Auto-generated linker symbols */" > $@
