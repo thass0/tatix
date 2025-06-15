@@ -38,4 +38,7 @@ struct result ipv4_route_add(struct ipv4_route_entry ent);
 // It needs to know this to compute the end-to-end checksum.
 struct result_ipv4_addr ipv4_route_interface_addr(struct ipv4_addr dest_ip);
 
+// Return the device MTU for the interface that will be used to route outgoing traffic destined for `dest_ip`.
+struct result_sz ipv4_route_mtu(struct ipv4_addr dest_ip);
+
 #endif // __TX_NET_IP_H__

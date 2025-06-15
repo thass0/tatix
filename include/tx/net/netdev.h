@@ -37,6 +37,7 @@ struct netdev {
     struct ipv4_addr ip_addr;
     netdev_link_type_t link_type;
     send_frame_func_t send_frame;
+    sz mtu;
     void *private_data;
 };
 

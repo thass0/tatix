@@ -212,6 +212,19 @@ struct result_ipv4_addr ipv4_route_interface_addr(struct ipv4_addr dest_ip)
     return result_ipv4_addr_ok(route->interface);
 }
 
+struct result_sz ipv4_route_mtu(struct ipv4_addr dest_ip)
+{
+    struct ipv4_route_entry *route = ipv4_route_get_entry(dest_ip);
+    if (!route)
+        return result_sz_error(EHOSTUNREACH);
+
+    struct netdev *netdev = netdev_lookup_ip_addr(route->interface);
+    if (!netdev)
+        return result_sz_error(ENODEV);
+
+    return result_sz_ok(MAX(0, netdev->mtu - sizeof(struct ipv4_header)));
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Send packets                                                              //
 ///////////////////////////////////////////////////////////////////////////////
