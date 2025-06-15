@@ -321,12 +321,21 @@ static struct tcp_conn *web_wait_accept_conn(struct tcp_conn *listen_conn)
 static struct result web_respond_close(struct tcp_conn *conn, struct byte_view response, struct send_buf sb,
                                        struct arena tmp)
 {
-    struct result_sz res = tcp_conn_send(conn, response, sb, tmp);
-    if (res.is_error)
-        return result_error(res.code);
 
-    if (result_sz_checked(res) != response.len)
-        return result_error(EIO);
+    sz n_transmitted = 0;
+
+    while (true) {
+        struct byte_view transmit = byte_view_skip(response, n_transmitted);
+        struct result_sz res = tcp_conn_send(conn, transmit, sb, tmp);
+        if (res.is_error)
+            return result_error(res.code);
+
+        n_transmitted += result_sz_checked(res);
+        if (n_transmitted >= response.len)
+            break;
+
+        sleep_ms(time_ms_new(10)); // Wait a bit for ACKs to arrive.
+    }
 
     return tcp_conn_close(&conn, sb, tmp);
 }
