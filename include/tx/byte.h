@@ -136,6 +136,13 @@ static inline void *byte_view_ptr(struct byte_view bv)
 // NOTE: Functions that operate on byte views live here. These might be things like index-wise compare. But nothing
 // will be implemented until a part of the systems needs it.
 
+// Return a new byte view that contains the last `bv.len - n` bytes of `bv`.
+static inline struct byte_view byte_view_skip(struct byte_view bv, sz n)
+{
+    assert(n < bv.len);
+    return byte_view_new(bv.dat + n, bv.len - n);
+}
+
 // Use this if you were looking for `memcpy`.
 static inline sz byte_buf_append(struct byte_buf *bb, struct byte_view bv)
 {
