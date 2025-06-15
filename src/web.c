@@ -321,7 +321,6 @@ static struct tcp_conn *web_wait_accept_conn(struct tcp_conn *listen_conn)
 static struct result web_respond_close(struct tcp_conn *conn, struct byte_view response, struct send_buf sb,
                                        struct arena tmp)
 {
-
     sz n_transmitted = 0;
 
     while (true) {
@@ -362,6 +361,8 @@ static struct result_sz web_recv_retry(struct tcp_conn *conn, struct byte_buf *r
     return result_sz_ok(n_received);
 }
 
+#define WEB_MAX_RESPONSE_SIZE BIT(22) /* 4 MiB */
+
 static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs_node *root, struct send_buf sb,
                                      struct arena tmp)
 {
@@ -382,7 +383,7 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
 
     print_dbg(PINFO, STR("Web server received:\n%s\n"), str_from_byte_buf(recv_buf));
 
-    struct byte_buf response_buf = byte_buf_from_array(byte_array_from_arena(0x6000, &tmp));
+    struct byte_buf response_buf = byte_buf_from_array(byte_array_from_arena(WEB_MAX_RESPONSE_SIZE, &tmp));
 
     struct result http_res = http_handle_request(root, str_from_byte_buf(recv_buf), &response_buf);
     if (http_res.is_error) {
@@ -398,8 +399,9 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
 
 struct result web_listen(struct ipv4_addr ip_addr, u16 port, struct ram_fs_node *root)
 {
-    struct arena tmp = arena_new(option_byte_array_checked(kvalloc_alloc(0x8000, 64)));
-    struct send_buf sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x8000, 64))));
+    struct arena tmp = arena_new(option_byte_array_checked(kvalloc_alloc(0x4000 + WEB_MAX_RESPONSE_SIZE, 64)));
+    struct send_buf sb =
+        send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000 + WEB_MAX_RESPONSE_SIZE, 64))));
 
     struct tcp_conn *listen_conn = tcp_conn_listen(ip_addr, port, tmp);
 
