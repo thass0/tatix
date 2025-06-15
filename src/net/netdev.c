@@ -35,6 +35,9 @@ struct result netdev_register_device(struct netdev *dev)
 
     dev->ip_addr = global_netdev_default_ip_addr;
 
+    assert(dev->link_type == NETDEV_LINK_TYPE_ETHERNET); // We don't support anything else at this point.
+    dev->mtu = MAX(0, dev->mtu - sizeof(struct ethernet_frame_header));
+
     byte fmt_buf[2 * MAC_ADDR_FMT_BUF_SIZE + IP_ADDR_FMT_BUF_SIZE];
     struct arena fmt_arn = arena_new(byte_array_new(fmt_buf, countof(fmt_buf)));
 

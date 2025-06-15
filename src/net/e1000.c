@@ -69,10 +69,9 @@
 #define E1000_RCTL_MPE BIT(4)
 #define E1000_RCTL_BAM BIT(15)
 
-#define E1000_MTU 1500
 // Maximum ethernet frame size is 1500B so this should work
 #define E1000_RX_BUF_SIZE 2048
-#define E1000_TX_BUF_SIZE 2048
+#define E1000_TX_BUF_SIZE 16288
 
 #define E1000_VENDOR_ID 0x8086
 #define E1000_DEVICE_ID 0x100E
@@ -571,7 +570,7 @@ static struct result e1000_probe(struct pci_device *pci)
     netdev->ip_addr = ipv4_addr_new(0, 0, 0, 0);
     netdev->link_type = NETDEV_LINK_TYPE_ETHERNET;
     netdev->send_frame = e1000_netdev_send_frame;
-    netdev->mtu = E1000_MTU;
+    netdev->mtu = E1000_TX_BUF_SIZE;
     netdev->private_data = dev;
 
     res = netdev_register_device(netdev);
