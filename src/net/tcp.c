@@ -772,8 +772,7 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
                   tcp_hdr->header_len);
     }
 
-    struct byte_view payload =
-        byte_view_new(segment.dat + tcp_hdr->header_len * 4, segment.len - tcp_hdr->header_len * 4);
+    struct byte_view payload = byte_view_skip(segment, tcp_hdr->header_len * 4);
 
     struct ipv4_addr host_addr = pseudo_hdr.dest_addr;
     struct ipv4_addr peer_addr = pseudo_hdr.src_addr;

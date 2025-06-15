@@ -132,8 +132,7 @@ struct result icmpv4_handle_message(struct ipv4_addr src_addr, struct byte_view 
         return result_ok();
     }
 
-    struct byte_view data =
-        byte_view_new(message.dat + sizeof(struct icmpv4_header), message.len - sizeof(struct icmpv4_header));
+    struct byte_view data = byte_view_skip(message, sizeof(struct icmpv4_header));
 
     switch (icmp_hdr->type) {
     case ICMPV4_TYPE_ECHO:
