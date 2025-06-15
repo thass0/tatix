@@ -37,6 +37,7 @@ enum http_content_type {
     HTTP_CONTENT_TYPE_TEXT_HTML,
     HTTP_CONTENT_TYPE_TEXT_PLAIN,
     HTTP_CONTENT_TYPE_TEXT_CSS,
+    HTTP_CONTENT_TYPE_IMAGE_PNG,
 };
 
 struct http_request {
@@ -65,6 +66,8 @@ static enum http_content_type http_get_content_type_from_extension(struct str ex
         return HTTP_CONTENT_TYPE_TEXT_HTML;
     } else if (str_is_equal(extension, STR(".css"))) {
         return HTTP_CONTENT_TYPE_TEXT_CSS;
+    } else if (str_is_equal(extension, STR(".png"))) {
+        return HTTP_CONTENT_TYPE_IMAGE_PNG;
     } else {
         return HTTP_CONTENT_TYPE_TEXT_PLAIN;
     }
@@ -115,8 +118,10 @@ static struct str http_content_type_to_string(enum http_content_type content_typ
         return STR("text/plain");
     case HTTP_CONTENT_TYPE_TEXT_CSS:
         return STR("text/css");
+    case HTTP_CONTENT_TYPE_IMAGE_PNG:
+        return STR("image/png");
     default:
-        return STR("text/plain");
+        crash("Invalid content type");
     }
 }
 
