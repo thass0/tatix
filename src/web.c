@@ -308,11 +308,17 @@ static struct result http_handle_request(struct ram_fs_node *root, struct str re
     return http_serve_file(root, req.path, response_buf);
 }
 
+static bool http_is_complete_header(struct str request_data)
+{
+    return !str_find_substring(request_data, STR("\r\n\r\n")).is_none;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Connection handling                                                       //
 ///////////////////////////////////////////////////////////////////////////////
 
 #define WEB_NUM_RECV_RETRIES 10
+#define WEB_NUM_RECV_REQUEST_RETRIES 5
 
 static struct tcp_conn *web_wait_accept_conn(struct tcp_conn *listen_conn)
 {
@@ -343,6 +349,7 @@ static struct result web_respond_close(struct tcp_conn *conn, struct byte_view r
     return tcp_conn_close(&conn, sb, tmp);
 }
 
+// Poll the TCP module for newly received data and store it in `recv_buf`.
 static struct result_sz web_recv_retry(struct tcp_conn *conn, struct byte_buf *recv_buf)
 {
     assert(conn);
@@ -369,6 +376,51 @@ static struct result_sz web_recv_retry(struct tcp_conn *conn, struct byte_buf *r
     return result_sz_ok(n_received);
 }
 
+// Try receiving a full HTTP header by polling the `web_recv_retry` function.
+static struct result_sz web_recv_http_request(struct tcp_conn *conn, struct byte_buf *recv_buf, struct send_buf sb,
+                                              struct arena tmp)
+{
+    assert(conn);
+    assert(recv_buf);
+
+    sz n_received = 0;
+
+    for (sz i = 0; i < WEB_NUM_RECV_REQUEST_RETRIES; i++) {
+        struct result_sz res = web_recv_retry(conn, recv_buf);
+        if (res.is_error)
+            return result_sz_error(res.code);
+
+        sz n_new = result_sz_checked(res);
+
+        if (!n_new)
+            return result_sz_ok(n_received);
+        n_received += n_new;
+
+        // The TCP module returns the total number of bytes available, a number to potentially exceeds the capacity
+        // of the buffer that's passed to the TCP module. This is why we check if more data has been received by the
+        // TCP module than we have space for.
+        if (n_received > recv_buf->cap) {
+            // We don't expect to receive any requests too big for the receive buffer because we are only serving
+            // static pages.
+            struct byte_buf response_buf = byte_buf_from_array(byte_array_from_arena(1028, &tmp));
+            http_build_response(HTTP_STATUS_INSUFFICIENT_STORAGE, HTTP_CONTENT_TYPE_TEXT_HTML,
+                                byte_view_from_str(insufficient_storage_body), &response_buf);
+            web_respond_close(conn, byte_view_from_buf(response_buf), sb, tmp);
+            print_dbg(
+                PWARN,
+                STR("Received more data than fits the receive buffer. Closed the connection with a 507 error.\n"));
+            return result_sz_error(ENOMEM);
+        }
+
+        if (http_is_complete_header(str_from_byte_buf(*recv_buf)))
+            return result_sz_ok(n_received);
+
+        sleep_ms(time_ms_new(10));
+    }
+
+    return result_sz_error(EINVAL);
+}
+
 #define WEB_MAX_RESPONSE_SIZE BIT(22) /* 4 MiB */
 
 static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs_node *root, struct send_buf sb,
@@ -377,24 +429,16 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
     struct tcp_conn *conn = web_wait_accept_conn(listen_conn);
 
     struct byte_buf recv_buf = byte_buf_from_array(byte_array_from_arena(1024, &tmp));
-
-    struct result_sz res = web_recv_retry(conn, &recv_buf);
-    if (res.is_error)
+    struct result_sz res = web_recv_http_request(conn, &recv_buf, sb, tmp);
+    if (res.is_error) {
+        tcp_conn_close(&conn, sb, tmp);
         return result_error(res.code);
+    }
 
     sz n_received = result_sz_checked(res);
     if (!n_received) {
         tcp_conn_close(&conn, sb, tmp);
         return result_ok();
-    }
-
-    if (result_sz_checked(res) > recv_buf.cap) {
-        struct byte_buf response_buf = byte_buf_from_array(byte_array_from_arena(2048, &tmp));
-        struct result res = http_build_response(HTTP_STATUS_INSUFFICIENT_STORAGE, HTTP_CONTENT_TYPE_TEXT_HTML,
-                                                byte_view_from_str(insufficient_storage_body), &response_buf);
-        if (res.is_error)
-            return res;
-        return web_respond_close(conn, byte_view_from_buf(response_buf), sb, tmp);
     }
 
     print_dbg(PINFO, STR("Web server received:\n%s\n"), str_from_byte_buf(recv_buf));
@@ -404,7 +448,7 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
     struct result http_res = http_handle_request(root, str_from_byte_buf(recv_buf), &response_buf);
     if (http_res.is_error) {
         tcp_conn_close(&conn, sb, tmp);
-        return result_error(http_res.code);
+        return http_res;
     }
 
     struct str response_start = str_new((char *)response_buf.dat, MIN(response_buf.len, 200));

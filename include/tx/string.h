@@ -2,6 +2,7 @@
 #define __TX_STRING_H__
 
 #include <tx/assert.h>
+#include <tx/base.h>
 #include <tx/byte.h>
 #include <tx/error.h>
 #include <tx/option.h>
@@ -78,6 +79,39 @@ static inline struct option_sz str_find_char_reverse(struct str s, char ch)
         if (s.dat[i - 1] == ch)
             return option_sz_ok(i - 1);
     }
+    return option_sz_none();
+}
+
+static inline struct option_sz str_find_substring(struct str search, struct str substr)
+{
+    assert(substr.len > 0);
+
+    sz total_offset = 0;
+
+    while (search.len >= substr.len) {
+        struct option_sz next_opt = str_find_char(search, substr.dat[0]);
+        if (next_opt.is_none)
+            return option_sz_none();
+
+        sz next = option_sz_checked(next_opt);
+        assert(next < search.len);
+
+        search.dat += next;
+        search.len -= next;
+        total_offset += next;
+
+        if (search.len < substr.len)
+            return option_sz_none();
+
+        // This is ok since search.len >= substr.len.
+        if (str_is_equal(str_new(search.dat, substr.len), substr))
+            return option_sz_ok(total_offset);
+
+        search.dat++;
+        search.len--;
+        total_offset++;
+    }
+
     return option_sz_none();
 }
 
