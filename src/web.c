@@ -345,14 +345,18 @@ static struct result_sz web_recv_retry(struct tcp_conn *conn, struct byte_buf *r
     assert(recv_buf);
 
     sz n_received = 0;
+    bool peer_closed_conn = false;
 
     for (sz i = 0; i < WEB_NUM_RECV_RETRIES; i++) {
-        struct result_sz res = tcp_conn_recv(conn, recv_buf);
+        struct result_sz res = tcp_conn_recv(conn, recv_buf, &peer_closed_conn);
         if (res.is_error)
             return result_sz_error(res.code);
 
         n_received = result_sz_checked(res);
         if (n_received)
+            break;
+
+        if (peer_closed_conn)
             break;
 
         sleep_ms(time_ms_new(10));
@@ -373,6 +377,12 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
     struct result_sz res = web_recv_retry(conn, &recv_buf);
     if (res.is_error)
         return result_error(res.code);
+
+    sz n_received = result_sz_checked(res);
+    if (!n_received) {
+        tcp_conn_close(&conn, sb, tmp);
+        return result_ok();
+    }
 
     if (result_sz_checked(res) > recv_buf.cap) {
         // There is more data to be received than what we have space for.

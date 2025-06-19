@@ -49,8 +49,10 @@ struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, 
 // Store data received on the connection `conn` into `buf`. On success, returns the maximum number of bytes available
 // to recive. This means 0 is returned if there is no data. In this case, wait a bit and try again. If there is more
 // data available than the buffer can fit, the total number of bytes available is returned and the buffer is filled
-// to its limit.
-struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf);
+// to its limit. The `peer_closed_conn` flag will be updated to indicate wheter the peer closed the connection. Once
+// this has happended, you can receive data for as long as you want, but you won't get any more. At that point, call
+// `tcp_conn_close`.
+struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool *peer_closed_conn);
 
 // Close the connection `*conn`. `conn` will be set to NULL since it's stale now.
 struct result tcp_conn_close(struct tcp_conn **conn, struct send_buf sb, struct arena tmp);

@@ -168,7 +168,8 @@ enum tcp_conn_state {
     TCP_CONN_STATE_LISTEN, // Waiting for a client to send a SYN for the connection.
     TCP_CONN_STATE_SYN_RCVD,
     TCP_CONN_STATE_ESTABLISHED,
-    TCP_CONN_STATE_CLOSE_WAIT, // We are waiting for the other side to ACK a FIN that we sent it.
+    TCP_CONN_STATE_CLOSE_WAIT,
+    TCP_CONN_STATE_LAST_ACK,
     TCP_CONN_STATE_FIN_WAIT_1,
     TCP_CONN_STATE_FIN_WAIT_2,
     TCP_CONN_STATE_CLOSING,
@@ -623,6 +624,23 @@ static struct result tcp_handle_receive_established(struct tcp_conn *conn, struc
     return result_ok();
 }
 
+static void tcp_handle_receive_last_ack(struct tcp_conn *conn, struct tcp_header *hdr, struct arena tmp)
+{
+    assert(conn);
+    assert(hdr);
+    assert(conn->state == TCP_CONN_STATE_LAST_ACK);
+
+    if (!(hdr->flags & TCP_HDR_FLAG_ACK))
+        return; // Nothing but ACKs is of interest in this state.
+
+    print_dbg(
+        PDBG,
+        STR("Received ACK for a connection in the LAST_ACK state (%s). Not responding. The connection is deleted now.\n"),
+        tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+
+    tcp_free_conn(conn);
+}
+
 static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct tcp_header *hdr,
                                                    struct byte_view payload, struct send_buf sb, struct arena tmp)
 {
@@ -802,7 +820,10 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
     case TCP_CONN_STATE_ESTABLISHED:
         return tcp_handle_receive_established(conn, tcp_hdr, payload, sb, tmp);
     case TCP_CONN_STATE_CLOSE_WAIT:
-        crash("TODO: Handle CLOSE_WAIT");
+        return result_ok(); // We are just waiting for the user to close the connection. There is nothing to do.
+    case TCP_CONN_STATE_LAST_ACK:
+        tcp_handle_receive_last_ack(conn, tcp_hdr, tmp);
+        return result_ok();
     case TCP_CONN_STATE_FIN_WAIT_1:
         return tcp_handle_receive_fin_wait_1(conn, tcp_hdr, payload, sb, tmp);
     case TCP_CONN_STATE_FIN_WAIT_2:
@@ -891,10 +912,13 @@ struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, 
     return result_sz_ok(n_sent);
 }
 
-struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf)
+struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool *peer_closed_conn)
 {
     assert(conn);
     assert(buf);
+    assert(peer_closed_conn);
+
+    *peer_closed_conn = conn->state == TCP_CONN_STATE_CLOSE_WAIT;
 
     sz avail = circ_buf_count(&conn->recv_buf);
     if (!avail)
@@ -926,6 +950,14 @@ struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct send_buf sb, str
         // when looking up or allocating connections.
 
         // TODO: I don't get why we need to send an ACK here ... (but connections don't close correctly without it).
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_FIN | TCP_HDR_FLAG_ACK, sb, tmp);
+    }
+
+    if (conn->state == TCP_CONN_STATE_CLOSE_WAIT) {
+        conn->state = TCP_CONN_STATE_LAST_ACK;
+
+        // The user has now lost access to this connection. We are only waiting to receive an ACK from the peer for
+        // this FIN and then the connection will be deleted.
         return tcp_send_segment_empty(conn, TCP_HDR_FLAG_FIN | TCP_HDR_FLAG_ACK, sb, tmp);
     }
 
