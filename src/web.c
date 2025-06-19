@@ -31,6 +31,7 @@ enum http_status {
     HTTP_STATUS_FORBIDDEN = 403,
     HTTP_STATUS_NOT_FOUND = 404,
     HTTP_STATUS_METHOD_NOT_ALLOWED = 405,
+    HTTP_STATUS_INSUFFICIENT_STORAGE = 507,
 };
 
 enum http_content_type {
@@ -104,6 +105,8 @@ static struct str http_status_to_string(enum http_status status)
         return STR("Not Found");
     case HTTP_STATUS_METHOD_NOT_ALLOWED:
         return STR("Method Not Allowed");
+    case HTTP_STATUS_INSUFFICIENT_STORAGE:
+        return STR("Insufficient Storage");
     default:
         return STR("Unknown");
     }
@@ -249,6 +252,13 @@ static struct str forbidden_body =
     STR_STATIC(HTML_PAGE("403 Forbidden", "<h1>403 Forbidden</h1><p>Directory listing not allowed.</p>"));
 static struct str not_found_body =
     STR_STATIC(HTML_PAGE("404 Not Found", "<h1>404 Not Found</h1><p>The requested file was not found.</p>"));
+static struct str bad_request_body =
+    STR_STATIC(HTML_PAGE("400 Bad Request", "<h1>400 Bad Request</h1><p>Invalid HTTP request.</p>"));
+static struct str method_not_allowed_body = STR_STATIC(
+    HTML_PAGE("405 Method Not Allowed", "<h1>405 Method Not Allowed</h1><p>Only GET requests are supported.</p>"));
+static struct str insufficient_storage_body = STR_STATIC(HTML_PAGE(
+    "507 Insufficient Storage",
+    "<h1>507 Insufficient Storage</h1><p>The server does not have enought memory to store your request.</p>"));
 
 static struct result http_serve_file(struct ram_fs_node *root, struct str path, struct byte_buf *response_buf)
 {
@@ -286,17 +296,11 @@ static struct result http_handle_request(struct ram_fs_node *root, struct str re
     struct http_request req = http_parse_request(request_data);
 
     if (!req.valid) {
-        static struct str bad_request_body =
-            STR_STATIC("<html><body><h1>400 Bad Request</h1><p>Invalid HTTP request.</p></body></html>");
-
         return http_build_response(HTTP_STATUS_BAD_REQUEST, HTTP_CONTENT_TYPE_TEXT_HTML,
                                    byte_view_from_str(bad_request_body), response_buf);
     }
 
     if (req.method != HTTP_METHOD_GET) {
-        static struct str method_not_allowed_body = STR_STATIC(
-            "<html><body><h1>405 Method Not Allowed</h1><p>Only GET requests are supported.</p></body></html>");
-
         return http_build_response(HTTP_STATUS_METHOD_NOT_ALLOWED, HTTP_CONTENT_TYPE_TEXT_HTML,
                                    byte_view_from_str(method_not_allowed_body), response_buf);
     }
@@ -385,10 +389,12 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
     }
 
     if (result_sz_checked(res) > recv_buf.cap) {
-        // There is more data to be received than what we have space for.
-        // TODO: Send HTTP error.
-        tcp_conn_close(&conn, sb, tmp);
-        return result_ok();
+        struct byte_buf response_buf = byte_buf_from_array(byte_array_from_arena(2048, &tmp));
+        struct result res = http_build_response(HTTP_STATUS_INSUFFICIENT_STORAGE, HTTP_CONTENT_TYPE_TEXT_HTML,
+                                                byte_view_from_str(insufficient_storage_body), &response_buf);
+        if (res.is_error)
+            return res;
+        return web_respond_close(conn, byte_view_from_buf(response_buf), sb, tmp);
     }
 
     print_dbg(PINFO, STR("Web server received:\n%s\n"), str_from_byte_buf(recv_buf));
