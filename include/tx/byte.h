@@ -139,7 +139,7 @@ static inline void *byte_view_ptr(struct byte_view bv)
 // Return a new byte view that contains the last `bv.len - n` bytes of `bv`.
 static inline struct byte_view byte_view_skip(struct byte_view bv, sz n)
 {
-    assert(n < bv.len);
+    assert(n <= bv.len);
     return byte_view_new(bv.dat + n, bv.len - n);
 }
 
