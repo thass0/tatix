@@ -36,7 +36,7 @@ SRC_DIR := src
 
 CC := gcc
 CPPFLAGS := -MMD -Iinclude/
-CFLAGS := $(DEBUG_FLAGS) $(PERF_FLAGS) -mgeneral-regs-only -std=gnu99 -ffreestanding -mcmodel=large -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -Wuninitialized -Wmaybe-uninitialized -pedantic
+CFLAGS := $(DEBUG_FLAGS) $(PERF_FLAGS) -fno-pic -fno-pie  -mgeneral-regs-only -std=gnu99 -ffreestanding -mcmodel=large -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -Wuninitialized -Wmaybe-uninitialized -pedantic
 
 SRCS := $(shell find $(SRC_DIR) -type f -name "*.c" -o -type f -name "*.s")
 OBJS := $(patsubst $(SRC_DIR)/%, $(BUILD_DIR)/%.o, $(SRCS))
