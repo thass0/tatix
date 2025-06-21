@@ -22,8 +22,15 @@
 
 #define ATA_COMMAND_READ_PIO BIT(5)
 
+#define ATA_STATUS_ERROR BIT(0)
+#define ATA_STATUS_DRQ BIT(3)
+#define ATA_STATUS_DF BIT(5) /* Drive Fault error */
 #define ATA_STATUS_READY BIT(6)
 #define ATA_STATUS_BUSY BIT(7)
+
+#define ATA_PRIMARY_CONTROL_PORT 0x3f6
+#define ATA_SECONDARY_CONTROL_PORT 0x376
+#define ATA_CONTROL_NIEN BIT(1)
 
 #define SECTOR_SIZE 512
 
@@ -65,15 +72,36 @@ struct result _print_fmt(struct str_buf buf, struct str fmt, ...)
     return res;
 }
 
-static inline void disk_wait(void)
+static inline int disk_wait_ready(void)
 {
-    while ((inb(ATA_IO_PORT_BASE + ATA_OFFSET_STATUS) & (ATA_STATUS_READY | ATA_STATUS_BUSY)) != ATA_STATUS_READY)
-        ;
+    u8 status = 0;
+    while (true) {
+        status = inb(ATA_IO_PORT_BASE + ATA_OFFSET_STATUS);
+        if (!(status & ATA_STATUS_BUSY))
+            break;
+    }
+
+    return (status & (ATA_STATUS_ERROR | ATA_STATUS_DF)) ? -1 : 0;
+}
+
+static inline int disk_wait_drq(void)
+{
+    u8 status = 0;
+    while (1) {
+        status = inb(ATA_IO_PORT_BASE + ATA_OFFSET_STATUS);
+        if (status & ATA_STATUS_BUSY)
+            continue;
+
+        if (status & ATA_STATUS_DRQ)
+            return 0;
+        if (status & (ATA_STATUS_ERROR | ATA_STATUS_DF))
+            return -1;
+    }
 }
 
 static inline void disk_read_sector(byte *dst, u32 lba)
 {
-    disk_wait();
+    disk_wait_ready();
     outb(ATA_IO_PORT_BASE + ATA_OFFSET_LBA_EXTRA, ((lba >> 24) & 0x0f) | 0xe0);
     outb(ATA_IO_PORT_BASE + ATA_OFFSET_SECTOR_COUNT, 1);
     outb(ATA_IO_PORT_BASE + ATA_OFFSET_LBA_LOW, lba);
@@ -81,7 +109,7 @@ static inline void disk_read_sector(byte *dst, u32 lba)
     outb(ATA_IO_PORT_BASE + ATA_OFFSET_LBA_HIGH, lba >> 16);
     outb(ATA_IO_PORT_BASE + ATA_OFFSET_COMMAND, ATA_COMMAND_READ_PIO);
 
-    disk_wait();
+    disk_wait_drq();
     insl(ATA_IO_PORT_BASE, dst, SECTOR_SIZE / 4);
 }
 
@@ -112,6 +140,12 @@ void load_kernel(void)
     sz n_load;
     char underlying[1024];
     struct str_buf buf = str_buf_new(underlying, 0, countof(underlying));
+
+    // Disable ATA interrupts for polling mode. If we don't do this, we will receive spurious interrupts
+    // when with enable interrupts later on. We would then have to acknowledge this interrupt which would
+    // require extra logic. It's better to make sure the interrupts just don't come up.
+    outb(ATA_PRIMARY_CONTROL_PORT, ATA_CONTROL_NIEN);
+    outb(ATA_SECONDARY_CONTROL_PORT, ATA_CONTROL_NIEN);
 
     _print_str(STR("Loading kernel ELF\n"));
     elf = (struct elf64_hdr *)elf_buf;
