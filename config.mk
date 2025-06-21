@@ -14,13 +14,13 @@ BOOT_LOAD_ADDR=0x7c00
 KERN_ENTRY_PADDR=0x100000
 
 # Physical base address for kernel code and static data (excluding .entry)
-KERN_BASE_PADDR=0x120000
+KERN_BASE_PADDR=0x130000
 # Virtual base address for kernel code and static data (excluding .entry)
-KERN_BASE_VADDR=0x80120000
+KERN_BASE_VADDR=0x80130000
 
 # Physical base address for kernel dynamic data
-KERN_DYN_PADDR=0x200000
+KERN_DYN_PADDR=0x1000000
 # Virtual base address for kernel dynamic data
-KERN_DYN_VADDR=0x80200000
+KERN_DYN_VADDR=0x81000000
 # Length of the kernel dynamic data section
 KERN_DYN_LEN=0x3fe00000

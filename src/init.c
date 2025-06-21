@@ -46,15 +46,15 @@ __noreturn __naked void _kernel_init(void)
 __section(".entry.data") __aligned(0x1000) static struct pt pml4; // Single PML4 table
 __section(".entry.data") __aligned(0x1000) static struct pt pdpt; // Single PDP table, this will have two entries
 __section(".entry.data") __aligned(0x1000) static struct pt pd_id; // PD table for identity mapping
-__section(".entry.data") __aligned(0x1000) static struct pt pt_id[8]; // PT pages for identity mapping (16 MB)
+__section(".entry.data") __aligned(0x1000) static struct pt pt_id[16]; // PT pages for identity mapping (32 MB)
 __section(".entry.data") __aligned(0x1000) static struct pt pd_vmem; // PD table for virtual mapping
-__section(".entry.data") __aligned(0x1000) static struct pt pt_vmem[8]; // PT pages for virtual mapping (16 MB)
+__section(".entry.data") __aligned(0x1000) static struct pt pt_vmem[16]; // PT pages for virtual mapping (32 MB)
 
 __section(".entry.text") __noreturn void _start(void)
 {
-    // Initialize a small page table. This page table identity-maps the first 16 MB of memory. That includes
-    // where the current execution is at. Additionally, this page tables maps 16 MB starting at address
-    // `KERN_BASE_VADDR` to the same first 16 MB of memory. The kernel uses virtual addresses with
+    // Initialize a small page table. This page table identity-maps the first 32 MB of memory. That includes
+    // where the current execution is at. Additionally, this page tables maps 32 MB starting at address
+    // `KERN_BASE_VADDR` to the same first 32 MB of memory. The kernel uses virtual addresses with
     // `KERN_BAES_VADDR` as their base. So once the page table is set, we can jump into the part of the
     // kernel that uses virtual addresses. Refer to the linker script kernel.ld for more detail.
     // NOTE: The identity mapping is only required until jumping into the kernel mapped with virtual addresses.
