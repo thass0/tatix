@@ -4,6 +4,7 @@
 #include <tx/com.h>
 #include <tx/fmt.h>
 #include <tx/print.h>
+#include <tx/sched.h>
 
 struct result print_str(struct str str)
 {
@@ -59,6 +60,9 @@ struct result __print_dbg(struct str basename, struct str line, struct str funcn
 
     res.is_error |= str_buf_append(&buf_cpy, funcname).is_error;
     res.is_error |= str_buf_append_n(&buf_cpy, funcname_max_len - funcname.len, ' ').is_error;
+    res.is_error |= str_buf_append(&buf_cpy, STR(" | ")).is_error;
+
+    res.is_error |= fmt(&buf_cpy, STR("%hu"), sched_current_id()).is_error;
 
     res.is_error |= str_buf_append(&buf_cpy, STR("]: ")).is_error;
 

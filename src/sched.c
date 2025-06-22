@@ -4,6 +4,7 @@
 static bool global_sched_initialized;
 
 static struct sched_task global_main_task; // Main task.
+static u16 global_next_id; // ID to use for the next task that's registered.
 static struct sched_task *global_current_task; // Task that's currently executing.
 static struct dlist global_sleep_list; // List of all sleeping tasks.
 
@@ -12,6 +13,7 @@ void sched_init(void)
     assert(!global_sched_initialized);
 
     byte_array_set(byte_array_new((void *)&global_main_task, sizeof(global_main_task)), 0);
+    global_main_task.id = global_next_id++;
     global_current_task = &global_main_task;
 
     dlist_init_empty(&global_sleep_list);
@@ -153,10 +155,19 @@ struct result sched_create_task(sched_callback_func_t callback, void *context)
 
     task->stack_ptr = task->stack_ptr - 6;
 
+    task->id = global_next_id++;
+
     task->wake_time = time_ms_new(0); // Will be woken up as soon as possible.
     sched_add_sleeping(task);
 
     return result_ok();
+}
+
+u16 sched_current_id(void)
+{
+    if (!global_sched_initialized)
+        return 0;
+    return global_current_task->id;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
