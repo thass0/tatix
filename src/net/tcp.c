@@ -849,7 +849,7 @@ struct tcp_conn *tcp_conn_listen(struct ipv4_addr addr, u16 port, struct arena t
     struct tcp_conn *conn = tcp_lookup_conn(addr, ipv4_addr_new(0, 0, 0, 0), port, 0, true);
 
     if (conn && conn->state == TCP_CONN_STATE_LISTEN)
-        return NULL;
+        return conn;
 
     conn = tcp_conn_alloc_and_init(addr, port, TCP_CONN_STATE_LISTEN);
     if (!conn) {
