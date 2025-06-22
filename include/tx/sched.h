@@ -17,6 +17,7 @@ struct sched_task {
     u64 *stack_ptr;
 
     struct time_ms wake_time;
+    u16 id;
 
     sched_callback_func_t callback;
     void *context;
@@ -35,6 +36,11 @@ void sched_init(void);
 // Create a new task. The task is scheduled the first time `sleep_*` is called after this function return. It can yield
 // control by itself calling `sleep_*`. When `callback` returns, the task is deleted and other tasks are scheduled.
 struct result sched_create_task(sched_callback_func_t callback, void *context);
+
+// Return the ID of the task that is currently running. This function can be called even before the scheduling
+// subsystem was initialized. It will return 0 in that case. This is consitent with the fact that the main task
+// that's executed by calling `sched_init` has ID 0.
+u16 sched_current_id(void);
 
 // Relinquish control of execution for `duration` milliseconds. Execution of the task calling this function will
 // resume once at least `duration` milliseconds have passed. Other tasks will run in the meantime. If these other
