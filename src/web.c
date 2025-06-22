@@ -30,7 +30,6 @@ enum http_status {
     HTTP_STATUS_BAD_REQUEST = 400,
     HTTP_STATUS_FORBIDDEN = 403,
     HTTP_STATUS_NOT_FOUND = 404,
-    HTTP_STATUS_METHOD_NOT_ALLOWED = 405,
     HTTP_STATUS_INSUFFICIENT_STORAGE = 507,
 };
 
@@ -92,6 +91,28 @@ static struct result_http_version http_parse_version(struct str version_str)
     return result_http_version_error(EINVAL);
 }
 
+static struct str http_method_to_string(enum http_method method)
+{
+    switch (method) {
+    case HTTP_METHOD_GET:
+        return STR("GET");
+    default:
+        return STR("Unknown");
+    }
+}
+
+static struct str http_version_to_string(enum http_version version)
+{
+    switch (version) {
+    case HTTP_VERSION_1_1:
+        return STR("HTTP/1.1");
+    case HTTP_VERSION_1_0:
+        return STR("HTTP/1.0");
+    default:
+        return STR("Unknown");
+    }
+}
+
 static struct str http_status_to_string(enum http_status status)
 {
     switch (status) {
@@ -103,8 +124,6 @@ static struct str http_status_to_string(enum http_status status)
         return STR("Forbidden");
     case HTTP_STATUS_NOT_FOUND:
         return STR("Not Found");
-    case HTTP_STATUS_METHOD_NOT_ALLOWED:
-        return STR("Method Not Allowed");
     case HTTP_STATUS_INSUFFICIENT_STORAGE:
         return STR("Insufficient Storage");
     default:
@@ -126,6 +145,30 @@ static struct str http_content_type_to_string(enum http_content_type content_typ
     default:
         crash("Invalid content type");
     }
+}
+
+static bool is_printable_ascii(char c)
+{
+    return (c >= 0x20 && c <= 0x7E) || c == 0x09 || c == 0x0A || c == 0x0D;
+}
+
+static struct str http_request_header_str(struct str request_data, struct arena tmp)
+{
+    struct option_sz end_idx_opt = str_find_substring(request_data, STR("\r\n\r\n"));
+    if (end_idx_opt.is_none)
+        return STR("<Not an HTTP header>");
+
+    sz len = MIN(option_sz_checked(end_idx_opt), 300);
+    struct str_buf buf = str_buf_from_arena(&tmp, len);
+
+    for (sz i = 0; i < len; i++) {
+        if (is_printable_ascii(request_data.dat[i]))
+            str_buf_append_char(&buf, request_data.dat[i]);
+        else
+            str_buf_append_char(&buf, '?');
+    }
+
+    return str_from_buf(buf);
 }
 
 static struct http_request http_parse_request(struct str request_data)
@@ -236,6 +279,9 @@ static struct result http_build_response(enum http_status status, enum http_cont
     if (n_appended != body.len)
         return result_error(ENOMEM);
 
+    print_dbg(PINFO, STR("Responding with: %s %s\n"), http_status_to_string(status),
+              http_content_type_to_string(content_type));
+
     return result_ok();
 }
 
@@ -254,8 +300,6 @@ static struct str not_found_body =
     STR_STATIC(HTML_PAGE("404 Not Found", "<h1>404 Not Found</h1><p>The requested file was not found.</p>"));
 static struct str bad_request_body =
     STR_STATIC(HTML_PAGE("400 Bad Request", "<h1>400 Bad Request</h1><p>Invalid HTTP request.</p>"));
-static struct str method_not_allowed_body = STR_STATIC(
-    HTML_PAGE("405 Method Not Allowed", "<h1>405 Method Not Allowed</h1><p>Only GET requests are supported.</p>"));
 static struct str insufficient_storage_body = STR_STATIC(HTML_PAGE(
     "507 Insufficient Storage",
     "<h1>507 Insufficient Storage</h1><p>The server does not have enought memory to store your request.</p>"));
@@ -271,12 +315,14 @@ static struct result http_serve_file(struct ram_fs_node *root, struct str path, 
 
     struct result_ram_fs_node file_result = ram_fs_open(root, path);
     if (file_result.is_error) {
+        print_dbg(PINFO, STR("Failed to find file %s\n"), path);
         return http_build_response(HTTP_STATUS_NOT_FOUND, HTTP_CONTENT_TYPE_TEXT_HTML,
                                    byte_view_from_str(not_found_body), response_buf);
     }
 
     struct ram_fs_node *file_node = result_ram_fs_node_checked(file_result);
     if (file_node->type != RAM_FS_TYPE_FILE) {
+        print_dbg(PINFO, STR("Cannot serve request for %s; it's not a file (type=%d)\n"), path, file_node->type);
         return http_build_response(HTTP_STATUS_FORBIDDEN, HTTP_CONTENT_TYPE_TEXT_HTML,
                                    byte_view_from_str(forbidden_body), response_buf);
     }
@@ -284,11 +330,13 @@ static struct result http_serve_file(struct ram_fs_node *root, struct str path, 
     struct str extension = http_get_file_extension(path);
     enum http_content_type content_type = http_get_content_type_from_extension(extension);
 
+    print_dbg(PINFO, STR("Serving file %s\n"), path);
+
     return http_build_response(HTTP_STATUS_OK, content_type, byte_view_from_buf(file_node->data), response_buf);
 }
 
 static struct result http_handle_request(struct ram_fs_node *root, struct str request_data,
-                                         struct byte_buf *response_buf)
+                                         struct byte_buf *response_buf, struct arena tmp)
 {
     assert(root);
     assert(response_buf);
@@ -296,14 +344,13 @@ static struct result http_handle_request(struct ram_fs_node *root, struct str re
     struct http_request req = http_parse_request(request_data);
 
     if (!req.valid) {
+        print_dbg(PINFO, STR("Received invalid HTTP request: %s\n"), http_request_header_str(request_data, tmp));
         return http_build_response(HTTP_STATUS_BAD_REQUEST, HTTP_CONTENT_TYPE_TEXT_HTML,
                                    byte_view_from_str(bad_request_body), response_buf);
     }
 
-    if (req.method != HTTP_METHOD_GET) {
-        return http_build_response(HTTP_STATUS_METHOD_NOT_ALLOWED, HTTP_CONTENT_TYPE_TEXT_HTML,
-                                   byte_view_from_str(method_not_allowed_body), response_buf);
-    }
+    print_dbg(PINFO, STR("Handling HTTP request: %s %s %s\n"), http_method_to_string(req.method), req.path,
+              http_version_to_string(req.version));
 
     return http_serve_file(root, req.path, response_buf);
 }
@@ -441,18 +488,13 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
         return result_ok();
     }
 
-    print_dbg(PINFO, STR("Web server received:\n%s\n"), str_from_byte_buf(recv_buf));
-
     struct byte_buf response_buf = byte_buf_from_array(byte_array_from_arena(WEB_MAX_RESPONSE_SIZE, &tmp));
 
-    struct result http_res = http_handle_request(root, str_from_byte_buf(recv_buf), &response_buf);
+    struct result http_res = http_handle_request(root, str_from_byte_buf(recv_buf), &response_buf, tmp);
     if (http_res.is_error) {
         tcp_conn_close(&conn, sb, tmp);
         return http_res;
     }
-
-    struct str response_start = str_new((char *)response_buf.dat, MIN(response_buf.len, 200));
-    print_dbg(PDBG, STR("Transmitting response:\n%s ...\n"), response_start);
 
     return web_respond_close(conn, byte_view_from_buf(response_buf), sb, tmp);
 }
@@ -468,12 +510,9 @@ struct result web_listen(struct ipv4_addr ip_addr, u16 port, struct ram_fs_node 
     print_dbg(PINFO, STR("Listening for connections on %s:%hu\n"), ipv4_addr_format(ip_addr, &tmp), port);
 
     while (true) {
-        // TODO: Fix sending big files!
         struct result res = web_handle_conn(listen_conn, root, sb, tmp);
-        if (res.is_error) {
-            print_dbg(PDBG, STR("Error handling connection: %s\n"), error_code_str(res.code));
-            return res;
-        }
+        if (res.is_error)
+            print_dbg(PERROR, STR("Error handling connection: %s\n"), error_code_str(res.code));
         sleep_ms(time_ms_new(10));
     }
 }
