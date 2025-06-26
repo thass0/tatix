@@ -36,6 +36,8 @@ static inline void dlist_remove(struct dlist *head)
     head->prev->next = head->next;
     assert(head->next);
     head->next->prev = head->prev;
+
+    dlist_init_empty(head);
 }
 
 static inline bool dlist_is_empty(struct dlist *head)
