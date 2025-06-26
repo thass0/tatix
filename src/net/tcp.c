@@ -489,6 +489,8 @@ static struct result_sz tcp_send_segment(struct tcp_conn *conn, u8 flags, struct
     sz n_send = MIN((sz)avail_window, payload.len);
     struct byte_view effective_payload = byte_view_new(payload.dat, n_send);
 
+    // NOTE: We must send segments even if `n_send` is 0. This is for control segments, usually.
+
     struct result res = tcp_send_segment_raw(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port,
                                              conn->send_next, conn->recv_next, conn->recv_window, flags,
                                              effective_payload, sb, arn);
@@ -882,9 +884,13 @@ struct tcp_conn *tcp_conn_accept(struct tcp_conn *listen_conn)
     return conn;
 }
 
-struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, struct send_buf sb, struct arena tmp)
+struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, bool *peer_closed_conn,
+                               struct send_buf sb, struct arena tmp)
 {
     assert(conn);
+    assert(peer_closed_conn);
+
+    *peer_closed_conn = conn->state == TCP_CONN_STATE_CLOSE_WAIT;
 
     struct result_sz mtu_res = ipv4_route_mtu(conn->peer_addr);
     if (mtu_res.is_error)

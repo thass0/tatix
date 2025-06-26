@@ -379,10 +379,11 @@ static struct result web_respond_close(struct tcp_conn *conn, struct byte_view r
                                        struct arena tmp)
 {
     sz n_transmitted = 0;
+    bool peer_closed_conn = false;
 
-    while (true) {
+    while (!peer_closed_conn) {
         struct byte_view transmit = byte_view_skip(response, n_transmitted);
-        struct result_sz res = tcp_conn_send(conn, transmit, sb, tmp);
+        struct result_sz res = tcp_conn_send(conn, transmit, &peer_closed_conn, sb, tmp);
         if (res.is_error)
             return result_error(res.code);
 
