@@ -45,6 +45,7 @@ struct input_packet {
     struct mac_addr src; // The MAC address of the sender of this packet.
     struct netdev *netdev; // Interface that this packet was received on.
     netdev_proto_t proto; // Protocol of the data in this packet. See `NETDEV_PROTO_*`.
+    sz n_failed_to_handle; // How often did we try and fail to handle  this packet?
     struct byte_buf data; // Packet data.
 };
 

@@ -198,6 +198,7 @@ static struct result netdev_intr_input_queue_add(struct mac_addr src, struct net
     pkt->src = src;
     pkt->netdev = netdev;
     pkt->proto = proto;
+    pkt->n_failed_to_handle = 0;
     pkt->data.len = 0;
     byte_buf_append(&pkt->data, data);
 
