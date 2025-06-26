@@ -197,6 +197,11 @@ void task_net_receive(void *ctx_ptr)
     while (true) {
         in_packet = netdev_get_input();
         if (in_packet) {
+            if (in_packet->n_failed_to_handle > 5) {
+                netdev_release_input(in_packet);
+                continue;
+            }
+
             send_buf_clear(&ctx->sb);
 
             switch (in_packet->proto) {
@@ -213,9 +218,13 @@ void task_net_receive(void *ctx_ptr)
 
             // Release the packet if the handler returned a sucess. Otherwise, leave the packet in the queue
             // so that it can be handled again.
-            // TODO: Limit the number of retries.
-            if (!res.is_error)
+            if (res.is_error) {
+                print_dbg(PWARN, STR("Failed to handle packet 0x%lx. Total attempts: %ld\n"), in_packet,
+                          in_packet->n_failed_to_handle);
+                in_packet->n_failed_to_handle++;
+            } else {
                 netdev_release_input(in_packet);
+            }
         }
         sleep_ms(time_ms_new(10));
     }
