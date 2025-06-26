@@ -43,13 +43,18 @@ struct tcp_conn *tcp_conn_listen(struct ipv4_addr addr, u16 port, struct arena t
 struct tcp_conn *tcp_conn_accept(struct tcp_conn *listen_conn);
 
 // Send `payload` to the other side of the connection `conn`. The return value indicates the number of bytes we were
-// able to transmit.
-struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, struct send_buf sb, struct arena tmp);
+// able to transmit. The `peer_closed_conn` flag will be updated to indicate whether the peer closed the connection.
+// Once this has happened, you can continue to transmit data, but the peer may be ignoring it, which makes the
+// transmit window fill up. No additional data is transmitted when the transmit window is full which means that this
+// function just returns 0. You are advised to check the `peer_closed_conn` flag and, if it's set, stop retrying
+// transmission after a while.
+struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, bool *peer_closed_conn,
+                               struct send_buf sb, struct arena tmp);
 
 // Store data received on the connection `conn` into `buf`. On success, returns the maximum number of bytes available
 // to recive. This means 0 is returned if there is no data. In this case, wait a bit and try again. If there is more
 // data available than the buffer can fit, the total number of bytes available is returned and the buffer is filled
-// to its limit. The `peer_closed_conn` flag will be updated to indicate wheter the peer closed the connection. Once
+// to its limit. The `peer_closed_conn` flag will be updated to indicate whether the peer closed the connection. Once
 // this has happended, you can receive data for as long as you want, but you won't get any more. At that point, call
 // `tcp_conn_close`.
 struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool *peer_closed_conn);
