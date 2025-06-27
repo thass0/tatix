@@ -480,15 +480,19 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
     return ipv4_send_packet(peer_addr, IPV4_PROTOCOL_TCP, sb, tmp);
 }
 
+static inline u32 tcp_send_window_avail(struct tcp_conn *conn)
+{
+    // This is correct even if `send_next > send_window + send_unack` because C uses modular arithmetic for
+    // unsigned types.
+    return (conn->send_window + conn->send_unack) - conn->send_next;
+}
+
 static struct result_sz tcp_send_segment(struct tcp_conn *conn, u8 flags, struct byte_view payload, struct send_buf sb,
                                          struct arena arn)
 {
     assert(conn);
 
-    // This is correct even if `send_next > send_window + send_unack` because C uses modular arithmetic for
-    // unsigned types.
-    u32 avail_window = (conn->send_window + conn->send_unack) - conn->send_next;
-    sz n_send = MIN((sz)avail_window, payload.len);
+    sz n_send = MIN((sz)tcp_send_window_avail(conn), payload.len);
     struct byte_view effective_payload = byte_view_new(payload.dat, n_send);
 
     // NOTE: We must send segments even if `n_send` is 0. This is for control segments, usually.
@@ -968,6 +972,9 @@ struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, 
     sz n_sent = 0;
 
     for (sz i = 0; i < payload.len; i += mtu) {
+        if (tcp_send_window_avail(conn) == 0)
+            return result_sz_ok(n_sent);
+
         struct byte_view fragment = byte_view_new(payload.dat + i, MIN(payload.len - i, mtu));
         res = tcp_send_segment(conn, TCP_HDR_FLAG_ACK, fragment, sb, tmp);
         if (res.is_error)
