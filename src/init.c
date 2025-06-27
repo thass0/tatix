@@ -304,7 +304,7 @@ __noreturn void kernel_init(void)
 
     struct web_listen_ctx web_listen_ctx;
     web_listen_ctx.addr = option_ipv4_addr_checked(rtcfg->host_ip);
-    web_listen_ctx.port = 4242;
+    web_listen_ctx.port = 80;
     web_listen_ctx.root = web_dir;
 
     sched_create_task(task_net_ping, NULL);
