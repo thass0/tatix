@@ -966,30 +966,13 @@ struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, 
     struct result_sz mtu_res = ipv4_route_mtu(conn->peer_addr);
     if (mtu_res.is_error)
         return result_sz_error(mtu_res.code);
-
     sz mtu = MAX(0, result_sz_checked(mtu_res) - sizeof(struct tcp_header));
-    struct result_sz res = result_sz_ok(0);
-    sz n_sent = 0;
 
-    for (sz i = 0; i < payload.len; i += mtu) {
-        if (tcp_send_window_avail(conn) == 0)
-            return result_sz_ok(n_sent);
+    if (tcp_send_window_avail(conn) == 0)
+        return result_sz_ok(0);
 
-        struct byte_view fragment = byte_view_new(payload.dat + i, MIN(payload.len - i, mtu));
-        res = tcp_send_segment(conn, TCP_HDR_FLAG_ACK, fragment, sb, tmp);
-        if (res.is_error)
-            return res;
-
-        sz n_fragment_sent = result_sz_checked(res);
-        n_sent += n_fragment_sent; // Update must happen before returning early.
-
-        // We return early once the entire transmit window has filled. The caller can then wait a bit for while ACKs
-        // for the already-transmitted data arrive and call `tcp_conn_send` again to transmit the rest of the data.
-        if (n_fragment_sent < fragment.len)
-            return result_sz_ok(n_sent);
-    }
-
-    return result_sz_ok(n_sent);
+    struct byte_view fragment = byte_view_new(payload.dat, MIN(payload.len, mtu));
+    return tcp_send_segment(conn, TCP_HDR_FLAG_ACK, fragment, sb, tmp);
 }
 
 struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool *peer_closed_conn)
