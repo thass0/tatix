@@ -241,7 +241,7 @@ static struct result http_build_header(enum http_status status, enum http_conten
     // partially. This is neat.
     struct str_buf buf = str_buf_from_byte_buf(*response_buf);
 
-    struct result res = fmt(&buf, STR("HTTP/1.1 %u %s\r\n"), (u32)status, http_status_to_string(status));
+    struct result res = fmt(&buf, STR("HTTP/1.0 %u %s\r\n"), (u32)status, http_status_to_string(status));
     if (res.is_error)
         return res;
 
@@ -251,10 +251,6 @@ static struct result http_build_header(enum http_status status, enum http_conten
 
     assert(body_len >= 0);
     res = fmt(&buf, STR("Content-Length: %lu\r\n"), (u64)body_len);
-    if (res.is_error)
-        return res;
-
-    res = str_buf_append(&buf, STR("Connection: close\r\n"));
     if (res.is_error)
         return res;
 
