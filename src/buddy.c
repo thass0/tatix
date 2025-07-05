@@ -173,14 +173,23 @@ static inline struct block *get_buddy(struct buddy *buddy, struct block *block, 
     }
 }
 
-static inline bool is_avail(struct buddy *buddy, void *addr)
+static inline bool is_avail(struct buddy *buddy, void *addr, sz ord)
 {
     assert(buddy);
-    sz bit_idx = ((ptr)addr - (ptr)buddy->base) / PAGE_SIZE;
-    sz byte_idx = bit_idx / BYTE_WIDTH;
-    assert(0 <= bit_idx);
-    assert(0 <= byte_idx && byte_idx < buddy->bitmap.len);
-    return (buddy->bitmap.dat[byte_idx] & (1 << (bit_idx % BYTE_WIDTH))) != 0;
+    assert(ord >= 0);
+
+    sz bit_idx = ((byte *)addr - buddy->base) / PAGE_SIZE;
+    sz bit_end = bit_idx + length_of_order(ord);
+    assert(buddy->bitmap.len <= SZ_MAX / BYTE_WIDTH);
+    assert(bit_end <= buddy->bitmap.len * BYTE_WIDTH);
+
+    for (; bit_idx < bit_end; bit_idx++) {
+        sz byte_idx = bit_idx / BYTE_WIDTH;
+        if ((buddy->bitmap.dat[byte_idx] & (1 << (bit_idx % BYTE_WIDTH))) == 0)
+            return false;
+    }
+
+    return true;
 }
 
 static void buddy_free_raw(struct buddy *buddy, void *ptr, sz ord)
@@ -194,7 +203,7 @@ static void buddy_free_raw(struct buddy *buddy, void *ptr, sz ord)
 
     print_dbg(PVERBOSE, STR("Freeing block: block=0x%lx ord=%ld\n"), block, ord);
 
-    while (ord < buddy->max_ord && is_avail(buddy, buddy_block)) {
+    while (ord < buddy->max_ord && is_avail(buddy, buddy_block, ord)) {
         print_dbg(PVERBOSE, STR("Coalescing blocks: block=0x%lx buddy_block=0x%lx ord=%ld\n"), block, buddy_block, ord);
         dlist_remove(&buddy_block->link);
         ord++;
