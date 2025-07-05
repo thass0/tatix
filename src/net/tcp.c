@@ -295,8 +295,8 @@ static struct tcp_conn *tcp_lookup_conn(struct ipv4_addr host_addr, struct ipv4_
     return NULL;
 }
 
-static struct str tcp_fmt_conn(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port, u16 peer_port,
-                               struct arena *arn)
+static struct str tcp_conn_format_raw(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
+                                      u16 peer_port, struct arena *arn)
 {
     assert(arn);
     struct str_buf sbuf = str_buf_from_byte_array(byte_array_from_arena(128, arn));
@@ -304,6 +304,12 @@ static struct str tcp_fmt_conn(struct ipv4_addr host_addr, struct ipv4_addr peer
                 ipv4_addr_format(peer_addr, arn), peer_port)
                 .is_error);
     return str_from_buf(sbuf);
+}
+
+struct str tcp_conn_format(struct tcp_conn *conn, struct arena *arn)
+{
+    assert(conn);
+    return tcp_conn_format_raw(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, arn);
 }
 
 static struct result_u32 tcp_generate_isn(void)
@@ -381,8 +387,7 @@ static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *h
         if (seq_num != conn->recv_next) {
             // We can support out-of-order delivery at a later time.
             print_dbg(PDBG, STR("Out-of-order segment received: expected seq=%u, got seq=%u (%s). Dropping ...\n"),
-                      conn->recv_next, seq_num,
-                      tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+                      conn->recv_next, seq_num, tcp_conn_format(conn, &tmp));
             return 0;
         }
 
@@ -390,7 +395,7 @@ static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *h
         if (write_res.is_error) {
             assert(write_res.code == EAGAIN);
             print_dbg(PWARN, STR("Not enough space in receive buffer to receive incoming segment (%s). Dropping ...\n"),
-                      tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+                      tcp_conn_format(conn, &tmp));
             return 0;
         }
 
@@ -400,7 +405,7 @@ static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *h
     if (hdr->flags & TCP_HDR_FLAG_FIN) {
         if (seq_num + payload.len != conn->recv_next) {
             print_dbg(PDBG, STR("FIN received with unexpected sequence number (%s). Dropping ...\n"),
-                      tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+                      tcp_conn_format(conn, &tmp));
             return payload.len;
         }
 
@@ -553,7 +558,7 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, str
         tcp_conn_alloc_and_init(listen_conn->host_addr, listen_conn->host_port, TCP_CONN_STATE_SYN_RCVD);
     if (!conn) {
         print_dbg(PDBG, STR("Failed to allocate and initialize new SYN_RCVD TCP connection (%s).\n"),
-                  tcp_fmt_conn(listen_conn->host_addr, peer_addr, listen_conn->host_port, peer_port, &tmp));
+                  tcp_conn_format_raw(listen_conn->host_addr, peer_addr, listen_conn->host_port, peer_port, &tmp));
         return result_error(ENOMEM);
     }
 
@@ -567,7 +572,7 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, str
     print_dbg(
         PDBG,
         STR("Received SYN for a connection in the LISTEN state (%s). Responding with SYN + ACK. Created a new connection in the SYN_RCVD state.\n"),
-        tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+        tcp_conn_format(conn, &tmp));
 
     return tcp_send_segment_empty(conn, TCP_HDR_FLAG_SYN | TCP_HDR_FLAG_ACK, sb, tmp);
 }
@@ -600,7 +605,7 @@ static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct t
         print_dbg(
             PWARN,
             STR("Failed to allocate receive buffer for a connection (%s). Resetting and deleting the connection.\n"),
-            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            tcp_conn_format(conn, &tmp));
         tcp_send_segment_empty(conn, TCP_HDR_FLAG_RST, sb, tmp);
         tcp_free_conn(conn);
         return result_error(ENOMEM);
@@ -609,7 +614,7 @@ static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct t
     print_dbg(
         PDBG,
         STR("Received ACK for a connection in the SYN_RCVD state (%s). Not responding. The connection is ESTABLISHED now.\n"),
-        tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+        tcp_conn_format(conn, &tmp));
 
     return result_ok();
 }
@@ -630,7 +635,7 @@ static struct result tcp_handle_receive_established(struct tcp_conn *conn, struc
         print_dbg(
             PDBG,
             STR("Received RST for a connection in the ESTABLISHED state (%s). Not responding. The connection is in the RESET state now.\n"),
-            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            tcp_conn_format(conn, &tmp));
 
         return result_ok();
     }
@@ -641,14 +646,14 @@ static struct result tcp_handle_receive_established(struct tcp_conn *conn, struc
         print_dbg(
             PDBG,
             STR("Received FIN for a connection in the ESTABLISHED state (%s). Responding with ACK. The connection is in the CLOSE_WAIT state now.\n"),
-            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            tcp_conn_format(conn, &tmp));
 
         return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
     }
 
     if (n_received > 0) {
         print_dbg(PDBG, STR("Received %ld bytes of data for connection %s. Responding with ACK.\n"), n_received,
-                  tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+                  tcp_conn_format(conn, &tmp));
         return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
     }
 
@@ -665,7 +670,7 @@ static void tcp_handle_receive_last_ack(struct tcp_conn *conn, struct tcp_header
         print_dbg(
             PDBG,
             STR("Received an ACK or RST (flags=%hhu) for a connection in the LAST_ACK state (%s). Not responding. The connection is deleted now."),
-            hdr->flags, tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            hdr->flags, tcp_conn_format(conn, &tmp));
 
         tcp_free_conn(conn);
     }
@@ -682,7 +687,7 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
         print_dbg(
             PDBG,
             STR("Received RST for a connection in the FIN_WAIT_1 state (%s). Not responding. The connection is deleted now.\n"),
-            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            tcp_conn_format(conn, &tmp));
         tcp_free_conn(conn);
         return result_ok();
     }
@@ -696,7 +701,7 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
         print_dbg(
             PDBG,
             STR("Received FIN + ACK for a connection in the FIN_WAIT_1 state (%s). Responding with ACK. The connection is in the TIME_WAIT state now.\n"),
-            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            tcp_conn_format(conn, &tmp));
 
         return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_FIN) {
@@ -707,7 +712,7 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
         print_dbg(
             PDBG,
             STR("Received FIN for a connection in the FIN_WAIT_1 state (%s). Responding with ACK. The connection is in the CLOSING state now.\n"),
-            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            tcp_conn_format(conn, &tmp));
 
         return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_ACK) {
@@ -718,7 +723,7 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
         print_dbg(
             PDBG,
             STR("Received ACK for a connection in the FIN_WAIT_1 state (%s). Not responding. The connection is in the FIN_WAIT_2 state now.\n"),
-            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            tcp_conn_format(conn, &tmp));
 
         return result_ok();
     }
@@ -738,7 +743,7 @@ static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct
         print_dbg(
             PDBG,
             STR("Received RST for a connection in the FIN_WAIT_2 state (%s). Not responding. The connection is deleted now.\n"),
-            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            tcp_conn_format(conn, &tmp));
         tcp_free_conn(conn);
         return result_ok();
     }
@@ -754,7 +759,7 @@ static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct
     print_dbg(
         PDBG,
         STR("Received FIN for a connection in the FIN_WAIT_2 state (%s). Responding with ACK. The connection is in the TIME_WAIT state now.\n"),
-        tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+        tcp_conn_format(conn, &tmp));
 
     return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
 }
@@ -769,7 +774,7 @@ static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header 
         print_dbg(
             PDBG,
             STR("Received RST for a connection in the CLOSING state (%s). Not responding. The connection is deleted now.\n"),
-            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            tcp_conn_format(conn, &tmp));
         tcp_free_conn(conn);
         return;
     }
@@ -784,7 +789,7 @@ static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header 
     print_dbg(
         PDBG,
         STR("Received ACK for a connection in the CLOSING state (%s). Not responding. The connection is in the TIME_WAIT state now.\n"),
-        tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+        tcp_conn_format(conn, &tmp));
 }
 
 static struct result tcp_handle_receive_time_wait(struct tcp_conn *conn, struct tcp_header *hdr,
@@ -798,7 +803,7 @@ static struct result tcp_handle_receive_time_wait(struct tcp_conn *conn, struct 
         print_dbg(
             PDBG,
             STR("Received RST for a connection in the TIME_WAIT state (%s). Not responding. The connection is deleted now.\n"),
-            tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+            tcp_conn_format(conn, &tmp));
         tcp_free_conn(conn);
         return result_ok();
     }
@@ -814,7 +819,7 @@ static struct result tcp_handle_receive_time_wait(struct tcp_conn *conn, struct 
     print_dbg(
         PDBG,
         STR("Received FIN for a connection in the TIME_WAIT state (%s). Responding with ACK. The connection remains in the TIME_WAIT state.\n"),
-        tcp_fmt_conn(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, &tmp));
+        tcp_conn_format(conn, &tmp));
 
     return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
 }
@@ -872,7 +877,7 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
 
     if (!conn) {
         print_dbg(PDBG, STR("Could not find a connection for TCP segment from peer (%s). Sending a reset.\n"),
-                  tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &tmp));
+                  tcp_conn_format_raw(host_addr, peer_addr, host_port, peer_port, &tmp));
         return tcp_send_segment_raw(host_addr, peer_addr, host_port, peer_port, u32_from_net_u32(tcp_hdr->ack_num),
                                     u32_from_net_u32(tcp_hdr->seq_num), u16_from_net_u16(tcp_hdr->window_size),
                                     TCP_HDR_FLAG_RST, byte_view_new(NULL, 0), sb, tmp);
@@ -903,7 +908,7 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
         return result_ok(); // We are just waiting for the user to close the connection. There is nothing to do.
     default:
         print_dbg(PERROR, STR("Unknown connection state %d for %s.\n"), conn->state,
-                  tcp_fmt_conn(host_addr, peer_addr, host_port, peer_port, &tmp));
+                  tcp_conn_format_raw(host_addr, peer_addr, host_port, peer_port, &tmp));
         crash("Connection state invalid");
     }
 }
