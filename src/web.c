@@ -45,6 +45,7 @@ struct http_request {
     enum http_method method;
     struct str path;
     enum http_version version;
+    bool allow_compression;
     bool valid;
 };
 
@@ -226,12 +227,39 @@ static struct http_request http_parse_request(struct str request_data)
     }
     req.version = result_http_version_checked(version_result);
 
+    struct option_sz header_end = str_find_substring(request_data, STR("\r\n\r\n"));
+    if (header_end.is_none) {
+        req.valid = false;
+        return req;
+    }
+
+    sz header_end_pos = option_sz_checked(header_end);
+    struct str headers_section = str_new(request_data.dat, header_end_pos);
+
+    struct option_sz accept_encoding_pos = str_find_substring_ignore_case(headers_section, STR("accept-encoding:"));
+    if (!accept_encoding_pos.is_none) {
+        sz ae_pos = option_sz_checked(accept_encoding_pos) + lengthof("accept-encoding:");
+        struct str remaining = str_new(headers_section.dat + ae_pos, headers_section.len - ae_pos);
+
+        struct option_sz line_end = str_find_char(remaining, '\r');
+        if (line_end.is_none)
+            line_end = str_find_char(remaining, '\n');
+
+        if (!line_end.is_none) {
+            sz end_pos = option_sz_checked(line_end);
+            struct str accept_encoding_value = str_new(remaining.dat, end_pos);
+
+            if (!str_find_substring_ignore_case(accept_encoding_value, STR("gzip")).is_none)
+                req.allow_compression = true;
+        }
+    }
+
     req.valid = true;
     return req;
 }
 
-static struct result http_build_header(enum http_status status, enum http_content_type content_type, sz body_len,
-                                       struct byte_buf *response_buf)
+static struct result http_build_header(enum http_status status, enum http_content_type content_type,
+                                       bool using_compression, sz body_len, struct byte_buf *response_buf)
 {
     assert(response_buf);
 
@@ -254,6 +282,12 @@ static struct result http_build_header(enum http_status status, enum http_conten
     if (res.is_error)
         return res;
 
+    if (using_compression) {
+        res = str_buf_append(&buf, STR("Content-Encoding: gzip\r\n"));
+        if (res.is_error)
+            return res;
+    }
+
     res = str_buf_append(&buf, STR("\r\n"));
     if (res.is_error)
         return res;
@@ -264,7 +298,7 @@ static struct result http_build_header(enum http_status status, enum http_conten
 }
 
 static struct result http_build_response(enum http_status status, enum http_content_type content_type,
-                                         struct byte_view body, struct byte_buf *response_buf)
+                                         bool using_compression, struct byte_view body, struct byte_buf *response_buf)
 {
     assert(response_buf);
 
@@ -272,7 +306,7 @@ static struct result http_build_response(enum http_status status, enum http_cont
     if (response_buf->cap < response_buf->len + body.len)
         return result_error(ENOMEM);
 
-    struct result res = http_build_header(status, content_type, body.len, response_buf);
+    struct result res = http_build_header(status, content_type, using_compression, body.len, response_buf);
     if (res.is_error)
         return res;
 
@@ -305,7 +339,8 @@ static struct str insufficient_storage_body = STR_STATIC(HTML_PAGE(
     "507 Insufficient Storage",
     "<h1>507 Insufficient Storage</h1><p>The server does not have enought memory to store your request.</p>"));
 
-static struct result http_serve_file(struct ram_fs_node *root, struct str path, struct byte_buf *response_buf)
+static struct result http_serve_file(struct ram_fs_node *root, bool using_compression, struct str path,
+                                     struct byte_buf *response_buf)
 {
     assert(root);
     assert(response_buf);
@@ -317,14 +352,14 @@ static struct result http_serve_file(struct ram_fs_node *root, struct str path, 
     struct result_ram_fs_node file_result = ram_fs_open(root, path);
     if (file_result.is_error) {
         print_dbg(PINFO, STR("Failed to find file %s\n"), path);
-        return http_build_response(HTTP_STATUS_NOT_FOUND, HTTP_CONTENT_TYPE_TEXT_HTML,
+        return http_build_response(HTTP_STATUS_NOT_FOUND, HTTP_CONTENT_TYPE_TEXT_HTML, false,
                                    byte_view_from_str(not_found_body), response_buf);
     }
 
     struct ram_fs_node *file_node = result_ram_fs_node_checked(file_result);
     if (file_node->type != RAM_FS_TYPE_FILE) {
         print_dbg(PINFO, STR("Cannot serve request for %s; it's not a file (type=%d)\n"), path, file_node->type);
-        return http_build_response(HTTP_STATUS_FORBIDDEN, HTTP_CONTENT_TYPE_TEXT_HTML,
+        return http_build_response(HTTP_STATUS_FORBIDDEN, HTTP_CONTENT_TYPE_TEXT_HTML, false,
                                    byte_view_from_str(forbidden_body), response_buf);
     }
 
@@ -333,11 +368,12 @@ static struct result http_serve_file(struct ram_fs_node *root, struct str path, 
 
     print_dbg(PINFO, STR("Serving file %s\n"), path);
 
-    return http_build_response(HTTP_STATUS_OK, content_type, byte_view_from_buf(file_node->data), response_buf);
+    return http_build_response(HTTP_STATUS_OK, content_type, using_compression, byte_view_from_buf(file_node->data),
+                               response_buf);
 }
 
-static struct result http_handle_request(struct ram_fs_node *root, struct str request_data,
-                                         struct byte_buf *response_buf, struct arena tmp)
+static struct result http_handle_request(struct ram_fs_node *root, struct ram_fs_node *compressed,
+                                         struct str request_data, struct byte_buf *response_buf, struct arena tmp)
 {
     assert(root);
     assert(response_buf);
@@ -346,14 +382,17 @@ static struct result http_handle_request(struct ram_fs_node *root, struct str re
 
     if (!req.valid) {
         print_dbg(PINFO, STR("Received invalid HTTP request: %s\n"), http_request_header_str(request_data, tmp));
-        return http_build_response(HTTP_STATUS_BAD_REQUEST, HTTP_CONTENT_TYPE_TEXT_HTML,
+        return http_build_response(HTTP_STATUS_BAD_REQUEST, HTTP_CONTENT_TYPE_TEXT_HTML, false,
                                    byte_view_from_str(bad_request_body), response_buf);
     }
 
     print_dbg(PINFO, STR("Handling HTTP request: %s %s %s\n"), http_method_to_string(req.method), req.path,
               http_version_to_string(req.version));
 
-    return http_serve_file(root, req.path, response_buf);
+    print_dbg(PDBG, STR("Are we using compression? %s\n"), req.allow_compression ? STR("Yes") : STR("No"));
+
+    struct ram_fs_node *dir = req.allow_compression ? compressed : root;
+    return http_serve_file(dir, req.allow_compression, req.path, response_buf);
 }
 
 static bool http_is_complete_header(struct str request_data)
@@ -452,7 +491,7 @@ static struct result_sz web_recv_http_request(struct tcp_conn *conn, struct byte
             // We don't expect to receive any requests too big for the receive buffer because we are only serving
             // static pages.
             struct byte_buf response_buf = byte_buf_from_array(byte_array_from_arena(1028, &tmp));
-            http_build_response(HTTP_STATUS_INSUFFICIENT_STORAGE, HTTP_CONTENT_TYPE_TEXT_HTML,
+            http_build_response(HTTP_STATUS_INSUFFICIENT_STORAGE, HTTP_CONTENT_TYPE_TEXT_HTML, false,
                                 byte_view_from_str(insufficient_storage_body), &response_buf);
             web_respond_close(conn, byte_view_from_buf(response_buf), sb, tmp);
             print_dbg(
@@ -472,8 +511,8 @@ static struct result_sz web_recv_http_request(struct tcp_conn *conn, struct byte
 
 #define WEB_MAX_RESPONSE_SIZE BIT(22) /* 4 MiB */
 
-static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs_node *root, struct send_buf sb,
-                                     struct arena tmp)
+static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs_node *root,
+                                     struct ram_fs_node *compressed, struct send_buf sb, struct arena tmp)
 {
     struct tcp_conn *conn = web_wait_accept_conn(listen_conn);
 
@@ -496,7 +535,7 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
 
     struct byte_buf response_buf = byte_buf_from_array(byte_array_from_arena(WEB_MAX_RESPONSE_SIZE, &tmp));
 
-    struct result http_res = http_handle_request(root, str_from_byte_buf(recv_buf), &response_buf, tmp);
+    struct result http_res = http_handle_request(root, compressed, str_from_byte_buf(recv_buf), &response_buf, tmp);
     if (http_res.is_error) {
         print_dbg(PDBG, STR("Failed to handle HTTP request for %s. Closing ...\n"), tcp_conn_format(conn, &tmp));
         tcp_conn_close(&conn, sb, tmp);
@@ -506,8 +545,11 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
     return web_respond_close(conn, byte_view_from_buf(response_buf), sb, tmp);
 }
 
-struct result web_listen(struct ipv4_addr ip_addr, u16 port, struct ram_fs_node *root)
+struct result web_listen(struct ipv4_addr ip_addr, u16 port, struct ram_fs_node *root, struct ram_fs_node *compressed)
 {
+    assert(root);
+    assert(compressed);
+
     struct arena tmp = arena_new(option_byte_array_checked(kvalloc_alloc(0x4000 + WEB_MAX_RESPONSE_SIZE, 64)));
     struct send_buf sb =
         send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000 + WEB_MAX_RESPONSE_SIZE, 64))));
@@ -517,7 +559,7 @@ struct result web_listen(struct ipv4_addr ip_addr, u16 port, struct ram_fs_node 
     print_dbg(PINFO, STR("Listening for connections on %s:%hu\n"), ipv4_addr_format(ip_addr, &tmp), port);
 
     while (true) {
-        struct result res = web_handle_conn(listen_conn, root, sb, tmp);
+        struct result res = web_handle_conn(listen_conn, root, compressed, sb, tmp);
         if (res.is_error)
             print_dbg(PERROR, STR("Error handling connection: %s\n"), error_code_str(res.code));
         sleep_ms(time_ms_new(10));

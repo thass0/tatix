@@ -115,6 +115,70 @@ static inline struct option_sz str_find_substring(struct str search, struct str 
     return option_sz_none();
 }
 
+static inline char char_to_lower(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return c + ('a' - 'A');
+    return c;
+}
+
+static inline bool char_equal_ignore_case(char a, char b)
+{
+    return char_to_lower(a) == char_to_lower(b);
+}
+
+static inline struct option_sz str_find_char_ignore_case(struct str s, char ch)
+{
+    char ch_lower = char_to_lower(ch);
+    sz l = s.len;
+    while (s.len) {
+        if (char_to_lower(*s.dat++) == ch_lower)
+            return option_sz_ok(l - s.len);
+        s.len--;
+    }
+    return option_sz_none();
+}
+
+static inline struct option_sz str_find_substring_ignore_case(struct str search, struct str substr)
+{
+    assert(substr.len > 0);
+
+    sz total_offset = 0;
+
+    while (search.len >= substr.len) {
+        struct option_sz next_opt = str_find_char_ignore_case(search, substr.dat[0]);
+        if (next_opt.is_none)
+            return option_sz_none();
+
+        sz next = option_sz_checked(next_opt);
+        assert(next < search.len);
+
+        search.dat += next;
+        search.len -= next;
+        total_offset += next;
+
+        if (search.len < substr.len)
+            return option_sz_none();
+
+        bool match = true;
+        for (sz i = 0; i < substr.len; i++) {
+            if (!char_equal_ignore_case(search.dat[i], substr.dat[i])) {
+                match = false;
+                break;
+            }
+        }
+
+        if (match)
+            return option_sz_ok(total_offset);
+
+        search.dat++;
+        search.len--;
+        total_offset++;
+    }
+
+    return option_sz_none();
+}
+
 static inline struct result str_buf_append(struct str_buf *buf, struct str s)
 {
     if (!buf)

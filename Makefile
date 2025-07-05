@@ -157,7 +157,10 @@ $(ROOTFS_OBJ): $(ROOTFS_ARCHIVE) | $(BUILD_DIR)
 
 $(ROOTFS_ARCHIVE): $(ROOTFS_DIR) | $(BUILD_DIR)
 	$(call compile_log,ARCHIVE,$@)
-	@./scripts/archive.py enc $< $@
+	@mkdir -p $(BUILD_DIR)/rootfs
+	@cp -r $<* $(BUILD_DIR)/rootfs
+	@./scripts/compress.py $</web $(BUILD_DIR)/rootfs/compressed
+	@./scripts/archive.py enc $(BUILD_DIR)/rootfs $@
 
 ################################################################################
 # Misc                                                                         #

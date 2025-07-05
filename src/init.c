@@ -250,13 +250,14 @@ struct web_listen_ctx {
     struct ipv4_addr addr;
     u16 port;
     struct ram_fs_node *root;
+    struct ram_fs_node *compressed;
 };
 
 void task_web_listen(void *ctx_ptr)
 {
     assert(ctx_ptr);
     struct web_listen_ctx *ctx = ctx_ptr;
-    web_listen(ctx->addr, ctx->port, ctx->root);
+    web_listen(ctx->addr, ctx->port, ctx->root, ctx->compressed);
 }
 
 __noreturn void kernel_init(void)
@@ -302,10 +303,16 @@ __noreturn void kernel_init(void)
     struct ram_fs_node *web_dir = result_ram_fs_node_checked(web_res);
     assert(web_dir->type == RAM_FS_TYPE_DIR);
 
+    struct result_ram_fs_node compressed_res = ram_fs_open(rfs->root, STR("/compressed/"));
+    assert(!compressed_res.is_error);
+    struct ram_fs_node *compressed_dir = result_ram_fs_node_checked(compressed_res);
+    assert(compressed_dir->type == RAM_FS_TYPE_DIR);
+
     struct web_listen_ctx web_listen_ctx;
     web_listen_ctx.addr = option_ipv4_addr_checked(rtcfg->host_ip);
     web_listen_ctx.port = 80;
     web_listen_ctx.root = web_dir;
+    web_listen_ctx.compressed = compressed_dir;
 
     sched_create_task(task_net_ping, NULL);
     sched_create_task(task_net_receive, &recv_ctx);
