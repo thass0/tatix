@@ -477,15 +477,19 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
 {
     struct tcp_conn *conn = web_wait_accept_conn(listen_conn);
 
+    print_dbg(PDBG, STR("Accepted connection %s\n"), tcp_conn_format(conn, &tmp));
+
     struct byte_buf recv_buf = byte_buf_from_array(byte_array_from_arena(1024, &tmp));
     struct result_sz res = web_recv_http_request(conn, &recv_buf, sb, tmp);
     if (res.is_error) {
+        print_dbg(PDBG, STR("Failed to receive HTTP request for %s. Closing ...\n"), tcp_conn_format(conn, &tmp));
         tcp_conn_close(&conn, sb, tmp);
         return result_error(res.code);
     }
 
     sz n_received = result_sz_checked(res);
     if (!n_received) {
+        print_dbg(PDBG, STR("Didn't receive any data for %s. Closing ...\n"), tcp_conn_format(conn, &tmp));
         tcp_conn_close(&conn, sb, tmp);
         return result_ok();
     }
@@ -494,6 +498,7 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
 
     struct result http_res = http_handle_request(root, str_from_byte_buf(recv_buf), &response_buf, tmp);
     if (http_res.is_error) {
+        print_dbg(PDBG, STR("Failed to handle HTTP request for %s. Closing ...\n"), tcp_conn_format(conn, &tmp));
         tcp_conn_close(&conn, sb, tmp);
         return http_res;
     }
