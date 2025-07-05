@@ -178,6 +178,7 @@ enum tcp_conn_state {
     TCP_CONN_STATE_RESET // Special state that's not included in the normal TCP state transitions.
 };
 
+#define TCP_CONN_DEFAULT_MSS 536 /* Based on RFC 9293 */
 #define TCP_CONN_TIME_WAIT_MS 100 /* This is low so we can re-use connections quickly. */
 #define TCP_CONN_RECV_WINDOW_SIZE 0x2000
 
@@ -188,6 +189,7 @@ struct tcp_conn {
     u16 host_port;
     u16 peer_port;
     enum tcp_conn_state state;
+    sz mss; // Maximum Segment Size the peer is willing to receive.
 
     struct dlist accept_queue;
 
@@ -321,7 +323,8 @@ static struct result_u32 tcp_generate_isn(void)
     return result_u32_ok((u32)isn_raw);
 }
 
-static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 host_port, enum tcp_conn_state state)
+static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 host_port, sz mss,
+                                                enum tcp_conn_state state)
 {
     struct tcp_conn *conn = tcp_alloc_conn();
     if (!conn)
@@ -338,6 +341,8 @@ static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 
     conn->host_port = host_port;
     conn->peer_port = 0;
     conn->state = state;
+
+    conn->mss = mss;
 
     dlist_init_empty(&conn->accept_queue);
 
@@ -554,8 +559,8 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, str
     // A new connection is created now so that `listen_conn` can remain in the LISTEN state to accept new connections.
     // The new connection will be moved through the states of the TCP handshake until it's in the ESTABLISHED state.
 
-    struct tcp_conn *conn =
-        tcp_conn_alloc_and_init(listen_conn->host_addr, listen_conn->host_port, TCP_CONN_STATE_SYN_RCVD);
+    struct tcp_conn *conn = tcp_conn_alloc_and_init(listen_conn->host_addr, listen_conn->host_port, listen_conn->mss,
+                                                    TCP_CONN_STATE_SYN_RCVD);
     if (!conn) {
         print_dbg(PDBG, STR("Failed to allocate and initialize new SYN_RCVD TCP connection (%s).\n"),
                   tcp_conn_format_raw(listen_conn->host_addr, peer_addr, listen_conn->host_port, peer_port, &tmp));
@@ -832,6 +837,38 @@ static bool tcp_checksum_is_ok(struct tcp_ip_pseudo_header pseudo_hdr, struct by
     return internet_checksum_finalize(checksum).inner == 0;
 }
 
+#define TCP_OPT_EOL 0
+#define TCP_OPT_NOP 1
+#define TCP_OPT_MSS 2
+
+static void tcp_handle_options(struct tcp_conn *conn, struct byte_view opts)
+{
+    sz i = 0;
+    while (i < opts.len) {
+        switch (opts.dat[i]) {
+        case TCP_OPT_EOL:
+            return;
+        case TCP_OPT_NOP:
+            i++;
+            break;
+        case TCP_OPT_MSS:
+            // We can ignore the length field because it's always 4.
+            if (i + 4 > opts.len)
+                return;
+            conn->mss = ((u16)opts.dat[i + 2] << 8) | (u16)opts.dat[i + 3];
+            i += 4;
+            break;
+        default:
+            // All options except for EOL and NOP have a "length" field after the "kind" field. We use the "length"
+            // field to skip the rest of this option.
+            if (i + 2 > opts.len)
+                return;
+            i += opts.dat[i + 1];
+            break;
+        }
+    }
+}
+
 struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment, struct send_buf sb,
                                 struct arena tmp)
 {
@@ -856,11 +893,6 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
         return result_ok();
     }
 
-    if (tcp_hdr->header_len > TCP_HEADER_LEN_NO_OPT) {
-        print_dbg(PWARN, STR("Received TCP segment with options that won't be handled (header_len=%hhd).\n"),
-                  tcp_hdr->header_len);
-    }
-
     struct byte_view payload = byte_view_skip(segment, tcp_hdr->header_len * 4);
 
     struct ipv4_addr host_addr = pseudo_hdr.dest_addr;
@@ -881,6 +913,12 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
         return tcp_send_segment_raw(host_addr, peer_addr, host_port, peer_port, u32_from_net_u32(tcp_hdr->ack_num),
                                     u32_from_net_u32(tcp_hdr->seq_num), u16_from_net_u16(tcp_hdr->window_size),
                                     TCP_HDR_FLAG_RST, byte_view_new(NULL, 0), sb, tmp);
+    }
+
+    if (tcp_hdr->header_len > TCP_HEADER_LEN_NO_OPT) {
+        struct byte_view tcp_options =
+            byte_view_new(segment.dat + TCP_HEADER_LEN_NO_OPT * 4, (tcp_hdr->header_len - TCP_HEADER_LEN_NO_OPT) * 4);
+        tcp_handle_options(conn, tcp_options);
     }
 
     switch (conn->state) {
@@ -924,7 +962,7 @@ struct tcp_conn *tcp_conn_listen(struct ipv4_addr addr, u16 port, struct arena t
     if (conn && conn->state == TCP_CONN_STATE_LISTEN)
         return conn;
 
-    conn = tcp_conn_alloc_and_init(addr, port, TCP_CONN_STATE_LISTEN);
+    conn = tcp_conn_alloc_and_init(addr, port, TCP_CONN_DEFAULT_MSS, TCP_CONN_STATE_LISTEN);
     if (!conn) {
         print_dbg(PERROR, STR("Failed to allocate and initialize new LISTEN TCP connection (%s:%hu).\n"),
                   ipv4_addr_format(addr, &tmp), port);
@@ -968,15 +1006,20 @@ struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, 
 
     *peer_closed_conn = tcp_conn_closed_by_peer(conn->state);
 
-    struct result_sz mtu_res = ipv4_route_mtu(conn->peer_addr);
-    if (mtu_res.is_error)
-        return result_sz_error(mtu_res.code);
-    sz mtu = MAX(0, result_sz_checked(mtu_res) - sizeof(struct tcp_header));
-
     if (tcp_send_window_avail(conn) == 0)
         return result_sz_ok(0);
 
-    struct byte_view fragment = byte_view_new(payload.dat, MIN(payload.len, mtu));
+    struct result_sz ip_mtu_res = ipv4_route_mtu(conn->peer_addr);
+    if (ip_mtu_res.is_error)
+        return result_sz_error(ip_mtu_res.code);
+
+    sz ip_mtu = result_sz_checked(ip_mtu_res);
+    sz len = MAX(0, ip_mtu - sizeof(struct tcp_header));
+    len = MIN(len, conn->mss);
+    len = MIN(len, payload.len);
+
+    struct byte_view fragment = byte_view_new(payload.dat, len);
+
     return tcp_send_segment(conn, TCP_HDR_FLAG_ACK, fragment, sb, tmp);
 }
 
