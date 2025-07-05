@@ -669,7 +669,7 @@ static void tcp_handle_receive_last_ack(struct tcp_conn *conn, struct tcp_header
     if ((hdr->flags & TCP_HDR_FLAG_ACK) || (hdr->flags & TCP_HDR_FLAG_RST)) {
         print_dbg(
             PDBG,
-            STR("Received an ACK or RST (flags=%hhu) for a connection in the LAST_ACK state (%s). Not responding. The connection is deleted now."),
+            STR("Received an ACK or RST (flags=%hhu) for a connection in the LAST_ACK state (%s). Not responding. The connection is deleted now.\n"),
             hdr->flags, tcp_conn_format(conn, &tmp));
 
         tcp_free_conn(conn);
