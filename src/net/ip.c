@@ -296,7 +296,7 @@ struct result ipv4_send_packet(struct ipv4_addr dest_ip, u8 proto, struct send_b
     if (res.is_error)
         return res;
 
-    print_dbg(PDBG, STR("Sending IPv4 packet netdev=%s gateway_ip=%s (%s delivery)\n"),
+    print_dbg(PVERBOSE, STR("Sending IPv4 packet netdev=%s gateway_ip=%s (%s delivery)\n"),
               mac_addr_format(netdev->mac_addr, &arn), ipv4_addr_format(gateway_ip, &arn),
               ipv4_addr_is_equal(route->gateway, route->interface) ? STR("direct") : STR("indirect"));
 
