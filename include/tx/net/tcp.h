@@ -34,6 +34,9 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
 
 struct tcp_conn; // Ha, you can't even see what's inside!
 
+// Return a string allocated from `arn` that represents the connection.
+struct str tcp_conn_format(struct tcp_conn *conn, struct arena *arn);
+
 // Create a connection to listen for incoming connections. If a segment destined for the given IP address and port
 // arrives, a new connection will be established. Call `tcp_conn_accept` on the connection returned from this function
 // to access these connections.
