@@ -293,6 +293,8 @@ __noreturn void kernel_init(void)
     res = pci_probe();
     assert(!res.is_error);
 
+    assert(!tcp_init().is_error);
+
     struct task_net_receive_ctx recv_ctx;
     recv_ctx.tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
     recv_ctx.sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64))));

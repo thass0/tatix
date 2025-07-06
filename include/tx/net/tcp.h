@@ -20,14 +20,14 @@ struct tcp_ip_pseudo_header {
     net_u16 tcp_length;
 };
 
-void tcp_init(void);
-
 struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment, struct send_buf sb,
                                 struct arena tmp);
 
 ///////////////////////////////////////////////////////////////////////////////
 // User interface                                                            //
 ///////////////////////////////////////////////////////////////////////////////
+
+struct result tcp_init(void);
 
 // These functions are meant for using TCP. You are handed internal data here so just don't touch it. We're all
 // adults here so this shouldn't be a problem, no?

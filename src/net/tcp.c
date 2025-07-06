@@ -7,8 +7,12 @@
 #include <tx/list.h>
 #include <tx/net/ip.h>
 #include <tx/net/netorder.h>
+#include <tx/pool.h>
 #include <tx/print.h>
 #include <tx/time.h>
+
+static bool global_tcp_is_initialized;
+static struct pool global_tcp_recv_buf_alloc;
 
 struct tcp_header {
     net_u16 src_port;
@@ -101,27 +105,29 @@ static inline sz circ_buf_space(struct circ_buf buf)
     return buf.data.len - 1 - circ_buf_count(buf);
 }
 
-static struct result circ_buf_alloc(struct circ_buf *buf, sz capacity)
+static struct result circ_buf_alloc(struct circ_buf *buf, struct pool *alloc)
 {
     assert(buf);
-    assert(capacity > 0);
+    assert(alloc);
 
-    struct option_byte_array mem_opt = kvalloc_alloc(capacity, 1);
-    if (mem_opt.is_none)
+    void *mem = pool_alloc(alloc);
+    if (!mem)
         return result_error(ENOMEM);
 
-    buf->data = option_byte_array_checked(mem_opt);
+    buf->data = byte_array_new(mem, alloc->size);
     buf->head = 0;
     buf->tail = 0;
 
     return result_ok();
 }
 
-static void circ_buf_free(struct circ_buf *buf)
+static void circ_buf_free(struct circ_buf *buf, struct pool *alloc)
 {
     assert(buf);
+    assert(alloc);
 
-    kvalloc_free(buf->data);
+    if (buf->data.dat)
+        pool_free(alloc, buf->data.dat);
     buf->data = byte_array_new(NULL, 0);
 }
 
@@ -251,7 +257,7 @@ static void tcp_free_conn(struct tcp_conn *conn)
 {
     assert(conn);
 
-    circ_buf_free(&conn->recv_buf);
+    circ_buf_free(&conn->recv_buf, &global_tcp_recv_buf_alloc);
     dlist_remove(&conn->accept_queue);
 
     // Since we are reusing these, we want to make sure we don't accidentally reuse old data. Thus we set each
@@ -455,6 +461,16 @@ static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *h
     }
 
     return payload.len;
+}
+
+struct result tcp_init(void)
+{
+    struct option_byte_array recv_mem_opt = kvalloc_alloc(TCP_CONN_RECV_BUF_SIZE * TCP_CONN_MAX_NUM, alignof(void *));
+    if (recv_mem_opt.is_none)
+        return result_error(ENOMEM);
+    global_tcp_recv_buf_alloc = pool_new(option_byte_array_checked(recv_mem_opt), TCP_CONN_RECV_BUF_SIZE);
+    global_tcp_is_initialized = true;
+    return result_ok();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -690,7 +706,7 @@ static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct t
     tcp_conn_update_send_state(conn, hdr);
 
     // We start receiving data in the ESTABLISHED state so we need to allocate a buffer at this point.
-    struct result buf_alloc_res = circ_buf_alloc(&conn->recv_buf, TCP_CONN_RECV_BUF_SIZE);
+    struct result buf_alloc_res = circ_buf_alloc(&conn->recv_buf, &global_tcp_recv_buf_alloc);
     if (buf_alloc_res.is_error) {
         print_dbg(
             PWARN,
@@ -962,6 +978,8 @@ static void tcp_handle_options(struct tcp_conn *conn, u8 flags, struct byte_view
 struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment, struct send_buf sb,
                                 struct arena tmp)
 {
+    assert(global_tcp_is_initialized);
+
     if (segment.len < sizeof(struct tcp_header)) {
         print_dbg(PDBG, STR("Received TCP segment smaller than the TCP header. Dropping ...\n"));
         return result_ok();
@@ -1047,6 +1065,8 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
 
 struct tcp_conn *tcp_conn_listen(struct ipv4_addr addr, u16 port, struct arena tmp)
 {
+    assert(global_tcp_is_initialized);
+
     struct tcp_conn *conn = tcp_lookup_conn(addr, ipv4_addr_new(0, 0, 0, 0), port, 0, true);
 
     if (conn && conn->state == TCP_CONN_STATE_LISTEN)
@@ -1066,6 +1086,7 @@ struct tcp_conn *tcp_conn_listen(struct ipv4_addr addr, u16 port, struct arena t
 
 struct tcp_conn *tcp_conn_accept(struct tcp_conn *listen_conn)
 {
+    assert(global_tcp_is_initialized);
     assert(listen_conn);
 
     struct tcp_conn *conn = __container_of(listen_conn->accept_queue.next, struct tcp_conn, accept_queue);
@@ -1091,6 +1112,7 @@ static inline bool tcp_conn_closed_by_peer(enum tcp_conn_state state)
 struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, bool *peer_closed_conn,
                                struct send_buf sb, struct arena tmp)
 {
+    assert(global_tcp_is_initialized);
     assert(conn);
     assert(peer_closed_conn);
 
@@ -1131,6 +1153,7 @@ struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, 
 
 struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool *peer_closed_conn)
 {
+    assert(global_tcp_is_initialized);
     assert(conn);
     assert(buf);
     assert(peer_closed_conn);
@@ -1148,6 +1171,7 @@ struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool
 
 struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct send_buf sb, struct arena tmp)
 {
+    assert(global_tcp_is_initialized);
     assert(conn_ptr);
     assert(*conn_ptr);
 
