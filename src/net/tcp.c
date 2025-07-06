@@ -44,13 +44,25 @@ struct tcp_option_mss {
     u8 kind;
     u8 length;
     net_u16 value;
-};
+} __packed;
 
 static_assert(sizeof(struct tcp_option_mss) == 4);
 
 #define TCP_OPT_MSS_KIND 2
 #define TCP_OPT_MSS_LENGTH 4
 #define TCP_OPT_MSS_VALUE 1460 /* Typical for ethernet with 1500 byte MTUs. */
+
+struct tcp_option_ws {
+    u8 kind;
+    u8 length;
+    u8 value;
+    u8 nop; // Padding
+} __packed;
+
+static_assert(sizeof(struct tcp_option_ws) == 4);
+
+#define TCP_OPT_WS_KIND 3
+#define TCP_OPT_WS_LENGTH 3
 
 ///////////////////////////////////////////////////////////////////////////////
 // Circular buffer implementation                                            //
@@ -205,18 +217,21 @@ struct tcp_conn {
     u16 peer_port;
     enum tcp_conn_state state;
     sz mss; // Maximum Segment Size the peer is willing to receive.
+    bool use_window_scale; // Should we send the window scale option?
 
     struct dlist accept_queue;
 
     // Transmission
     u32 send_unack; // SND.UNA
     u32 send_next; // SND.NXT
-    u16 send_window; // SND.WND
+    sz send_window_real; // SND.WND (scale applied, can be bigger than a 16-bit unsigned integer).
+    u8 send_window_scale;
     u32 iss; // Initial send sequence number (ISS).
 
     // Reception
     u32 recv_next; // RCV.NXT
-    u16 recv_window; // RCV.WND
+    sz recv_window_real; // RCV.WND (scale applied, can be bigger than a 16-bit unsigned interger).
+    u8 recv_window_scale;
     struct circ_buf recv_buf;
 
     // Set when the connection is put in the TIME_WAIT state. The connection is deleted when `TCP_CONN_TIME_WAIT_MS`
@@ -358,11 +373,13 @@ static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 
     conn->state = state;
 
     conn->mss = mss;
+    conn->use_window_scale = false;
 
     dlist_init_empty(&conn->accept_queue);
 
     conn->recv_next = 0;
-    conn->recv_window = TCP_CONN_RECV_WINDOW_SIZE;
+    conn->recv_window_real = TCP_CONN_RECV_WINDOW_SIZE;
+    conn->recv_window_scale = 0;
     conn->recv_buf.data = byte_array_new(NULL, 0);
     conn->recv_buf.head = 0;
     conn->recv_buf.tail = 0;
@@ -370,7 +387,8 @@ static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 
     conn->iss = result_u32_checked(isn_res);
     conn->send_unack = conn->iss;
     conn->send_next = conn->iss;
-    conn->send_window = 0;
+    conn->send_window_real = 0;
+    conn->send_window_scale = 0;
 
     conn->time_wait_start = time_ms_new(0);
 
@@ -392,7 +410,8 @@ static void tcp_conn_update_send_state(struct tcp_conn *conn, struct tcp_header 
             conn->send_unack = ack_num;
     }
 
-    conn->send_window = u16_from_net_u16(hdr->window_size);
+    // NOTE: `conn->send_window_scale` is 0 if window scaling isn't used.
+    conn->send_window_real = u16_from_net_u16(hdr->window_size) << conn->send_window_scale;
 }
 
 static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *hdr, struct byte_view payload,
@@ -440,8 +459,9 @@ static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *h
 ///////////////////////////////////////////////////////////////////////////////
 
 static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
-                                          u16 peer_port, u32 seq_num, u32 ack_num, u16 window_size, u8 flags,
-                                          struct byte_view payload, struct send_buf sb, struct arena tmp)
+                                          u16 peer_port, u32 seq_num, u32 ack_num, sz window_size_real, u8 window_scale,
+                                          bool use_window_scale, u8 flags, struct byte_view payload, struct send_buf sb,
+                                          struct arena tmp)
 {
     // We need this to compute the checksum over the pseudo header because the pseudo header contains information
     // from the IP layer.
@@ -463,24 +483,35 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
         flags |= TCP_HDR_FLAG_RST;
     }
 
+    bool use_mss = flags & TCP_HDR_FLAG_SYN;
+    bool use_ws = (flags & TCP_HDR_FLAG_SYN) && use_window_scale;
+
     struct tcp_option_mss mss;
-    if (flags & TCP_HDR_FLAG_SYN) {
+    if (use_mss) {
         mss.kind = TCP_OPT_MSS_KIND;
         mss.length = TCP_OPT_MSS_LENGTH;
         mss.value = net_u16_from_u16(TCP_OPT_MSS_VALUE);
     }
+
+    struct tcp_option_ws ws;
+    if (use_ws) {
+        ws.kind = TCP_OPT_WS_KIND;
+        ws.length = TCP_OPT_WS_LENGTH;
+        ws.value = window_scale;
+        ws.nop = TCP_OPT_NOP_KIND;
+    }
+
+    sz opt_size = (use_mss ? sizeof(mss) : 0) + (use_ws ? sizeof(ws) : 0);
 
     struct tcp_header hdr;
     hdr.src_port = net_u16_from_u16(host_port);
     hdr.dest_port = net_u16_from_u16(peer_port);
     hdr.seq_num = net_u32_from_u32(seq_num);
     hdr.ack_num = net_u32_from_u32(ack_num);
-    hdr.header_len = TCP_HDR_LEN_NO_OPT;
-    if (flags & TCP_HDR_FLAG_SYN)
-        hdr.header_len++;
+    hdr.header_len = TCP_HDR_LEN_NO_OPT + (opt_size / 4);
     hdr.reserved = 0;
     hdr.flags = flags;
-    hdr.window_size = net_u16_from_u16(window_size);
+    hdr.window_size = net_u16_from_u16(window_size_real >> window_scale);
     hdr.checksum = net_u16_from_u16(0);
     hdr.urgent = net_u16_from_u16(0);
 
@@ -489,16 +520,15 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
     pseudo_hdr.dest_addr = peer_addr;
     pseudo_hdr.zero = 0;
     pseudo_hdr.protocol = IPV4_PROTOCOL_TCP;
-    if (flags & TCP_HDR_FLAG_SYN)
-        pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(hdr) + sizeof(mss) + payload.len);
-    else
-        pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(hdr) + payload.len);
+    pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(hdr) + opt_size + payload.len);
 
     net_u16 checksum = net_u16_from_u16(0);
     checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&hdr, sizeof(hdr)));
     checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&pseudo_hdr, sizeof(pseudo_hdr)));
-    if (flags & TCP_HDR_FLAG_SYN)
+    if (use_mss)
         checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&mss, sizeof(mss)));
+    if (use_ws)
+        checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&ws, sizeof(ws)));
     checksum = internet_checksum_iterate(checksum, payload);
     hdr.checksum = internet_checksum_finalize(checksum);
 
@@ -511,11 +541,14 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
         assert(byte_buf_append(buf, payload) == payload.len);
     }
 
-    if (flags & TCP_HDR_FLAG_SYN) {
-        buf = send_buf_prepend(&sb, sizeof(mss));
+    if (opt_size) {
+        buf = send_buf_prepend(&sb, opt_size);
         if (!buf)
             return result_error(ENOMEM);
-        assert(byte_buf_append(buf, byte_view_new((void *)&mss, sizeof(mss))) == sizeof(mss));
+        if (use_mss)
+            assert(byte_buf_append(buf, byte_view_new((void *)&mss, sizeof(mss))) == sizeof(mss));
+        if (use_ws)
+            assert(byte_buf_append(buf, byte_view_new((void *)&ws, sizeof(ws))) == sizeof(ws));
     }
 
     buf = send_buf_prepend(&sb, sizeof(hdr));
@@ -526,11 +559,16 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
     return ipv4_send_packet(peer_addr, IPV4_PROTOCOL_TCP, sb, tmp);
 }
 
-static inline u32 tcp_send_window_avail(struct tcp_conn *conn)
+static inline sz tcp_send_window_avail(struct tcp_conn *conn)
 {
-    // This is correct even if `send_next > send_window + send_unack` because C uses modular arithmetic for
-    // unsigned types.
-    return (conn->send_window + conn->send_unack) - conn->send_next;
+    sz send_next = conn->send_next;
+    sz send_unack = conn->send_unack;
+
+    // This is only possible if the window size got decreased so that `send_next` now lies beyond the right edge
+    // of the send window. We can't send any more data until ACKs have arrived and `send_unack` has advanced.
+    if (send_next > send_unack + conn->send_window_real)
+        return 0;
+    return (send_unack + conn->send_window_real) - send_next;
 }
 
 static struct result_sz tcp_send_segment(struct tcp_conn *conn, u8 flags, struct byte_view payload, struct send_buf sb,
@@ -538,14 +576,15 @@ static struct result_sz tcp_send_segment(struct tcp_conn *conn, u8 flags, struct
 {
     assert(conn);
 
-    sz n_send = MIN((sz)tcp_send_window_avail(conn), payload.len);
+    sz n_send = MIN(tcp_send_window_avail(conn), payload.len);
     struct byte_view effective_payload = byte_view_new(payload.dat, n_send);
 
     // NOTE: We must send segments even if `n_send` is 0. This is for control segments, usually.
 
     struct result res = tcp_send_segment_raw(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port,
-                                             conn->send_next, conn->recv_next, conn->recv_window, flags,
-                                             effective_payload, sb, arn);
+                                             conn->send_next, conn->recv_next, conn->recv_window_real,
+                                             conn->recv_window_scale, conn->use_window_scale, flags, effective_payload,
+                                             sb, arn);
     if (res.is_error)
         return result_sz_error(res.code);
 
@@ -609,6 +648,8 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, str
     conn->peer_port = peer_port;
     // The SYN in the incoming header has consumed one sequence number so we add one to the ISN send by our peer.
     conn->recv_next = u32_from_net_u32(hdr->seq_num) + 1;
+    conn->send_window_scale = listen_conn->send_window_scale;
+    conn->use_window_scale = listen_conn->use_window_scale;
 
     print_dbg(
         PDBG,
@@ -641,7 +682,7 @@ static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct t
     tcp_conn_update_send_state(conn, hdr);
 
     // We start receiving data in the ESTABLISHED state so we need to allocate a buffer at this point.
-    struct result buf_alloc_res = circ_buf_alloc(&conn->recv_buf, conn->recv_window);
+    struct result buf_alloc_res = circ_buf_alloc(&conn->recv_buf, conn->recv_window_real);
     if (buf_alloc_res.is_error) {
         print_dbg(
             PWARN,
@@ -873,7 +914,7 @@ static bool tcp_checksum_is_ok(struct tcp_ip_pseudo_header pseudo_hdr, struct by
     return internet_checksum_finalize(checksum).inner == 0;
 }
 
-static void tcp_handle_options(struct tcp_conn *conn, struct byte_view opts)
+static void tcp_handle_options(struct tcp_conn *conn, u8 flags, struct byte_view opts)
 {
     sz i = 0;
     while (i < opts.len) {
@@ -889,6 +930,15 @@ static void tcp_handle_options(struct tcp_conn *conn, struct byte_view opts)
                 return;
             conn->mss = MAX(((u16)opts.dat[i + 2] << 8) | (u16)opts.dat[i + 3], TCP_CONN_DEFAULT_MSS);
             i += TCP_OPT_MSS_LENGTH;
+            break;
+        case TCP_OPT_WS_KIND:
+            if (i + TCP_OPT_WS_LENGTH > opts.len)
+                return;
+            if ((flags & TCP_HDR_FLAG_SYN) && opts.dat[i + 2] <= 14) {
+                conn->send_window_scale = opts.dat[i + 2];
+                conn->use_window_scale = true;
+            }
+            i += TCP_OPT_WS_LENGTH;
             break;
         default:
             // All options except for EOL and NOP have a "length" field after the "kind" field. We use the "length"
@@ -943,14 +993,14 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
         print_dbg(PDBG, STR("Could not find a connection for TCP segment from peer (%s). Sending a reset.\n"),
                   tcp_conn_format_raw(host_addr, peer_addr, host_port, peer_port, &tmp));
         return tcp_send_segment_raw(host_addr, peer_addr, host_port, peer_port, u32_from_net_u32(tcp_hdr->ack_num),
-                                    u32_from_net_u32(tcp_hdr->seq_num), u16_from_net_u16(tcp_hdr->window_size),
+                                    u32_from_net_u32(tcp_hdr->seq_num), TCP_CONN_RECV_WINDOW_SIZE, 0, false,
                                     TCP_HDR_FLAG_RST, byte_view_new(NULL, 0), sb, tmp);
     }
 
     if (tcp_hdr->header_len > TCP_HDR_LEN_NO_OPT) {
         struct byte_view tcp_options =
             byte_view_new(segment.dat + TCP_HDR_LEN_NO_OPT * 4, (tcp_hdr->header_len - TCP_HDR_LEN_NO_OPT) * 4);
-        tcp_handle_options(conn, tcp_options);
+        tcp_handle_options(conn, tcp_hdr->flags, tcp_options);
     }
 
     switch (conn->state) {
