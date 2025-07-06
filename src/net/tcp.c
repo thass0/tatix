@@ -209,7 +209,7 @@ enum tcp_conn_state {
 
 #define TCP_CONN_DEFAULT_MSS 536 /* Based on RFC 9293 */
 #define TCP_CONN_TIME_WAIT_MS 100 /* This is low so we can re-use connections quickly. */
-#define TCP_CONN_RECV_WINDOW_SIZE 0x2000
+#define TCP_CONN_RECV_BUF_SIZE 0x2000
 
 struct tcp_conn {
     bool is_used;
@@ -232,8 +232,6 @@ struct tcp_conn {
 
     // Reception
     u32 recv_next; // RCV.NXT
-    sz recv_window_real; // RCV.WND (scale applied, can be bigger than a 16-bit unsigned interger).
-    u8 recv_window_scale;
     struct circ_buf recv_buf;
 
     // Set when the connection is put in the TIME_WAIT state. The connection is deleted when `TCP_CONN_TIME_WAIT_MS`
@@ -380,8 +378,6 @@ static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 
     dlist_init_empty(&conn->accept_queue);
 
     conn->recv_next = 0;
-    conn->recv_window_real = TCP_CONN_RECV_WINDOW_SIZE;
-    conn->recv_window_scale = 0;
     conn->recv_buf.data = byte_array_new(NULL, 0);
     conn->recv_buf.head = 0;
     conn->recv_buf.tail = 0;
@@ -580,13 +576,22 @@ static struct result_sz tcp_send_segment(struct tcp_conn *conn, u8 flags, struct
 
     sz n_send = MIN(tcp_send_window_avail(conn), payload.len);
     struct byte_view effective_payload = byte_view_new(payload.dat, n_send);
-
     // NOTE: We must send segments even if `n_send` is 0. This is for control segments, usually.
 
+    // NOTE: On not shrinking the usable window.
+    // With the receive window, we tell the peer how much data can currently accept. The usable window, i.e.
+    // `recv_next + recv_window`, is never allowed to shrink. Between two transmissions, the value of `recv_window` can
+    // decrease by the number of payload bytes we received (and haven't yet processed). But we always advance
+    // `recv_next` by at least the length of the payload (`recv_next` can additionally be advanced by SYN and FIN
+    // segments). This means that the sum `recv_next + recv_window` will increase monotonically.
+    sz recv_window = TCP_CONN_RECV_BUF_SIZE;
+    // The recive buffer is only allocated once we have transitioned from SYN_RCVD to ESTABLISHED.
+    if (conn->state != TCP_CONN_STATE_LISTEN && conn->state != TCP_CONN_STATE_SYN_RCVD)
+        recv_window = circ_buf_space(conn->recv_buf);
+
     struct result res = tcp_send_segment_raw(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port,
-                                             conn->send_next, conn->recv_next, conn->recv_window_real,
-                                             conn->recv_window_scale, conn->use_window_scale, flags, effective_payload,
-                                             sb, arn);
+                                             conn->send_next, conn->recv_next, recv_window, 0, conn->use_window_scale,
+                                             flags, effective_payload, sb, arn);
     if (res.is_error)
         return result_sz_error(res.code);
 
@@ -684,7 +689,7 @@ static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct t
     tcp_conn_update_send_state(conn, hdr);
 
     // We start receiving data in the ESTABLISHED state so we need to allocate a buffer at this point.
-    struct result buf_alloc_res = circ_buf_alloc(&conn->recv_buf, conn->recv_window_real);
+    struct result buf_alloc_res = circ_buf_alloc(&conn->recv_buf, TCP_CONN_RECV_BUF_SIZE);
     if (buf_alloc_res.is_error) {
         print_dbg(
             PWARN,
@@ -995,7 +1000,7 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
         print_dbg(PDBG, STR("Could not find a connection for TCP segment from peer (%s). Sending a reset.\n"),
                   tcp_conn_format_raw(host_addr, peer_addr, host_port, peer_port, &tmp));
         return tcp_send_segment_raw(host_addr, peer_addr, host_port, peer_port, u32_from_net_u32(tcp_hdr->ack_num),
-                                    u32_from_net_u32(tcp_hdr->seq_num), TCP_CONN_RECV_WINDOW_SIZE, 0, false,
+                                    u32_from_net_u32(tcp_hdr->seq_num), TCP_CONN_RECV_BUF_SIZE, 0, false,
                                     TCP_HDR_FLAG_RST, byte_view_new(NULL, 0), sb, tmp);
     }
 
