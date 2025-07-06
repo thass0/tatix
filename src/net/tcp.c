@@ -37,6 +37,21 @@ struct tcp_header {
 
 static_assert(sizeof(struct tcp_header) == 20);
 
+#define TCP_OPT_EOL_KIND 0
+#define TCP_OPT_NOP_KIND 1
+
+struct tcp_option_mss {
+    u8 kind;
+    u8 length;
+    net_u16 value;
+};
+
+static_assert(sizeof(struct tcp_option_mss) == 4);
+
+#define TCP_OPT_MSS_KIND 2
+#define TCP_OPT_MSS_LENGTH 4
+#define TCP_OPT_MSS_VALUE 1460 /* Typical for ethernet with 1500 byte MTUs. */
+
 ///////////////////////////////////////////////////////////////////////////////
 // Circular buffer implementation                                            //
 ///////////////////////////////////////////////////////////////////////////////
@@ -448,12 +463,21 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
         flags |= TCP_HDR_FLAG_RST;
     }
 
+    struct tcp_option_mss mss;
+    if (flags & TCP_HDR_FLAG_SYN) {
+        mss.kind = TCP_OPT_MSS_KIND;
+        mss.length = TCP_OPT_MSS_LENGTH;
+        mss.value = net_u16_from_u16(TCP_OPT_MSS_VALUE);
+    }
+
     struct tcp_header hdr;
     hdr.src_port = net_u16_from_u16(host_port);
     hdr.dest_port = net_u16_from_u16(peer_port);
     hdr.seq_num = net_u32_from_u32(seq_num);
     hdr.ack_num = net_u32_from_u32(ack_num);
     hdr.header_len = TCP_HDR_LEN_NO_OPT;
+    if (flags & TCP_HDR_FLAG_SYN)
+        hdr.header_len++;
     hdr.reserved = 0;
     hdr.flags = flags;
     hdr.window_size = net_u16_from_u16(window_size);
@@ -465,11 +489,16 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
     pseudo_hdr.dest_addr = peer_addr;
     pseudo_hdr.zero = 0;
     pseudo_hdr.protocol = IPV4_PROTOCOL_TCP;
-    pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(hdr) + payload.len);
+    if (flags & TCP_HDR_FLAG_SYN)
+        pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(hdr) + sizeof(mss) + payload.len);
+    else
+        pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(hdr) + payload.len);
 
     net_u16 checksum = net_u16_from_u16(0);
     checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&hdr, sizeof(hdr)));
     checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&pseudo_hdr, sizeof(pseudo_hdr)));
+    if (flags & TCP_HDR_FLAG_SYN)
+        checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&mss, sizeof(mss)));
     checksum = internet_checksum_iterate(checksum, payload);
     hdr.checksum = internet_checksum_finalize(checksum);
 
@@ -480,6 +509,13 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
         if (!buf)
             return result_error(ENOMEM);
         assert(byte_buf_append(buf, payload) == payload.len);
+    }
+
+    if (flags & TCP_HDR_FLAG_SYN) {
+        buf = send_buf_prepend(&sb, sizeof(mss));
+        if (!buf)
+            return result_error(ENOMEM);
+        assert(byte_buf_append(buf, byte_view_new((void *)&mss, sizeof(mss))) == sizeof(mss));
     }
 
     buf = send_buf_prepend(&sb, sizeof(hdr));
@@ -837,26 +873,22 @@ static bool tcp_checksum_is_ok(struct tcp_ip_pseudo_header pseudo_hdr, struct by
     return internet_checksum_finalize(checksum).inner == 0;
 }
 
-#define TCP_OPT_EOL 0
-#define TCP_OPT_NOP 1
-#define TCP_OPT_MSS 2
-
 static void tcp_handle_options(struct tcp_conn *conn, struct byte_view opts)
 {
     sz i = 0;
     while (i < opts.len) {
         switch (opts.dat[i]) {
-        case TCP_OPT_EOL:
+        case TCP_OPT_EOL_KIND:
             return;
-        case TCP_OPT_NOP:
+        case TCP_OPT_NOP_KIND:
             i++;
             break;
-        case TCP_OPT_MSS:
+        case TCP_OPT_MSS_KIND:
             // We can ignore the length field because it's always 4.
-            if (i + 4 > opts.len)
+            if (i + TCP_OPT_MSS_LENGTH > opts.len)
                 return;
-            conn->mss = ((u16)opts.dat[i + 2] << 8) | (u16)opts.dat[i + 3];
-            i += 4;
+            conn->mss = MAX(((u16)opts.dat[i + 2] << 8) | (u16)opts.dat[i + 3], TCP_CONN_DEFAULT_MSS);
+            i += TCP_OPT_MSS_LENGTH;
             break;
         default:
             // All options except for EOL and NOP have a "length" field after the "kind" field. We use the "length"
