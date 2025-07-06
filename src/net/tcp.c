@@ -86,17 +86,19 @@ static inline bool circ_buf_is_full(struct circ_buf *buf)
     return (buf->head + 1) % buf->data.len == buf->tail;
 }
 
-static inline sz circ_buf_count(struct circ_buf *buf)
+static inline sz circ_buf_count(struct circ_buf buf)
 {
-    assert(buf);
-    assert(buf->data.len);
-    return (buf->head - buf->tail + buf->data.len) % buf->data.len;
+    assert(buf.data.len >= 0);
+    if (buf.data.len == 0)
+        return 0;
+    return (buf.head - buf.tail + buf.data.len) % buf.data.len;
 }
 
-static inline sz circ_buf_space(struct circ_buf *buf)
+static inline sz circ_buf_space(struct circ_buf buf)
 {
-    assert(buf);
-    return buf->data.len - 1 - circ_buf_count(buf);
+    if (buf.data.len == 0)
+        return 0;
+    return buf.data.len - 1 - circ_buf_count(buf);
 }
 
 static struct result circ_buf_alloc(struct circ_buf *buf, sz capacity)
@@ -151,7 +153,7 @@ static struct result circ_buf_write(struct circ_buf *buf, struct byte_view data)
 {
     assert(buf);
 
-    if (data.len > circ_buf_space(buf))
+    if (data.len > circ_buf_space(*buf))
         return result_error(EAGAIN);
 
     for (sz i = 0; i < data.len; i++) {
@@ -169,7 +171,7 @@ static sz circ_buf_read(struct circ_buf *buf, struct byte_buf *dest)
     assert(dest);
 
     sz bytes_read = 0;
-    sz available = circ_buf_count(buf);
+    sz available = circ_buf_count(*buf);
     sz space = dest->cap - dest->len;
     sz to_read = MIN(available, space);
 
@@ -1129,7 +1131,7 @@ struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool
 
     *peer_closed_conn = tcp_conn_closed_by_peer(conn->state);
 
-    sz avail = circ_buf_count(&conn->recv_buf);
+    sz avail = circ_buf_count(conn->recv_buf);
     if (!avail)
         return result_sz_ok(0);
 
