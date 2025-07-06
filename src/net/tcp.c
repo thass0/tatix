@@ -28,7 +28,7 @@ struct tcp_header {
     net_u16 urgent;
 };
 
-#define TCP_HEADER_LEN_NO_OPT 5
+#define TCP_HDR_LEN_NO_OPT 5
 
 #define TCP_HDR_FLAG_FIN BIT(0)
 #define TCP_HDR_FLAG_SYN BIT(1)
@@ -453,7 +453,7 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
     hdr.dest_port = net_u16_from_u16(peer_port);
     hdr.seq_num = net_u32_from_u32(seq_num);
     hdr.ack_num = net_u32_from_u32(ack_num);
-    hdr.header_len = TCP_HEADER_LEN_NO_OPT;
+    hdr.header_len = TCP_HDR_LEN_NO_OPT;
     hdr.reserved = 0;
     hdr.flags = flags;
     hdr.window_size = net_u16_from_u16(window_size);
@@ -885,10 +885,10 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
         return result_ok();
     }
 
-    if (tcp_hdr->header_len < TCP_HEADER_LEN_NO_OPT) {
+    if (tcp_hdr->header_len < TCP_HDR_LEN_NO_OPT) {
         print_dbg(PDBG,
                   STR("Received TCP segment with invalid header length %hhd (must be at least " TOSTRING(
-                      TCP_HEADER_LEN_NO_OPT) "). Dropping ...\n"),
+                      TCP_HDR_LEN_NO_OPT) "). Dropping ...\n"),
                   tcp_hdr->header_len);
         return result_ok();
     }
@@ -915,9 +915,9 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
                                     TCP_HDR_FLAG_RST, byte_view_new(NULL, 0), sb, tmp);
     }
 
-    if (tcp_hdr->header_len > TCP_HEADER_LEN_NO_OPT) {
+    if (tcp_hdr->header_len > TCP_HDR_LEN_NO_OPT) {
         struct byte_view tcp_options =
-            byte_view_new(segment.dat + TCP_HEADER_LEN_NO_OPT * 4, (tcp_hdr->header_len - TCP_HEADER_LEN_NO_OPT) * 4);
+            byte_view_new(segment.dat + TCP_HDR_LEN_NO_OPT * 4, (tcp_hdr->header_len - TCP_HDR_LEN_NO_OPT) * 4);
         tcp_handle_options(conn, tcp_options);
     }
 
