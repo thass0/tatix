@@ -376,15 +376,14 @@ static struct tcp_conn *web_wait_accept_conn(struct tcp_conn *listen_conn)
     return conn;
 }
 
-static struct result web_respond_close(struct tcp_conn *conn, struct byte_view response, struct send_buf sb,
-                                       struct arena tmp)
+static struct result web_respond_close(struct tcp_conn *conn, struct byte_view response, struct arena tmp)
 {
     sz n_transmitted = 0;
     bool peer_closed_conn = false;
 
     while (!peer_closed_conn) {
         struct byte_view transmit = byte_view_skip(response, n_transmitted);
-        struct result_sz res = tcp_conn_send(conn, transmit, &peer_closed_conn, sb, tmp);
+        struct result_sz res = tcp_conn_send(conn, transmit, &peer_closed_conn, tmp);
         if (res.is_error)
             return result_error(res.code);
 
@@ -395,7 +394,7 @@ static struct result web_respond_close(struct tcp_conn *conn, struct byte_view r
         sleep_ms(time_ms_new(10)); // Wait a bit for ACKs to arrive.
     }
 
-    return tcp_conn_close(&conn, sb, tmp);
+    return tcp_conn_close(&conn, tmp);
 }
 
 // Poll the TCP module for newly received data and store it in `recv_buf`.
@@ -426,8 +425,7 @@ static struct result_sz web_recv_retry(struct tcp_conn *conn, struct byte_buf *r
 }
 
 // Try receiving a full HTTP header by polling the `web_recv_retry` function.
-static struct result_sz web_recv_http_request(struct tcp_conn *conn, struct byte_buf *recv_buf, struct send_buf sb,
-                                              struct arena tmp)
+static struct result_sz web_recv_http_request(struct tcp_conn *conn, struct byte_buf *recv_buf, struct arena tmp)
 {
     assert(conn);
     assert(recv_buf);
@@ -454,7 +452,7 @@ static struct result_sz web_recv_http_request(struct tcp_conn *conn, struct byte
             struct byte_buf response_buf = byte_buf_from_array(byte_array_from_arena(1028, &tmp));
             http_build_response(HTTP_STATUS_INSUFFICIENT_STORAGE, HTTP_CONTENT_TYPE_TEXT_HTML,
                                 byte_view_from_str(insufficient_storage_body), &response_buf);
-            web_respond_close(conn, byte_view_from_buf(response_buf), sb, tmp);
+            web_respond_close(conn, byte_view_from_buf(response_buf), tmp);
             print_dbg(
                 PWARN,
                 STR("Received more data than fits the receive buffer. Closed the connection with a 507 error.\n"));
@@ -472,25 +470,24 @@ static struct result_sz web_recv_http_request(struct tcp_conn *conn, struct byte
 
 #define WEB_MAX_RESPONSE_SIZE BIT(22) /* 4 MiB */
 
-static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs_node *root, struct send_buf sb,
-                                     struct arena tmp)
+static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs_node *root, struct arena tmp)
 {
     struct tcp_conn *conn = web_wait_accept_conn(listen_conn);
 
     print_dbg(PDBG, STR("Accepted connection %s\n"), tcp_conn_format(conn, &tmp));
 
     struct byte_buf recv_buf = byte_buf_from_array(byte_array_from_arena(1024, &tmp));
-    struct result_sz res = web_recv_http_request(conn, &recv_buf, sb, tmp);
+    struct result_sz res = web_recv_http_request(conn, &recv_buf, tmp);
     if (res.is_error) {
         print_dbg(PDBG, STR("Failed to receive HTTP request for %s. Closing ...\n"), tcp_conn_format(conn, &tmp));
-        tcp_conn_close(&conn, sb, tmp);
+        tcp_conn_close(&conn, tmp);
         return result_error(res.code);
     }
 
     sz n_received = result_sz_checked(res);
     if (!n_received) {
         print_dbg(PDBG, STR("Didn't receive any data for %s. Closing ...\n"), tcp_conn_format(conn, &tmp));
-        tcp_conn_close(&conn, sb, tmp);
+        tcp_conn_close(&conn, tmp);
         return result_ok();
     }
 
@@ -499,25 +496,23 @@ static struct result web_handle_conn(struct tcp_conn *listen_conn, struct ram_fs
     struct result http_res = http_handle_request(root, str_from_byte_buf(recv_buf), &response_buf, tmp);
     if (http_res.is_error) {
         print_dbg(PDBG, STR("Failed to handle HTTP request for %s. Closing ...\n"), tcp_conn_format(conn, &tmp));
-        tcp_conn_close(&conn, sb, tmp);
+        tcp_conn_close(&conn, tmp);
         return http_res;
     }
 
-    return web_respond_close(conn, byte_view_from_buf(response_buf), sb, tmp);
+    return web_respond_close(conn, byte_view_from_buf(response_buf), tmp);
 }
 
 struct result web_listen(struct ipv4_addr ip_addr, u16 port, struct ram_fs_node *root)
 {
     struct arena tmp = arena_new(option_byte_array_checked(kvalloc_alloc(0x4000 + WEB_MAX_RESPONSE_SIZE, 64)));
-    struct send_buf sb =
-        send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000 + WEB_MAX_RESPONSE_SIZE, 64))));
 
     struct tcp_conn *listen_conn = tcp_conn_listen(ip_addr, port, tmp);
 
     print_dbg(PINFO, STR("Listening for connections on %s:%hu\n"), ipv4_addr_format(ip_addr, &tmp), port);
 
     while (true) {
-        struct result res = web_handle_conn(listen_conn, root, sb, tmp);
+        struct result res = web_handle_conn(listen_conn, root, tmp);
         if (res.is_error)
             print_dbg(PERROR, STR("Error handling connection: %s\n"), error_code_str(res.code));
         sleep_ms(time_ms_new(10));
