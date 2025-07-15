@@ -760,8 +760,7 @@ static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, struct by
     return tcp_send_segment_noqueue(conn, sbq->flags, sbq->seq_num, sbq->checksum, sbq->len, sbq->sb, tmp);
 }
 
-static inline struct result tcp_send_segment_empty(struct tcp_conn *conn, u8 flags, struct send_buf sb,
-                                                   struct arena arn)
+static inline struct result tcp_send_segment_empty(struct tcp_conn *conn, u8 flags, struct arena arn)
 {
     return tcp_send_segment(conn, flags, byte_view_new(NULL, 0), arn);
 }
@@ -771,7 +770,7 @@ static inline struct result tcp_send_segment_empty(struct tcp_conn *conn, u8 fla
 ///////////////////////////////////////////////////////////////////////////////
 
 static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, struct ipv4_addr peer_addr, u16 peer_port,
-                                               struct tcp_header *hdr, struct send_buf sb, struct arena tmp)
+                                               struct tcp_header *hdr, struct arena tmp)
 {
     assert(listen_conn);
     assert(hdr);
@@ -815,11 +814,10 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, str
         STR("Received SYN for a connection in the LISTEN state (%s). Responding with SYN + ACK. Created a new connection in the SYN_RCVD state.\n"),
         tcp_conn_format(conn, &tmp));
 
-    return tcp_send_segment_empty(conn, TCP_HDR_FLAG_SYN | TCP_HDR_FLAG_ACK, sb, tmp);
+    return tcp_send_segment_empty(conn, TCP_HDR_FLAG_SYN | TCP_HDR_FLAG_ACK, tmp);
 }
 
-static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct tcp_header *hdr, struct send_buf sb,
-                                                 struct arena tmp)
+static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct tcp_header *hdr, struct arena tmp)
 {
     assert(conn);
     assert(hdr);
@@ -847,7 +845,7 @@ static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct t
             PWARN,
             STR("Failed to allocate receive buffer for a connection (%s). Resetting and deleting the connection.\n"),
             tcp_conn_format(conn, &tmp));
-        tcp_send_segment_empty(conn, TCP_HDR_FLAG_RST, sb, tmp);
+        tcp_send_segment_empty(conn, TCP_HDR_FLAG_RST, tmp);
         tcp_free_conn(conn);
         return result_error(ENOMEM);
     }
@@ -861,7 +859,7 @@ static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct t
 }
 
 static struct result tcp_handle_receive_established(struct tcp_conn *conn, struct tcp_header *hdr,
-                                                    struct byte_view payload, struct send_buf sb, struct arena tmp)
+                                                    struct byte_view payload, struct arena tmp)
 {
     assert(conn);
     assert(hdr);
@@ -889,13 +887,13 @@ static struct result tcp_handle_receive_established(struct tcp_conn *conn, struc
             STR("Received FIN for a connection in the ESTABLISHED state (%s). Responding with ACK. The connection is in the CLOSE_WAIT state now.\n"),
             tcp_conn_format(conn, &tmp));
 
-        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, tmp);
     }
 
     if (n_received > 0) {
         print_dbg(PDBG, STR("Received %ld bytes of data for connection %s. Responding with ACK.\n"), n_received,
                   tcp_conn_format(conn, &tmp));
-        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, tmp);
     }
 
     return result_ok();
@@ -918,7 +916,7 @@ static void tcp_handle_receive_last_ack(struct tcp_conn *conn, struct tcp_header
 }
 
 static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct tcp_header *hdr,
-                                                   struct byte_view payload, struct send_buf sb, struct arena tmp)
+                                                   struct byte_view payload, struct arena tmp)
 {
     assert(conn);
     assert(hdr);
@@ -944,7 +942,7 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
             STR("Received FIN + ACK for a connection in the FIN_WAIT_1 state (%s). Responding with ACK. The connection is in the TIME_WAIT state now.\n"),
             tcp_conn_format(conn, &tmp));
 
-        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_FIN) {
         conn->state = TCP_CONN_STATE_CLOSING;
         tcp_conn_update_send_state(conn, hdr);
@@ -955,7 +953,7 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
             STR("Received FIN for a connection in the FIN_WAIT_1 state (%s). Responding with ACK. The connection is in the CLOSING state now.\n"),
             tcp_conn_format(conn, &tmp));
 
-        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_ACK) {
         conn->state = TCP_CONN_STATE_FIN_WAIT_2;
         tcp_conn_update_send_state(conn, hdr);
@@ -974,7 +972,7 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
 }
 
 static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct tcp_header *hdr,
-                                                   struct byte_view payload, struct send_buf sb, struct arena tmp)
+                                                   struct byte_view payload, struct arena tmp)
 {
     assert(conn);
     assert(hdr);
@@ -1002,7 +1000,7 @@ static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct
         STR("Received FIN for a connection in the FIN_WAIT_2 state (%s). Responding with ACK. The connection is in the TIME_WAIT state now.\n"),
         tcp_conn_format(conn, &tmp));
 
-    return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
+    return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, tmp);
 }
 
 static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header *hdr, struct arena tmp)
@@ -1034,7 +1032,7 @@ static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header 
 }
 
 static struct result tcp_handle_receive_time_wait(struct tcp_conn *conn, struct tcp_header *hdr,
-                                                  struct byte_view payload, struct send_buf sb, struct arena tmp)
+                                                  struct byte_view payload, struct arena tmp)
 {
     assert(conn);
     assert(hdr);
@@ -1062,7 +1060,7 @@ static struct result tcp_handle_receive_time_wait(struct tcp_conn *conn, struct 
         STR("Received FIN for a connection in the TIME_WAIT state (%s). Responding with ACK. The connection remains in the TIME_WAIT state.\n"),
         tcp_conn_format(conn, &tmp));
 
-    return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, sb, tmp);
+    return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, tmp);
 }
 
 static bool tcp_checksum_is_ok(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment)
@@ -1167,25 +1165,25 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
 
     switch (conn->state) {
     case TCP_CONN_STATE_LISTEN:
-        return tcp_handle_receive_listen(conn, peer_addr, peer_port, tcp_hdr, sb, tmp);
+        return tcp_handle_receive_listen(conn, peer_addr, peer_port, tcp_hdr, tmp);
     case TCP_CONN_STATE_SYN_RCVD:
-        return tcp_handle_receive_syn_rcvd(conn, tcp_hdr, sb, tmp);
+        return tcp_handle_receive_syn_rcvd(conn, tcp_hdr, tmp);
     case TCP_CONN_STATE_ESTABLISHED:
-        return tcp_handle_receive_established(conn, tcp_hdr, payload, sb, tmp);
+        return tcp_handle_receive_established(conn, tcp_hdr, payload, tmp);
     case TCP_CONN_STATE_CLOSE_WAIT:
         return result_ok(); // We are just waiting for the user to close the connection. There is nothing to do.
     case TCP_CONN_STATE_LAST_ACK:
         tcp_handle_receive_last_ack(conn, tcp_hdr, tmp);
         return result_ok();
     case TCP_CONN_STATE_FIN_WAIT_1:
-        return tcp_handle_receive_fin_wait_1(conn, tcp_hdr, payload, sb, tmp);
+        return tcp_handle_receive_fin_wait_1(conn, tcp_hdr, payload, tmp);
     case TCP_CONN_STATE_FIN_WAIT_2:
-        return tcp_handle_receive_fin_wait_2(conn, tcp_hdr, payload, sb, tmp);
+        return tcp_handle_receive_fin_wait_2(conn, tcp_hdr, payload, tmp);
     case TCP_CONN_STATE_CLOSING:
         tcp_handle_receive_closing(conn, tcp_hdr, tmp);
         return result_ok();
     case TCP_CONN_STATE_TIME_WAIT:
-        return tcp_handle_receive_time_wait(conn, tcp_hdr, payload, sb, tmp);
+        return tcp_handle_receive_time_wait(conn, tcp_hdr, payload, tmp);
     case TCP_CONN_STATE_RESET:
         return result_ok(); // We are just waiting for the user to close the connection. There is nothing to do.
     default:
@@ -1246,7 +1244,7 @@ static inline bool tcp_conn_closed_by_peer(enum tcp_conn_state state)
 }
 
 struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, bool *peer_closed_conn,
-                               struct send_buf sb, struct arena tmp)
+                               struct arena tmp)
 {
     assert(global_tcp_is_initialized);
     assert(conn);
@@ -1299,7 +1297,7 @@ struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool
     return result_sz_ok(avail);
 }
 
-struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct send_buf sb, struct arena tmp)
+struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct arena tmp)
 {
     assert(global_tcp_is_initialized);
     assert(conn_ptr);
@@ -1322,7 +1320,7 @@ struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct send_buf sb, str
         // when looking up or allocating connections.
 
         // TODO: I don't get why we need to send an ACK here ... (but connections don't close correctly without it).
-        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_FIN | TCP_HDR_FLAG_ACK, sb, tmp);
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_FIN | TCP_HDR_FLAG_ACK, tmp);
     }
 
     if (conn->state == TCP_CONN_STATE_CLOSE_WAIT) {
@@ -1330,7 +1328,7 @@ struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct send_buf sb, str
 
         // The user has now lost access to this connection. We are only waiting to receive an ACK from the peer for
         // this FIN and then the connection will be deleted.
-        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_FIN | TCP_HDR_FLAG_ACK, sb, tmp);
+        return tcp_send_segment_empty(conn, TCP_HDR_FLAG_FIN | TCP_HDR_FLAG_ACK, tmp);
     }
 
     // All other states mean that a close operation is already in progress so we don't need to act.

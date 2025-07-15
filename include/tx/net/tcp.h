@@ -54,7 +54,7 @@ struct tcp_conn *tcp_conn_accept(struct tcp_conn *listen_conn);
 // function just returns 0. You are advised to check the `peer_closed_conn` flag and, if it's set, stop retrying
 // transmission after a while.
 struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, bool *peer_closed_conn,
-                               struct send_buf sb, struct arena tmp);
+                               struct arena tmp);
 
 // Store data received on the connection `conn` into `buf`. On success, returns the maximum number of bytes available
 // to recive. This means 0 is returned if there is no data. In this case, wait a bit and try again. If there is more
@@ -65,6 +65,6 @@ struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, 
 struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool *peer_closed_conn);
 
 // Close the connection `*conn`. `conn` will be set to NULL since it's stale now.
-struct result tcp_conn_close(struct tcp_conn **conn, struct send_buf sb, struct arena tmp);
+struct result tcp_conn_close(struct tcp_conn **conn, struct arena tmp);
 
 #endif // __TX_NET_TCP_H__
