@@ -661,18 +661,6 @@ static struct result tcp_send_segment_noqueue(struct tcp_conn *conn, u8 flags, u
                                         payload_checksum, payload_len, sb, arn);
 }
 
-static inline sz tcp_send_window_avail(struct tcp_conn *conn)
-{
-    sz send_next = conn->send_next;
-    sz send_unack = conn->send_unack;
-
-    // This is only possible if the window size got decreased so that `send_next` now lies beyond the right edge
-    // of the send window. We can't send any more data until ACKs have arrived and `send_unack` has advanced.
-    if (send_next > send_unack + conn->send_window_real)
-        return 0;
-    return (send_unack + conn->send_window_real) - send_next;
-}
-
 static struct result tcp_poll_transmit_conn(struct tcp_conn *conn, struct arena tmp)
 {
     struct dlist *head = conn->send_queue.next;
@@ -1241,6 +1229,18 @@ struct tcp_conn *tcp_conn_accept(struct tcp_conn *listen_conn)
 static inline bool tcp_conn_closed_by_peer(enum tcp_conn_state state)
 {
     return (state == TCP_CONN_STATE_CLOSE_WAIT) || (state == TCP_CONN_STATE_RESET);
+}
+
+static inline sz tcp_send_window_avail(struct tcp_conn *conn)
+{
+    sz send_next = conn->send_next;
+    sz send_unack = conn->send_unack;
+
+    // This is only possible if the window size got decreased so that `send_next` now lies beyond the right edge
+    // of the send window. We can't send any more data until ACKs have arrived and `send_unack` has advanced.
+    if (send_next > send_unack + conn->send_window_real)
+        return 0;
+    return (send_unack + conn->send_window_real) - send_next;
 }
 
 struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, bool *peer_closed_conn,
