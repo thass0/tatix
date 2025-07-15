@@ -71,25 +71,25 @@ static_assert(sizeof(struct tcp_option_ws) == 4);
 // Circular receive buffer                                                   //
 ///////////////////////////////////////////////////////////////////////////////
 
-struct circ_buf {
+struct recv_buf {
     struct byte_array data;
     sz head;
     sz tail;
 };
 
-static inline bool circ_buf_is_empty(struct circ_buf *buf)
+static inline bool recv_buf_is_empty(struct recv_buf *buf)
 {
     assert(buf);
     return buf->head == buf->tail;
 }
 
-static inline bool circ_buf_is_full(struct circ_buf *buf)
+static inline bool recv_buf_is_full(struct recv_buf *buf)
 {
     assert(buf);
     return (buf->head + 1) % buf->data.len == buf->tail;
 }
 
-static inline sz circ_buf_count(struct circ_buf buf)
+static inline sz recv_buf_count(struct recv_buf buf)
 {
     assert(buf.data.len >= 0);
     if (buf.data.len == 0)
@@ -97,14 +97,14 @@ static inline sz circ_buf_count(struct circ_buf buf)
     return (buf.head - buf.tail + buf.data.len) % buf.data.len;
 }
 
-static inline sz circ_buf_space(struct circ_buf buf)
+static inline sz recv_buf_space(struct recv_buf buf)
 {
     if (buf.data.len == 0)
         return 0;
-    return buf.data.len - 1 - circ_buf_count(buf);
+    return buf.data.len - 1 - recv_buf_count(buf);
 }
 
-static struct result circ_buf_alloc(struct circ_buf *buf, struct pool *alloc)
+static struct result recv_buf_alloc(struct recv_buf *buf, struct pool *alloc)
 {
     assert(buf);
     assert(alloc);
@@ -120,7 +120,7 @@ static struct result circ_buf_alloc(struct circ_buf *buf, struct pool *alloc)
     return result_ok();
 }
 
-static void circ_buf_free(struct circ_buf *buf, struct pool *alloc)
+static void recv_buf_free(struct recv_buf *buf, struct pool *alloc)
 {
     assert(buf);
     assert(alloc);
@@ -130,11 +130,11 @@ static void circ_buf_free(struct circ_buf *buf, struct pool *alloc)
     buf->data = byte_array_new(NULL, 0);
 }
 
-static struct result circ_buf_push_byte(struct circ_buf *buf, byte b)
+static struct result recv_buf_push_byte(struct recv_buf *buf, byte b)
 {
     assert(buf);
 
-    if (circ_buf_is_full(buf))
+    if (recv_buf_is_full(buf))
         return result_error(EAGAIN);
 
     buf->data.dat[buf->head] = b;
@@ -142,11 +142,11 @@ static struct result circ_buf_push_byte(struct circ_buf *buf, byte b)
     return result_ok();
 }
 
-static struct result_byte circ_buf_pop_byte(struct circ_buf *buf)
+static struct result_byte recv_buf_pop_byte(struct recv_buf *buf)
 {
     assert(buf);
 
-    if (circ_buf_is_empty(buf))
+    if (recv_buf_is_empty(buf))
         return result_byte_error(EAGAIN);
 
     byte b = buf->data.dat[buf->tail];
@@ -154,15 +154,15 @@ static struct result_byte circ_buf_pop_byte(struct circ_buf *buf)
     return result_byte_ok(b);
 }
 
-static struct result circ_buf_write(struct circ_buf *buf, struct byte_view data)
+static struct result recv_buf_write(struct recv_buf *buf, struct byte_view data)
 {
     assert(buf);
 
-    if (data.len > circ_buf_space(*buf))
+    if (data.len > recv_buf_space(*buf))
         return result_error(EAGAIN);
 
     for (sz i = 0; i < data.len; i++) {
-        struct result res = circ_buf_push_byte(buf, data.dat[i]);
+        struct result res = recv_buf_push_byte(buf, data.dat[i]);
         if (res.is_error)
             return res;
     }
@@ -170,18 +170,18 @@ static struct result circ_buf_write(struct circ_buf *buf, struct byte_view data)
     return result_ok();
 }
 
-static sz circ_buf_read(struct circ_buf *buf, struct byte_buf *dest)
+static sz recv_buf_read(struct recv_buf *buf, struct byte_buf *dest)
 {
     assert(buf);
     assert(dest);
 
     sz bytes_read = 0;
-    sz available = circ_buf_count(*buf);
+    sz available = recv_buf_count(*buf);
     sz space = dest->cap - dest->len;
     sz to_read = MIN(available, space);
 
     for (sz i = 0; i < to_read; i++) {
-        struct result_byte res = circ_buf_pop_byte(buf);
+        struct result_byte res = recv_buf_pop_byte(buf);
         if (res.is_error)
             break;
 
@@ -290,7 +290,7 @@ struct tcp_conn {
     // Reception
     u32 recv_next; // RCV.NXT
     sz recv_window_size_real; // RCV.WND
-    struct circ_buf recv_buf;
+    struct recv_buf recv_buf;
 
     // Set when the connection is put in the TIME_WAIT state. The connection is deleted when `TCP_CONN_TIME_WAIT_MS`
     // has passed (see `tcp_purge_old_conn` and calls sites of this function).
@@ -309,7 +309,7 @@ static void tcp_free_conn(struct tcp_conn *conn)
 {
     assert(conn);
 
-    circ_buf_free(&conn->recv_buf, &global_tcp_recv_buf_alloc);
+    recv_buf_free(&conn->recv_buf, &global_tcp_recv_buf_alloc);
     dlist_remove(&conn->accept_queue);
 
     // Since we are reusing these, we want to make sure we don't accidentally reuse old data. Thus we set each
@@ -491,7 +491,7 @@ static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *h
             return 0;
         }
 
-        struct result write_res = circ_buf_write(&conn->recv_buf, payload);
+        struct result write_res = recv_buf_write(&conn->recv_buf, payload);
         if (write_res.is_error) {
             assert(write_res.code == EAGAIN);
             print_dbg(PWARN, STR("Not enough space in receive buffer to receive incoming segment (%s). Dropping ...\n"),
@@ -658,7 +658,7 @@ static struct result tcp_send_segment_noqueue(struct tcp_conn *conn, u8 flags, u
     assert(conn);
 
     if (conn->state != TCP_CONN_STATE_LISTEN && conn->state != TCP_CONN_STATE_SYN_RCVD) {
-        sz space = circ_buf_space(conn->recv_buf);
+        sz space = recv_buf_space(conn->recv_buf);
         if (space - conn->recv_window_size_real >= TCP_OPT_MSS_VALUE)
             conn->recv_window_size_real = space;
     }
@@ -836,7 +836,7 @@ static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct t
     tcp_conn_update_send_state(conn, hdr);
 
     // We start receiving data in the ESTABLISHED state so we need to allocate a buffer at this point.
-    struct result buf_alloc_res = circ_buf_alloc(&conn->recv_buf, &global_tcp_recv_buf_alloc);
+    struct result buf_alloc_res = recv_buf_alloc(&conn->recv_buf, &global_tcp_recv_buf_alloc);
     if (buf_alloc_res.is_error) {
         print_dbg(
             PWARN,
@@ -1297,11 +1297,11 @@ struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool
 
     *peer_closed_conn = tcp_conn_closed_by_peer(conn->state);
 
-    sz avail = circ_buf_count(conn->recv_buf);
+    sz avail = recv_buf_count(conn->recv_buf);
     if (!avail)
         return result_sz_ok(0);
 
-    circ_buf_read(&conn->recv_buf, buf);
+    recv_buf_read(&conn->recv_buf, buf);
 
     return result_sz_ok(avail);
 }
