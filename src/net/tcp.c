@@ -12,7 +12,6 @@
 #include <tx/time.h>
 
 static bool global_tcp_is_initialized;
-static struct pool global_tcp_recv_buf_alloc;
 
 struct tcp_header {
     net_u16 src_port;
@@ -297,6 +296,8 @@ struct tcp_conn {
     // has passed (see `tcp_purge_old_conn` and calls sites of this function).
     struct time_ms time_wait_start;
 };
+
+static struct pool global_tcp_recv_buf_alloc;
 
 // If we need to handle more connections at the same time, we could also allocate this array dynamically. The main
 // reason for using an array is that it's simple to search (without requiring much pointer chasing like linked lists
