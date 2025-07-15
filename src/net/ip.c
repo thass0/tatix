@@ -56,6 +56,14 @@ net_u16 internet_checksum_iterate(net_u16 checksum, struct byte_view data)
     return (net_u16){ sum };
 }
 
+net_u16 internet_checksum_add(net_u16 a, net_u16 b)
+{
+    u32 sum = (u32)a.inner + (u32)b.inner;
+    while (sum >> 16)
+        sum = (sum & 0xffff) + (sum >> 16);
+    return (net_u16){ sum };
+}
+
 net_u16 internet_checksum_finalize(net_u16 sum)
 {
     return (net_u16){ ~sum.inner };
