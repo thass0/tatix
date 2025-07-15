@@ -68,7 +68,7 @@ static_assert(sizeof(struct tcp_option_ws) == 4);
 #define TCP_OPT_WS_LENGTH 3
 
 ///////////////////////////////////////////////////////////////////////////////
-// Circular buffer implementation                                            //
+// Circular receive buffer                                                   //
 ///////////////////////////////////////////////////////////////////////////////
 
 struct circ_buf {
@@ -245,7 +245,7 @@ static void tcp_free_sbq_and_sb(struct send_buf_queue *sbq)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Manage connections                                                        //
+// TCP connection                                                            //
 ///////////////////////////////////////////////////////////////////////////////
 
 enum tcp_conn_state {
@@ -516,6 +516,10 @@ static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *h
 
     return payload.len;
 }
+
+///////////////////////////////////////////////////////////////////////////////
+// TCP initialization                                                        //
+///////////////////////////////////////////////////////////////////////////////
 
 struct result tcp_init(void)
 {
