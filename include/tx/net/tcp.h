@@ -8,6 +8,12 @@
 #include <tx/net/netorder.h>
 #include <tx/net/send_buf.h>
 
+struct result tcp_init(void);
+
+// Retransmit all unacknowledged segments of active connections. This function must be called periodically in intervals
+// small enough so the segments can be retransmitted soon after their timer has completed.
+struct result tcp_poll_retransmit(struct arena tmp);
+
 ///////////////////////////////////////////////////////////////////////////////
 // IP side                                                                   //
 ///////////////////////////////////////////////////////////////////////////////
@@ -26,10 +32,6 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
 ///////////////////////////////////////////////////////////////////////////////
 // User interface                                                            //
 ///////////////////////////////////////////////////////////////////////////////
-
-struct result tcp_init(void);
-
-struct result tcp_poll_transmit(struct arena tmp);
 
 // These functions are meant for using TCP. You are handed internal data here so just don't touch it. We're all
 // adults here so this shouldn't be a problem, no?

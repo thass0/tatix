@@ -661,7 +661,7 @@ static struct result tcp_send_segment_noqueue(struct tcp_conn *conn, u8 flags, u
                                         payload_checksum, payload_len, sb, arn);
 }
 
-static struct result tcp_poll_transmit_conn(struct tcp_conn *conn, struct arena tmp)
+static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct arena tmp)
 {
     struct dlist *head = conn->send_queue.next;
 
@@ -697,13 +697,13 @@ static struct result tcp_poll_transmit_conn(struct tcp_conn *conn, struct arena 
     return result_ok();
 }
 
-struct result tcp_poll_transmit(struct arena tmp)
+struct result tcp_poll_retransmit(struct arena tmp)
 {
     struct result res = result_ok();
 
     for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
         if (global_tcp_conn_table[i].is_used) {
-            res = tcp_poll_transmit_conn(&global_tcp_conn_table[i], tmp);
+            res = tcp_poll_retransmit_conn(&global_tcp_conn_table[i], tmp);
             if (res.is_error)
                 return res;
         }
