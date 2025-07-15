@@ -699,6 +699,8 @@ static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct aren
 
 struct result tcp_poll_retransmit(struct arena tmp)
 {
+    assert(global_tcp_is_initialized);
+
     struct result res = result_ok();
 
     for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
