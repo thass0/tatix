@@ -523,6 +523,8 @@ static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *h
 
 struct result tcp_init(void)
 {
+    assert(!global_tcp_is_initialized);
+
     struct option_byte_array recv_mem_opt = kvalloc_alloc(TCP_CONN_RECV_BUF_SIZE * TCP_CONN_MAX_NUM, alignof(void *));
     if (recv_mem_opt.is_none)
         return result_error(ENOMEM);
@@ -552,7 +554,7 @@ struct result tcp_init(void)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Transmit outgoing segments                                                //
+// Transmit and retransmission logic                                         //
 ///////////////////////////////////////////////////////////////////////////////
 
 static struct result tcp_send_segment_noqueue_raw(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
@@ -761,7 +763,7 @@ static inline struct result tcp_send_segment_empty(struct tcp_conn *conn, u8 fla
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// Handle incoming segments                                                  //
+// Handling incoming segments and manage the TCP state machine               //
 ///////////////////////////////////////////////////////////////////////////////
 
 static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, struct ipv4_addr peer_addr, u16 peer_port,
