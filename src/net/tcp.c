@@ -550,10 +550,11 @@ struct result tcp_init(void)
 // Transmit outgoing segments                                                //
 ///////////////////////////////////////////////////////////////////////////////
 
-static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
-                                          u16 peer_port, u32 seq_num, u32 ack_num, sz window_size_real, u8 window_scale,
-                                          bool use_window_scale, u8 flags, net_u16 payload_checksum, sz payload_len,
-                                          struct send_buf sb, struct arena tmp)
+static struct result tcp_send_segment_noqueue_raw(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
+                                                  u16 peer_port, u32 seq_num, u32 ack_num, sz window_size_real,
+                                                  u8 window_scale, bool use_window_scale, u8 flags,
+                                                  net_u16 payload_checksum, sz payload_len, struct send_buf sb,
+                                                  struct arena tmp)
 {
     // We need this to compute the checksum over the pseudo header because the pseudo header contains information
     // from the IP layer.
@@ -644,6 +645,22 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
     return ipv4_send_packet(peer_addr, IPV4_PROTOCOL_TCP, sb, tmp);
 }
 
+static struct result tcp_send_segment_noqueue(struct tcp_conn *conn, u8 flags, u32 seq_num, net_u16 payload_checksum,
+                                              sz payload_len, struct send_buf sb, struct arena arn)
+{
+    assert(conn);
+
+    if (conn->state != TCP_CONN_STATE_LISTEN && conn->state != TCP_CONN_STATE_SYN_RCVD) {
+        sz space = circ_buf_space(conn->recv_buf);
+        if (space - conn->recv_window_size_real >= TCP_OPT_MSS_VALUE)
+            conn->recv_window_size_real = space;
+    }
+
+    return tcp_send_segment_noqueue_raw(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, seq_num,
+                                        conn->recv_next, conn->recv_window_size_real, 0, conn->use_window_scale, flags,
+                                        payload_checksum, payload_len, sb, arn);
+}
+
 static inline sz tcp_send_window_avail(struct tcp_conn *conn)
 {
     sz send_next = conn->send_next;
@@ -654,39 +671,6 @@ static inline sz tcp_send_window_avail(struct tcp_conn *conn)
     if (send_next > send_unack + conn->send_window_real)
         return 0;
     return (send_unack + conn->send_window_real) - send_next;
-}
-
-static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, u32 seq_num, net_u16 payload_checksum,
-                                      sz payload_len, struct send_buf sb, struct arena arn)
-{
-    assert(conn);
-
-    if (conn->state != TCP_CONN_STATE_LISTEN && conn->state != TCP_CONN_STATE_SYN_RCVD) {
-        sz space = circ_buf_space(conn->recv_buf);
-        if (space - conn->recv_window_size_real >= TCP_OPT_MSS_VALUE)
-            conn->recv_window_size_real = space;
-    }
-
-    return tcp_send_segment_raw(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, seq_num,
-                                conn->recv_next, conn->recv_window_size_real, 0, conn->use_window_scale, flags,
-                                payload_checksum, payload_len, sb, arn);
-}
-
-static inline struct result tcp_send_segment_empty(struct tcp_conn *conn, u8 flags, struct send_buf sb,
-                                                   struct arena arn)
-{
-    assert(conn);
-
-    struct result res = tcp_send_segment(conn, flags, conn->send_next, net_u16_from_u16(0), 0, sb, arn);
-    if (res.is_error)
-        return res;
-
-    if (flags & TCP_HDR_FLAG_SYN)
-        conn->send_next++;
-    if (flags & TCP_HDR_FLAG_FIN)
-        conn->send_next++;
-
-    return result_ok();
 }
 
 static struct result tcp_poll_transmit_conn(struct tcp_conn *conn, struct arena tmp)
@@ -711,7 +695,8 @@ static struct result tcp_poll_transmit_conn(struct tcp_conn *conn, struct arena 
         if (now.ms >= sbq->last_try.ms + sbq->retry_after.ms) {
             print_dbg(PDBG, STR("Retransmitting datagram seq_num=%ld n_transmissions=%ld\n"), sbq->seq_num - conn->iss,
                       sbq->n_transmissions);
-            struct result res = tcp_send_segment(conn, sbq->flags, sbq->seq_num, sbq->checksum, sbq->len, sbq->sb, tmp);
+            struct result res =
+                tcp_send_segment_noqueue(conn, sbq->flags, sbq->seq_num, sbq->checksum, sbq->len, sbq->sb, tmp);
             if (res.is_error)
                 return res;
             sbq->n_transmissions++;
@@ -739,7 +724,7 @@ struct result tcp_poll_transmit(struct arena tmp)
     return res;
 }
 
-static struct result tcp_queue_send(struct tcp_conn *conn, u8 flags, struct byte_view fragment, struct arena tmp)
+static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, struct byte_view fragment, struct arena tmp)
 {
     assert(conn);
 
@@ -756,7 +741,7 @@ static struct result tcp_queue_send(struct tcp_conn *conn, u8 flags, struct byte
         return result_error(ENOMEM);
 
     sbq->seq_num = seq_num;
-    sbq->required_ack = seq_num + fragment.len;
+    sbq->required_ack = conn->send_next;
     sbq->flags = flags;
     sbq->last_try = time_current_ms();
     sbq->retry_after = time_ms_new(200);
@@ -764,13 +749,21 @@ static struct result tcp_queue_send(struct tcp_conn *conn, u8 flags, struct byte
     sbq->checksum = internet_checksum_iterate(net_u16_from_u16(0), fragment);
     sbq->len = fragment.len;
 
-    struct byte_buf *buf = send_buf_prepend(&sbq->sb, fragment.len);
-    assert(byte_buf_append(buf, fragment) == fragment.len);
+    if (fragment.len) {
+        struct byte_buf *buf = send_buf_prepend(&sbq->sb, fragment.len);
+        assert(byte_buf_append(buf, fragment) == fragment.len);
+    }
 
     dlist_insert(conn->send_queue.prev, &sbq->link);
 
     print_dbg(PDBG, STR("Transmitting seq_num=%ld\n"), seq_num - conn->iss);
-    return tcp_send_segment(conn, sbq->flags, sbq->seq_num, sbq->checksum, sbq->len, sbq->sb, tmp);
+    return tcp_send_segment_noqueue(conn, sbq->flags, sbq->seq_num, sbq->checksum, sbq->len, sbq->sb, tmp);
+}
+
+static inline struct result tcp_send_segment_empty(struct tcp_conn *conn, u8 flags, struct send_buf sb,
+                                                   struct arena arn)
+{
+    return tcp_send_segment(conn, flags, byte_view_new(NULL, 0), arn);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1160,9 +1153,10 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
     if (!conn) {
         print_dbg(PDBG, STR("Could not find a connection for TCP segment from peer (%s). Sending a reset.\n"),
                   tcp_conn_format_raw(host_addr, peer_addr, host_port, peer_port, &tmp));
-        return tcp_send_segment_raw(host_addr, peer_addr, host_port, peer_port, u32_from_net_u32(tcp_hdr->ack_num),
-                                    u32_from_net_u32(tcp_hdr->seq_num), TCP_CONN_DEFAULT_RECV_WINDOW_SIZE, 0, false,
-                                    TCP_HDR_FLAG_RST, net_u16_from_u16(0), 0, sb, tmp);
+        return tcp_send_segment_noqueue_raw(host_addr, peer_addr, host_port, peer_port,
+                                            u32_from_net_u32(tcp_hdr->ack_num), u32_from_net_u32(tcp_hdr->seq_num),
+                                            TCP_CONN_DEFAULT_RECV_WINDOW_SIZE, 0, false, TCP_HDR_FLAG_RST,
+                                            net_u16_from_u16(0), 0, sb, tmp);
     }
 
     if (tcp_hdr->header_len > TCP_HDR_LEN_NO_OPT) {
@@ -1277,7 +1271,7 @@ struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, 
             return result_sz_ok(n_sent);
 
         struct byte_view fragment = byte_view_new(payload.dat + i, MIN(payload.len - i, len));
-        res = tcp_queue_send(conn, TCP_HDR_FLAG_ACK, fragment, tmp);
+        res = tcp_send_segment(conn, TCP_HDR_FLAG_ACK, fragment, tmp);
         if (res.is_error)
             return result_sz_error(res.code);
 
