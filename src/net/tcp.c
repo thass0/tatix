@@ -456,7 +456,12 @@ static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 
     return conn;
 }
 
-static bool seq_gt(u32 a, u32 b)
+static inline sz seq_num_relative(struct tcp_conn *conn, sz seq_num)
+{
+    return (u32)seq_num - (u32)conn->iss;
+}
+
+static inline bool seq_gt(u32 a, u32 b)
 {
     return (i64)a - (i64)b > 0;
 }
@@ -678,7 +683,7 @@ static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct aren
         // We can remove the buffer from the retransmission queue if the cummulative ACK numbers we received
         // are greater than the last ACK number required by the buffer.
         if (seq_gt(conn->send_unack, sbq->required_ack)) {
-            print_dbg(PDBG, STR("Freeing sbq 0x%lx seq_num=%ld\n"), &sbq, sbq->seq_num - conn->iss);
+            print_dbg(PDBG, STR("Freeing sbq 0x%lx seq_num=%ld\n"), &sbq, seq_num_relative(conn, sbq->seq_num));
             struct dlist *next = head->next;
             dlist_remove(head);
             head = next;
@@ -688,8 +693,8 @@ static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct aren
 
         struct time_ms now = time_current_ms();
         if (now.ms >= sbq->last_try.ms + sbq->retry_after.ms) {
-            print_dbg(PDBG, STR("Retransmitting datagram seq_num=%ld n_transmissions=%ld\n"), sbq->seq_num - conn->iss,
-                      sbq->n_transmissions);
+            print_dbg(PDBG, STR("Retransmitting datagram seq_num=%ld n_transmissions=%ld\n"),
+                      seq_num_relative(conn, sbq->seq_num), sbq->n_transmissions);
             struct result res =
                 tcp_send_segment_noqueue(conn, sbq->flags, sbq->seq_num, sbq->checksum, sbq->len, sbq->sb, tmp);
             if (res.is_error)
@@ -753,7 +758,6 @@ static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, struct by
 
     dlist_insert(conn->send_queue.prev, &sbq->link);
 
-    print_dbg(PDBG, STR("Transmitting seq_num=%ld\n"), seq_num - conn->iss);
     return tcp_send_segment_noqueue(conn, sbq->flags, sbq->seq_num, sbq->checksum, sbq->len, sbq->sb, tmp);
 }
 
