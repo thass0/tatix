@@ -230,6 +230,17 @@ void task_net_receive(void *ctx_ptr)
     }
 }
 
+void task_tcp_poll_transmit(void *ctx_ptr __unused)
+{
+    struct arena tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
+    while (true) {
+        struct result res = tcp_poll_transmit(tmp_arn);
+        if (res.is_error)
+            print_dbg(PDBG, STR("Error: %hu\n"), res.code);
+        sleep_ms(time_ms_new(10));
+    }
+}
+
 void task_net_ping(void *ctx_ptr __unused)
 {
     struct result res = result_ok();
@@ -310,6 +321,7 @@ __noreturn void kernel_init(void)
     web_listen_ctx.root = web_dir;
 
     sched_create_task(task_net_ping, NULL);
+    sched_create_task(task_tcp_poll_transmit, NULL);
     sched_create_task(task_net_receive, &recv_ctx);
     sched_create_task(task_web_listen, &web_listen_ctx);
 

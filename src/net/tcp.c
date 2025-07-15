@@ -196,6 +196,56 @@ static sz circ_buf_read(struct circ_buf *buf, struct byte_buf *dest)
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+// Send buffer queue                                                         //
+///////////////////////////////////////////////////////////////////////////////
+
+#define TCP_SBQ_NUM 1024
+#define TCP_SB_MAX_LEN 2048
+
+static struct pool global_tcp_sbq_alloc;
+static struct pool global_tcp_sb_alloc;
+
+struct send_buf_queue {
+    struct dlist link;
+    struct send_buf sb;
+
+    u32 seq_num;
+    u32 required_ack;
+    u8 flags;
+    net_u16 checksum;
+    sz len;
+
+    sz n_transmissions;
+    struct time_ms retry_after;
+    struct time_ms last_try;
+};
+
+static struct send_buf_queue *tcp_alloc_sbq_and_sb(void)
+{
+    struct send_buf_queue *sbq = pool_alloc(&global_tcp_sbq_alloc);
+    if (!sbq)
+        return NULL;
+
+    void *sb_mem = pool_alloc(&global_tcp_sb_alloc);
+    if (!sb_mem) {
+        pool_free(&global_tcp_sbq_alloc, sbq);
+        return NULL;
+    }
+
+    sbq->sb = send_buf_new(arena_new(byte_array_new(sb_mem, TCP_SB_MAX_LEN)));
+
+    return sbq;
+}
+
+static void tcp_free_sbq_and_sb(struct send_buf_queue *sbq)
+{
+    assert(sbq);
+
+    pool_free(&global_tcp_sb_alloc, sbq->sb.orig_arn.beg);
+    pool_free(&global_tcp_sbq_alloc, sbq);
+}
+
+///////////////////////////////////////////////////////////////////////////////
 // Manage connections                                                        //
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -236,6 +286,7 @@ struct tcp_conn {
     sz send_window_real; // SND.WND (scale applied, can be bigger than a 16-bit unsigned integer).
     u8 send_window_scale;
     u32 iss; // Initial send sequence number (ISS).
+    struct dlist send_queue;
 
     // Reception
     u32 recv_next; // RCV.NXT
@@ -397,6 +448,8 @@ static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 
     conn->send_window_real = 0;
     conn->send_window_scale = 0;
 
+    dlist_init_empty(&conn->send_queue);
+
     conn->time_wait_start = time_ms_new(0);
 
     return conn;
@@ -468,7 +521,27 @@ struct result tcp_init(void)
     struct option_byte_array recv_mem_opt = kvalloc_alloc(TCP_CONN_RECV_BUF_SIZE * TCP_CONN_MAX_NUM, alignof(void *));
     if (recv_mem_opt.is_none)
         return result_error(ENOMEM);
-    global_tcp_recv_buf_alloc = pool_new(option_byte_array_checked(recv_mem_opt), TCP_CONN_RECV_BUF_SIZE);
+    struct byte_array recv_mem = option_byte_array_checked(recv_mem_opt);
+    global_tcp_recv_buf_alloc = pool_new(recv_mem, TCP_CONN_RECV_BUF_SIZE);
+
+    struct option_byte_array sbq_mem_opt =
+        kvalloc_alloc(sizeof(struct send_buf_queue) * TCP_SBQ_NUM, alignof(struct send_buf_queue));
+    if (sbq_mem_opt.is_none) {
+        kvalloc_free(recv_mem);
+        return result_error(ENOMEM);
+    }
+    struct byte_array sbq_mem = option_byte_array_checked(sbq_mem_opt);
+    global_tcp_sbq_alloc = pool_new(sbq_mem, sizeof(struct send_buf_queue));
+
+    struct option_byte_array sb_mem_opt = kvalloc_alloc(TCP_SB_MAX_LEN * TCP_SBQ_NUM, alignof(void *));
+    if (sb_mem_opt.is_none) {
+        kvalloc_free(recv_mem);
+        kvalloc_free(sbq_mem);
+        return result_error(ENOMEM);
+    }
+    struct byte_array sb_mem = option_byte_array_checked(sb_mem_opt);
+    global_tcp_sb_alloc = pool_new(sb_mem, TCP_SB_MAX_LEN);
+
     global_tcp_is_initialized = true;
     return result_ok();
 }
@@ -479,8 +552,8 @@ struct result tcp_init(void)
 
 static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
                                           u16 peer_port, u32 seq_num, u32 ack_num, sz window_size_real, u8 window_scale,
-                                          bool use_window_scale, u8 flags, struct byte_view payload, struct send_buf sb,
-                                          struct arena tmp)
+                                          bool use_window_scale, u8 flags, net_u16 payload_checksum, sz payload_len,
+                                          struct send_buf sb, struct arena tmp)
 {
     // We need this to compute the checksum over the pseudo header because the pseudo header contains information
     // from the IP layer.
@@ -539,26 +612,19 @@ static struct result tcp_send_segment_raw(struct ipv4_addr host_addr, struct ipv
     pseudo_hdr.dest_addr = peer_addr;
     pseudo_hdr.zero = 0;
     pseudo_hdr.protocol = IPV4_PROTOCOL_TCP;
-    pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(hdr) + opt_size + payload.len);
+    pseudo_hdr.tcp_length = net_u16_from_u16(sizeof(hdr) + opt_size + payload_len);
 
     net_u16 checksum = net_u16_from_u16(0);
+    checksum = internet_checksum_add(checksum, payload_checksum);
     checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&hdr, sizeof(hdr)));
     checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&pseudo_hdr, sizeof(pseudo_hdr)));
     if (use_mss)
         checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&mss, sizeof(mss)));
     if (use_ws)
         checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&ws, sizeof(ws)));
-    checksum = internet_checksum_iterate(checksum, payload);
     hdr.checksum = internet_checksum_finalize(checksum);
 
     struct byte_buf *buf = NULL;
-
-    if (payload.len > 0) {
-        buf = send_buf_prepend(&sb, payload.len);
-        if (!buf)
-            return result_error(ENOMEM);
-        assert(byte_buf_append(buf, payload) == payload.len);
-    }
 
     if (opt_size) {
         buf = send_buf_prepend(&sb, opt_size);
@@ -590,14 +656,10 @@ static inline sz tcp_send_window_avail(struct tcp_conn *conn)
     return (send_unack + conn->send_window_real) - send_next;
 }
 
-static struct result_sz tcp_send_segment(struct tcp_conn *conn, u8 flags, struct byte_view payload, struct send_buf sb,
-                                         struct arena arn)
+static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, u32 seq_num, net_u16 payload_checksum,
+                                      sz payload_len, struct send_buf sb, struct arena arn)
 {
     assert(conn);
-
-    sz n_send = MIN(tcp_send_window_avail(conn), payload.len);
-    struct byte_view effective_payload = byte_view_new(payload.dat, n_send);
-    // NOTE: We must send segments even if `n_send` is 0. This is for control segments, usually.
 
     if (conn->state != TCP_CONN_STATE_LISTEN && conn->state != TCP_CONN_STATE_SYN_RCVD) {
         sz space = circ_buf_space(conn->recv_buf);
@@ -605,30 +667,110 @@ static struct result_sz tcp_send_segment(struct tcp_conn *conn, u8 flags, struct
             conn->recv_window_size_real = space;
     }
 
-    struct result res = tcp_send_segment_raw(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port,
-                                             conn->send_next, conn->recv_next, conn->recv_window_size_real, 0,
-                                             conn->use_window_scale, flags, effective_payload, sb, arn);
-    if (res.is_error)
-        return result_sz_error(res.code);
-
-    // By advancing `send_next`, we increase the number of bytes in flight.
-    conn->send_next += (u32)n_send;
-    if (flags & TCP_HDR_FLAG_SYN)
-        conn->send_next++;
-    if (flags & TCP_HDR_FLAG_FIN)
-        conn->send_next++;
-
-    return result_sz_ok(n_send);
+    return tcp_send_segment_raw(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, seq_num,
+                                conn->recv_next, conn->recv_window_size_real, 0, conn->use_window_scale, flags,
+                                payload_checksum, payload_len, sb, arn);
 }
 
 static inline struct result tcp_send_segment_empty(struct tcp_conn *conn, u8 flags, struct send_buf sb,
                                                    struct arena arn)
 {
     assert(conn);
-    struct result_sz res = tcp_send_segment(conn, flags, byte_view_new(NULL, 0), sb, arn);
+
+    struct result res = tcp_send_segment(conn, flags, conn->send_next, net_u16_from_u16(0), 0, sb, arn);
     if (res.is_error)
-        return result_error(res.code);
+        return res;
+
+    if (flags & TCP_HDR_FLAG_SYN)
+        conn->send_next++;
+    if (flags & TCP_HDR_FLAG_FIN)
+        conn->send_next++;
+
     return result_ok();
+}
+
+static struct result tcp_poll_transmit_conn(struct tcp_conn *conn, struct arena tmp)
+{
+    struct dlist *head = conn->send_queue.next;
+
+    while (head != &conn->send_queue) {
+        struct send_buf_queue *sbq = __container_of(head, struct send_buf_queue, link);
+
+        // We can remove the buffer from the retransmission queue if the cummulative ACK numbers we received
+        // are greater than the last ACK number required by the buffer.
+        if (seq_gt(conn->send_unack, sbq->required_ack)) {
+            print_dbg(PDBG, STR("Freeing sbq 0x%lx seq_num=%ld\n"), &sbq, sbq->seq_num - conn->iss);
+            struct dlist *next = head->next;
+            dlist_remove(head);
+            head = next;
+            tcp_free_sbq_and_sb(sbq);
+            continue;
+        }
+
+        struct time_ms now = time_current_ms();
+        if (now.ms >= sbq->last_try.ms + sbq->retry_after.ms) {
+            print_dbg(PDBG, STR("Retransmitting datagram seq_num=%ld n_transmissions=%ld\n"), sbq->seq_num - conn->iss,
+                      sbq->n_transmissions);
+            struct result res = tcp_send_segment(conn, sbq->flags, sbq->seq_num, sbq->checksum, sbq->len, sbq->sb, tmp);
+            if (res.is_error)
+                return res;
+            sbq->n_transmissions++;
+            sbq->retry_after = time_ms_new(sbq->retry_after.ms * 2);
+        }
+
+        head = head->next;
+    }
+
+    return result_ok();
+}
+
+struct result tcp_poll_transmit(struct arena tmp)
+{
+    struct result res = result_ok();
+
+    for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
+        if (global_tcp_conn_table[i].is_used) {
+            res = tcp_poll_transmit_conn(&global_tcp_conn_table[i], tmp);
+            if (res.is_error)
+                return res;
+        }
+    }
+
+    return res;
+}
+
+static struct result tcp_queue_send(struct tcp_conn *conn, u8 flags, struct byte_view fragment, struct arena tmp)
+{
+    assert(conn);
+
+    u32 seq_num = conn->send_next;
+
+    conn->send_next += fragment.len;
+    if (flags & TCP_HDR_FLAG_SYN)
+        conn->send_next++;
+    if (flags & TCP_HDR_FLAG_FIN)
+        conn->send_next++;
+
+    struct send_buf_queue *sbq = tcp_alloc_sbq_and_sb();
+    if (!sbq)
+        return result_error(ENOMEM);
+
+    sbq->seq_num = seq_num;
+    sbq->required_ack = seq_num + fragment.len;
+    sbq->flags = flags;
+    sbq->last_try = time_current_ms();
+    sbq->retry_after = time_ms_new(200);
+    sbq->n_transmissions = 1;
+    sbq->checksum = internet_checksum_iterate(net_u16_from_u16(0), fragment);
+    sbq->len = fragment.len;
+
+    struct byte_buf *buf = send_buf_prepend(&sbq->sb, fragment.len);
+    assert(byte_buf_append(buf, fragment) == fragment.len);
+
+    dlist_insert(conn->send_queue.prev, &sbq->link);
+
+    print_dbg(PDBG, STR("Transmitting seq_num=%ld\n"), seq_num - conn->iss);
+    return tcp_send_segment(conn, sbq->flags, sbq->seq_num, sbq->checksum, sbq->len, sbq->sb, tmp);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1020,7 +1162,7 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
                   tcp_conn_format_raw(host_addr, peer_addr, host_port, peer_port, &tmp));
         return tcp_send_segment_raw(host_addr, peer_addr, host_port, peer_port, u32_from_net_u32(tcp_hdr->ack_num),
                                     u32_from_net_u32(tcp_hdr->seq_num), TCP_CONN_DEFAULT_RECV_WINDOW_SIZE, 0, false,
-                                    TCP_HDR_FLAG_RST, byte_view_new(NULL, 0), sb, tmp);
+                                    TCP_HDR_FLAG_RST, net_u16_from_u16(0), 0, sb, tmp);
     }
 
     if (tcp_hdr->header_len > TCP_HDR_LEN_NO_OPT) {
@@ -1127,25 +1269,19 @@ struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, 
     len = MIN(len, conn->mss);
     len = MIN(len, payload.len);
 
-    struct result_sz res = result_sz_ok(0);
+    struct result res = result_ok();
     sz n_sent = 0;
 
     for (sz i = 0; i < payload.len; i += len) {
-        if (tcp_send_window_avail(conn) == 0)
+        if (tcp_send_window_avail(conn) < MIN(payload.len - i, len))
             return result_sz_ok(n_sent);
 
         struct byte_view fragment = byte_view_new(payload.dat + i, MIN(payload.len - i, len));
-        res = tcp_send_segment(conn, TCP_HDR_FLAG_ACK, fragment, sb, tmp);
+        res = tcp_queue_send(conn, TCP_HDR_FLAG_ACK, fragment, tmp);
         if (res.is_error)
-            return res;
+            return result_sz_error(res.code);
 
-        sz n_fragment_sent = result_sz_checked(res);
-        n_sent += n_fragment_sent; // Update must happen before returning early.
-
-        // We return early once the entire transmit window has filled. The caller can then wait a bit for while ACKs
-        // for the already-transmitted data arrive and call `tcp_conn_send` again to transmit the rest of the data.
-        if (n_fragment_sent < fragment.len)
-            return result_sz_ok(n_sent);
+        n_sent += fragment.len;
     }
 
     return result_sz_ok(n_sent);
