@@ -12,6 +12,12 @@
 #include <tx/pic.h>
 #include <tx/print.h>
 
+#define E1000_DROP_FRAMES 0
+
+#if E1000_DROP_FRAMES
+#include <tx/asm.h>
+#endif
+
 // The 8254x PCI/PCI-X Family of Gigabit Ethernet Controllers Software Developer’s Manual (2009 version) was used as a
 // source for this driver References to sections are with respect to this document. A copy of the manual used can be
 // found in the manuals/ directory. It could also be found here at the time of writing:
@@ -405,6 +411,15 @@ static struct result e1000_tx_poll(struct e1000_device *dev, struct send_buf sb)
     struct e1000_legacy_tx_desc *tx_desc = &dev->tx_queue[dev->tx_tail];
 
     sz len = send_buf_total_length(sb);
+
+#if E1000_DROP_FRAMES
+    u64 random_value = 0;
+    assert(rdrand_u64(&random_value));
+    if (random_value % 4 == 0) {
+        print_dbg(PDBG, STR("Dropping a frame!\n"));
+        return result_ok();
+    }
+#endif
 
     if (len > E1000_TX_BUF_SIZE)
         return result_error(EINVAL);
