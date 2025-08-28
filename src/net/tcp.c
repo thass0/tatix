@@ -43,6 +43,11 @@ static_assert(sizeof(struct tcp_header) == 20);
 #define TCP_OPT_EOL_KIND 0
 #define TCP_OPT_NOP_KIND 1
 
+// NOTE: The `TCP_OPT_*_LENGTH` constant does not always match the size of the corresponding `struct tcp_option_*`.
+// That's because these structures are used only for constructing outgoing segments, not for parsing options in
+// incoming segments. So these options can contain padding at the end that's not a proper part of the option. This
+// leads to the length of the structure being greater than the length field.
+
 struct tcp_option_mss {
     u8 kind;
     u8 length;
@@ -66,6 +71,20 @@ static_assert(sizeof(struct tcp_option_ws) == 4);
 
 #define TCP_OPT_WS_KIND 3
 #define TCP_OPT_WS_LENGTH 3
+
+struct tcp_option_ts {
+    u8 kind;
+    u8 length;
+    net_u32 tsval;
+    net_u32 tsecr;
+    u8 nop1;
+    u8 nop2;
+} __packed;
+
+static_assert(sizeof(struct tcp_option_ts) == 12);
+
+#define TCP_OPT_TS_KIND 8
+#define TCP_OPT_TS_LENGTH 10
 
 ///////////////////////////////////////////////////////////////////////////////
 // Circular receive buffer                                                   //
@@ -267,6 +286,12 @@ enum tcp_conn_state {
 #define TCP_CONN_RECV_BUF_SIZE 0x4000
 #define TCP_CONN_DEFAULT_RECV_WINDOW_SIZE (TCP_CONN_RECV_BUF_SIZE / 2)
 
+struct tsopt {
+    bool have_ts;
+    u32 tsval;
+    u32 tsecr;
+};
+
 struct tcp_conn {
     bool is_used;
     struct ipv4_addr host_addr;
@@ -295,6 +320,16 @@ struct tcp_conn {
     // Set when the connection is put in the TIME_WAIT state. The connection is deleted when `TCP_CONN_TIME_WAIT_MS`
     // has passed (see `tcp_purge_old_conn` and calls sites of this function).
     struct time_ms time_wait_start;
+
+    // Time stamp option state
+    bool use_time_stamps;
+    u32 ts_recent; // Most recent timestamp received.
+    u32 last_ack_sent; // The sequence number sent in the last ACK segment.
+
+    // Round-trip time and retransmission timeout
+    u32 srtt; // Smooted RTT (in ms).
+    u32 rttvar; // RTT variance (in ms).
+    u32 rto; // Retranmission timeout (in ms).
 };
 
 static struct pool global_tcp_recv_buf_alloc;
@@ -453,7 +488,20 @@ static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 
 
     conn->time_wait_start = time_ms_new(0);
 
+    conn->use_time_stamps = false;
+    conn->ts_recent = 0;
+    conn->last_ack_sent = 0;
+
+    conn->srtt = 0;
+    conn->rttvar = 0;
+    conn->rto = 1000; // Default of 1s.
+
     return conn;
+}
+
+static u32 tcp_get_timestamp_clock(void)
+{
+    return (u32)time_current_ms().ms;
 }
 
 static inline sz seq_num_relative(struct tcp_conn *conn, sz seq_num)
@@ -466,27 +514,60 @@ static inline bool seq_gt(u32 a, u32 b)
     return (i64)a - (i64)b > 0;
 }
 
-static void tcp_conn_update_send_state(struct tcp_conn *conn, struct tcp_header *hdr)
+static inline u32 abs_diff(u32 a, u32 b)
+{
+    return (a > b) ? (a - b) : (b - a);
+}
+
+static void tcp_conn_update_rtt(struct tcp_conn *conn, u32 rtt_sample)
+{
+    // This is according to RFC 6298.
+
+    if (conn->srtt == 0) {
+        conn->srtt = rtt_sample;
+        conn->rttvar = rtt_sample / 2;
+    } else {
+        conn->rttvar = (3 * conn->rttvar + abs_diff(rtt_sample, conn->srtt)) / 4; // beta = 1/4
+        conn->srtt = (7 * conn->srtt + rtt_sample) / 8; // alpha = 1/8
+    }
+
+    conn->rto = conn->srtt + MAX(50, 4 * conn->rttvar); // Minimum granularity of 50ms.
+    conn->rto = MIN(60 * 1000, MAX(1000, conn->rto)); // Minimum RTO is 1s, maximum 60s.
+}
+
+static void tcp_conn_update_send_state(struct tcp_conn *conn, struct tcp_header *hdr, struct tsopt tsopt)
 {
     assert(conn);
 
     if (hdr->flags & TCP_HDR_FLAG_ACK) {
         u32 ack_num = u32_from_net_u32(hdr->ack_num);
-        if (seq_gt(ack_num, conn->send_unack))
+
+        if (seq_gt(ack_num, conn->send_unack)) {
             conn->send_unack = ack_num;
+
+            if (conn->use_time_stamps && tsopt.have_ts && tsopt.tsecr != 0) {
+                u32 current_time = tcp_get_timestamp_clock();
+                u32 rtt_sample = current_time - tsopt.tsecr;
+                tcp_conn_update_rtt(conn, rtt_sample);
+            }
+        }
     }
 
     // NOTE: `conn->send_window_scale` is 0 if window scaling isn't used.
     conn->send_window_real = u16_from_net_u16(hdr->window_size) << conn->send_window_scale;
 }
 
-static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *hdr, struct byte_view payload,
-                                     struct arena tmp)
+static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *hdr, struct tsopt tsopt,
+                                     struct byte_view payload, struct arena tmp)
 {
     assert(conn);
     assert(hdr);
 
     u32 seq_num = u32_from_net_u32(hdr->seq_num);
+
+    if (conn->use_time_stamps && tsopt.have_ts && seq_num <= conn->last_ack_sent &&
+        conn->last_ack_sent < seq_num + payload.len)
+        conn->ts_recent = tsopt.tsval;
 
     if (payload.len > 0) {
         if (seq_num != conn->recv_next) {
@@ -565,8 +646,8 @@ struct result tcp_init(void)
 static struct result tcp_send_segment_noqueue_raw(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
                                                   u16 peer_port, u32 seq_num, u32 ack_num, sz window_size_real,
                                                   u8 window_scale, bool use_window_scale, u8 flags,
-                                                  net_u16 payload_checksum, sz payload_len, struct send_buf sb,
-                                                  struct arena tmp)
+                                                  net_u16 payload_checksum, sz payload_len, u32 ts_recent,
+                                                  bool use_time_stamps, struct send_buf sb, struct arena tmp)
 {
     // We need this to compute the checksum over the pseudo header because the pseudo header contains information
     // from the IP layer.
@@ -590,6 +671,7 @@ static struct result tcp_send_segment_noqueue_raw(struct ipv4_addr host_addr, st
 
     bool use_mss = flags & TCP_HDR_FLAG_SYN;
     bool use_ws = (flags & TCP_HDR_FLAG_SYN) && use_window_scale;
+    bool use_ts = use_time_stamps;
 
     struct tcp_option_mss mss;
     if (use_mss) {
@@ -606,7 +688,18 @@ static struct result tcp_send_segment_noqueue_raw(struct ipv4_addr host_addr, st
         ws.nop = TCP_OPT_NOP_KIND;
     }
 
-    sz opt_size = (use_mss ? sizeof(mss) : 0) + (use_ws ? sizeof(ws) : 0);
+    struct tcp_option_ts ts;
+    if (use_ts) {
+        ts.kind = TCP_OPT_TS_KIND;
+        ts.length = TCP_OPT_TS_LENGTH;
+        ts.tsval = net_u32_from_u32(tcp_get_timestamp_clock());
+        ts.tsecr = net_u32_from_u32(ts_recent);
+        ts.nop1 = TCP_OPT_NOP_KIND;
+        ts.nop2 = TCP_OPT_NOP_KIND;
+    }
+
+    sz opt_size = (use_mss ? sizeof(mss) : 0) + (use_ws ? sizeof(ws) : 0) + (use_ts ? sizeof(ts) : 0);
+    assert(IS_ALIGNED(opt_size, 4)); // `opt_size` must be evenly divisible by 4.
 
     struct tcp_header hdr;
     hdr.src_port = net_u16_from_u16(host_port);
@@ -635,6 +728,8 @@ static struct result tcp_send_segment_noqueue_raw(struct ipv4_addr host_addr, st
         checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&mss, sizeof(mss)));
     if (use_ws)
         checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&ws, sizeof(ws)));
+    if (use_ts)
+        checksum = internet_checksum_iterate(checksum, byte_view_new((void *)&ts, sizeof(ts)));
     hdr.checksum = internet_checksum_finalize(checksum);
 
     struct byte_buf *buf = NULL;
@@ -647,6 +742,8 @@ static struct result tcp_send_segment_noqueue_raw(struct ipv4_addr host_addr, st
             assert(byte_buf_append(buf, byte_view_new((void *)&mss, sizeof(mss))) == sizeof(mss));
         if (use_ws)
             assert(byte_buf_append(buf, byte_view_new((void *)&ws, sizeof(ws))) == sizeof(ws));
+        if (use_ts)
+            assert(byte_buf_append(buf, byte_view_new((void *)&ts, sizeof(ts))) == sizeof(ts));
     }
 
     buf = send_buf_prepend(&sb, sizeof(hdr));
@@ -668,9 +765,12 @@ static struct result tcp_send_segment_noqueue(struct tcp_conn *conn, u8 flags, u
             conn->recv_window_size_real = space;
     }
 
+    if (flags & TCP_HDR_FLAG_ACK)
+        conn->last_ack_sent = conn->recv_next;
+
     return tcp_send_segment_noqueue_raw(conn->host_addr, conn->peer_addr, conn->host_port, conn->peer_port, seq_num,
                                         conn->recv_next, conn->recv_window_size_real, 0, conn->use_window_scale, flags,
-                                        payload_checksum, payload_len, sb, arn);
+                                        payload_checksum, payload_len, conn->ts_recent, conn->use_time_stamps, sb, arn);
 }
 
 static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct arena tmp)
@@ -746,7 +846,7 @@ static struct result tcp_send_segment(struct tcp_conn *conn, u8 flags, struct by
     sbq->required_ack = conn->send_next;
     sbq->flags = flags;
     sbq->last_try = time_current_ms();
-    sbq->retry_after = time_ms_new(200);
+    sbq->retry_after = time_ms_new(conn->rto);
     sbq->n_transmissions = 1;
     sbq->checksum = internet_checksum_iterate(net_u16_from_u16(0), fragment);
     sbq->len = fragment.len;
@@ -771,7 +871,7 @@ static inline struct result tcp_send_segment_empty(struct tcp_conn *conn, u8 fla
 ///////////////////////////////////////////////////////////////////////////////
 
 static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, struct ipv4_addr peer_addr, u16 peer_port,
-                                               struct tcp_header *hdr, struct arena tmp)
+                                               struct tcp_header *hdr, struct tsopt tsopt, struct arena tmp)
 {
     assert(listen_conn);
     assert(hdr);
@@ -810,6 +910,11 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, str
     conn->send_window_scale = listen_conn->send_window_scale;
     conn->use_window_scale = listen_conn->use_window_scale;
 
+    if (tsopt.have_ts) {
+        conn->use_time_stamps = true;
+        conn->ts_recent = tsopt.tsval;
+    }
+
     print_dbg(
         PDBG,
         STR("Received SYN for a connection in the LISTEN state (%s). Responding with SYN + ACK. Created a new connection in the SYN_RCVD state.\n"),
@@ -818,7 +923,8 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, str
     return tcp_send_segment_empty(conn, TCP_HDR_FLAG_SYN | TCP_HDR_FLAG_ACK, tmp);
 }
 
-static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct tcp_header *hdr, struct arena tmp)
+static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct tcp_header *hdr, struct tsopt tsopt,
+                                                 struct arena tmp)
 {
     assert(conn);
     assert(hdr);
@@ -837,7 +943,7 @@ static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct t
         return result_ok();
 
     conn->state = TCP_CONN_STATE_ESTABLISHED;
-    tcp_conn_update_send_state(conn, hdr);
+    tcp_conn_update_send_state(conn, hdr, tsopt);
 
     // We start receiving data in the ESTABLISHED state so we need to allocate a buffer at this point.
     struct result buf_alloc_res = recv_buf_alloc(&conn->recv_buf, &global_tcp_recv_buf_alloc);
@@ -859,15 +965,15 @@ static struct result tcp_handle_receive_syn_rcvd(struct tcp_conn *conn, struct t
     return result_ok();
 }
 
-static struct result tcp_handle_receive_established(struct tcp_conn *conn, struct tcp_header *hdr,
+static struct result tcp_handle_receive_established(struct tcp_conn *conn, struct tcp_header *hdr, struct tsopt tsopt,
                                                     struct byte_view payload, struct arena tmp)
 {
     assert(conn);
     assert(hdr);
     assert(conn->state == TCP_CONN_STATE_ESTABLISHED);
 
-    tcp_conn_update_send_state(conn, hdr);
-    sz n_received = tcp_conn_update_recv_state(conn, hdr, payload, tmp);
+    tcp_conn_update_send_state(conn, hdr, tsopt);
+    sz n_received = tcp_conn_update_recv_state(conn, hdr, tsopt, payload, tmp);
 
     if (hdr->flags & TCP_HDR_FLAG_RST) {
         conn->state = TCP_CONN_STATE_RESET;
@@ -916,7 +1022,7 @@ static void tcp_handle_receive_last_ack(struct tcp_conn *conn, struct tcp_header
     }
 }
 
-static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct tcp_header *hdr,
+static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct tcp_header *hdr, struct tsopt tsopt,
                                                    struct byte_view payload, struct arena tmp)
 {
     assert(conn);
@@ -935,8 +1041,8 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
     if ((hdr->flags & TCP_HDR_FLAG_FIN) && (hdr->flags & TCP_HDR_FLAG_ACK)) {
         conn->state = TCP_CONN_STATE_TIME_WAIT;
         conn->time_wait_start = time_current_ms();
-        tcp_conn_update_send_state(conn, hdr);
-        tcp_conn_update_recv_state(conn, hdr, payload, tmp);
+        tcp_conn_update_send_state(conn, hdr, tsopt);
+        tcp_conn_update_recv_state(conn, hdr, tsopt, payload, tmp);
 
         print_dbg(
             PDBG,
@@ -946,8 +1052,8 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
         return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_FIN) {
         conn->state = TCP_CONN_STATE_CLOSING;
-        tcp_conn_update_send_state(conn, hdr);
-        tcp_conn_update_recv_state(conn, hdr, payload, tmp);
+        tcp_conn_update_send_state(conn, hdr, tsopt);
+        tcp_conn_update_recv_state(conn, hdr, tsopt, payload, tmp);
 
         print_dbg(
             PDBG,
@@ -957,8 +1063,8 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
         return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_ACK) {
         conn->state = TCP_CONN_STATE_FIN_WAIT_2;
-        tcp_conn_update_send_state(conn, hdr);
-        tcp_conn_update_recv_state(conn, hdr, payload, tmp);
+        tcp_conn_update_send_state(conn, hdr, tsopt);
+        tcp_conn_update_recv_state(conn, hdr, tsopt, payload, tmp);
 
         print_dbg(
             PDBG,
@@ -972,7 +1078,7 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
     return result_ok();
 }
 
-static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct tcp_header *hdr,
+static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct tcp_header *hdr, struct tsopt tsopt,
                                                    struct byte_view payload, struct arena tmp)
 {
     assert(conn);
@@ -993,8 +1099,8 @@ static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct
 
     conn->state = TCP_CONN_STATE_TIME_WAIT;
     conn->time_wait_start = time_current_ms();
-    tcp_conn_update_send_state(conn, hdr);
-    tcp_conn_update_recv_state(conn, hdr, payload, tmp);
+    tcp_conn_update_send_state(conn, hdr, tsopt);
+    tcp_conn_update_recv_state(conn, hdr, tsopt, payload, tmp);
 
     print_dbg(
         PDBG,
@@ -1004,7 +1110,8 @@ static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct
     return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, tmp);
 }
 
-static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header *hdr, struct arena tmp)
+static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header *hdr, struct tsopt tsopt,
+                                       struct arena tmp)
 {
     assert(conn);
     assert(hdr);
@@ -1024,7 +1131,7 @@ static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header 
 
     conn->state = TCP_CONN_STATE_TIME_WAIT;
     conn->time_wait_start = time_current_ms();
-    tcp_conn_update_send_state(conn, hdr);
+    tcp_conn_update_send_state(conn, hdr, tsopt);
 
     print_dbg(
         PDBG,
@@ -1032,7 +1139,7 @@ static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header 
         tcp_conn_format(conn, &tmp));
 }
 
-static struct result tcp_handle_receive_time_wait(struct tcp_conn *conn, struct tcp_header *hdr,
+static struct result tcp_handle_receive_time_wait(struct tcp_conn *conn, struct tcp_header *hdr, struct tsopt tsopt,
                                                   struct byte_view payload, struct arena tmp)
 {
     assert(conn);
@@ -1050,8 +1157,8 @@ static struct result tcp_handle_receive_time_wait(struct tcp_conn *conn, struct 
 
     // No user will ever see that data that we receive here. The only purpose of updating the send and receive states
     // at this point is to make sure that we ACK everything that the peer sent us when returning from this function.
-    tcp_conn_update_send_state(conn, hdr);
-    tcp_conn_update_recv_state(conn, hdr, payload, tmp);
+    tcp_conn_update_send_state(conn, hdr, tsopt);
+    tcp_conn_update_recv_state(conn, hdr, tsopt, payload, tmp);
 
     if (!(hdr->flags & TCP_HDR_FLAG_FIN))
         return result_ok();
@@ -1072,41 +1179,58 @@ static bool tcp_checksum_is_ok(struct tcp_ip_pseudo_header pseudo_hdr, struct by
     return internet_checksum_finalize(checksum).inner == 0;
 }
 
-static void tcp_handle_options(struct tcp_conn *conn, u8 flags, struct byte_view opts)
+static struct tsopt tcp_handle_options(struct tcp_conn *conn, u8 flags, struct byte_view opts)
 {
+    struct tsopt tsopt;
+    tsopt.have_ts = false;
+    tsopt.tsval = 0;
+    tsopt.tsecr = 0;
+
     sz i = 0;
     while (i < opts.len) {
         switch (opts.dat[i]) {
         case TCP_OPT_EOL_KIND:
-            return;
+            return tsopt;
         case TCP_OPT_NOP_KIND:
             i++;
             break;
         case TCP_OPT_MSS_KIND:
             // We can ignore the length field because it's always 4.
             if (i + TCP_OPT_MSS_LENGTH > opts.len)
-                return;
+                return tsopt;
             conn->mss = MAX(((u16)opts.dat[i + 2] << 8) | (u16)opts.dat[i + 3], TCP_CONN_DEFAULT_MSS);
             i += TCP_OPT_MSS_LENGTH;
             break;
         case TCP_OPT_WS_KIND:
             if (i + TCP_OPT_WS_LENGTH > opts.len)
-                return;
+                return tsopt;
             if ((flags & TCP_HDR_FLAG_SYN) && opts.dat[i + 2] <= 14) {
                 conn->send_window_scale = opts.dat[i + 2];
                 conn->use_window_scale = true;
             }
             i += TCP_OPT_WS_LENGTH;
             break;
+        case TCP_OPT_TS_KIND:
+            if (i + TCP_OPT_TS_LENGTH > opts.len)
+                return tsopt;
+            tsopt.have_ts = true;
+            tsopt.tsval = ((u32)opts.dat[i + 2] << 24) | ((u32)opts.dat[i + 3] << 16) | ((u32)opts.dat[i + 4] << 8) |
+                          (u32)opts.dat[i + 5];
+            tsopt.tsecr = ((u32)opts.dat[i + 6] << 24) | ((u32)opts.dat[i + 7] << 16) | ((u32)opts.dat[i + 8] << 8) |
+                          (u32)opts.dat[i + 9];
+            i += TCP_OPT_TS_LENGTH;
+            break;
         default:
             // All options except for EOL and NOP have a "length" field after the "kind" field. We use the "length"
             // field to skip the rest of this option.
             if (i + 2 > opts.len)
-                return;
+                return tsopt;
             i += opts.dat[i + 1];
             break;
         }
     }
+
+    return tsopt;
 }
 
 struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct byte_view segment, struct send_buf sb,
@@ -1155,36 +1279,41 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
         return tcp_send_segment_noqueue_raw(host_addr, peer_addr, host_port, peer_port,
                                             u32_from_net_u32(tcp_hdr->ack_num), u32_from_net_u32(tcp_hdr->seq_num),
                                             TCP_CONN_DEFAULT_RECV_WINDOW_SIZE, 0, false, TCP_HDR_FLAG_RST,
-                                            net_u16_from_u16(0), 0, sb, tmp);
+                                            net_u16_from_u16(0), 0, 0, false, sb, tmp);
     }
+
+    struct tsopt tsopt;
+    tsopt.have_ts = false;
+    tsopt.tsval = 0;
+    tsopt.tsecr = 0;
 
     if (tcp_hdr->header_len > TCP_HDR_LEN_NO_OPT) {
         struct byte_view tcp_options =
             byte_view_new(segment.dat + TCP_HDR_LEN_NO_OPT * 4, (tcp_hdr->header_len - TCP_HDR_LEN_NO_OPT) * 4);
-        tcp_handle_options(conn, tcp_hdr->flags, tcp_options);
+        tsopt = tcp_handle_options(conn, tcp_hdr->flags, tcp_options);
     }
 
     switch (conn->state) {
     case TCP_CONN_STATE_LISTEN:
-        return tcp_handle_receive_listen(conn, peer_addr, peer_port, tcp_hdr, tmp);
+        return tcp_handle_receive_listen(conn, peer_addr, peer_port, tcp_hdr, tsopt, tmp);
     case TCP_CONN_STATE_SYN_RCVD:
-        return tcp_handle_receive_syn_rcvd(conn, tcp_hdr, tmp);
+        return tcp_handle_receive_syn_rcvd(conn, tcp_hdr, tsopt, tmp);
     case TCP_CONN_STATE_ESTABLISHED:
-        return tcp_handle_receive_established(conn, tcp_hdr, payload, tmp);
+        return tcp_handle_receive_established(conn, tcp_hdr, tsopt, payload, tmp);
     case TCP_CONN_STATE_CLOSE_WAIT:
         return result_ok(); // We are just waiting for the user to close the connection. There is nothing to do.
     case TCP_CONN_STATE_LAST_ACK:
         tcp_handle_receive_last_ack(conn, tcp_hdr, tmp);
         return result_ok();
     case TCP_CONN_STATE_FIN_WAIT_1:
-        return tcp_handle_receive_fin_wait_1(conn, tcp_hdr, payload, tmp);
+        return tcp_handle_receive_fin_wait_1(conn, tcp_hdr, tsopt, payload, tmp);
     case TCP_CONN_STATE_FIN_WAIT_2:
-        return tcp_handle_receive_fin_wait_2(conn, tcp_hdr, payload, tmp);
+        return tcp_handle_receive_fin_wait_2(conn, tcp_hdr, tsopt, payload, tmp);
     case TCP_CONN_STATE_CLOSING:
-        tcp_handle_receive_closing(conn, tcp_hdr, tmp);
+        tcp_handle_receive_closing(conn, tcp_hdr, tsopt, tmp);
         return result_ok();
     case TCP_CONN_STATE_TIME_WAIT:
-        return tcp_handle_receive_time_wait(conn, tcp_hdr, payload, tmp);
+        return tcp_handle_receive_time_wait(conn, tcp_hdr, tsopt, payload, tmp);
     case TCP_CONN_STATE_RESET:
         return result_ok(); // We are just waiting for the user to close the connection. There is nothing to do.
     default:
