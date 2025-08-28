@@ -9,7 +9,6 @@
 #include <tx/net/netorder.h>
 #include <tx/pool.h>
 #include <tx/print.h>
-#include <tx/time.h>
 
 static bool global_tcp_is_initialized;
 
@@ -90,6 +89,8 @@ static_assert(sizeof(struct tcp_option_ts) == 12);
 // Circular receive buffer                                                   //
 ///////////////////////////////////////////////////////////////////////////////
 
+static sz global_tcp_stats_recv_mem;
+
 struct recv_buf {
     struct byte_array data;
     sz head;
@@ -136,6 +137,8 @@ static struct result recv_buf_alloc(struct recv_buf *buf, struct pool *alloc)
     buf->head = 0;
     buf->tail = 0;
 
+    global_tcp_stats_recv_mem += alloc->size;
+
     return result_ok();
 }
 
@@ -147,6 +150,8 @@ static void recv_buf_free(struct recv_buf *buf, struct pool *alloc)
     if (buf->data.dat)
         pool_free(alloc, buf->data.dat);
     buf->data = byte_array_new(NULL, 0);
+
+    global_tcp_stats_recv_mem -= alloc->size;
 }
 
 static struct result recv_buf_push_byte(struct recv_buf *buf, byte b)
@@ -223,6 +228,8 @@ static sz recv_buf_read(struct recv_buf *buf, struct byte_buf *dest)
 static struct pool global_tcp_sbq_alloc;
 static struct pool global_tcp_sb_alloc;
 
+static sz global_tcp_stats_sbq_mem;
+
 struct send_buf_queue {
     struct dlist link;
     struct send_buf sb;
@@ -252,6 +259,8 @@ static struct send_buf_queue *tcp_alloc_sbq_and_sb(void)
 
     sbq->sb = send_buf_new(arena_new(byte_array_new(sb_mem, TCP_SB_MAX_LEN)));
 
+    global_tcp_stats_sbq_mem += global_tcp_sbq_alloc.size + global_tcp_sb_alloc.size;
+
     return sbq;
 }
 
@@ -261,6 +270,8 @@ static void tcp_free_sbq_and_sb(struct send_buf_queue *sbq)
 
     pool_free(&global_tcp_sb_alloc, sbq->sb.orig_arn.beg);
     pool_free(&global_tcp_sbq_alloc, sbq);
+
+    global_tcp_stats_sbq_mem -= global_tcp_sbq_alloc.size + global_tcp_sb_alloc.size;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1327,6 +1338,9 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
 // User interface                                                            //
 ///////////////////////////////////////////////////////////////////////////////
 
+static sz global_tcp_stats_bytes_tx;
+static sz global_tcp_stats_bytes_rx;
+
 struct tcp_conn *tcp_conn_listen(struct ipv4_addr addr, u16 port, struct arena tmp)
 {
     assert(global_tcp_is_initialized);
@@ -1416,6 +1430,7 @@ struct result_sz tcp_conn_send(struct tcp_conn *conn, struct byte_view payload, 
             return result_sz_error(res.code);
 
         n_sent += fragment.len;
+        global_tcp_stats_bytes_tx += fragment.len;
     }
 
     return result_sz_ok(n_sent);
@@ -1435,6 +1450,8 @@ struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool
         return result_sz_ok(0);
 
     recv_buf_read(&conn->recv_buf, buf);
+
+    global_tcp_stats_bytes_rx += avail;
 
     return result_sz_ok(avail);
 }
@@ -1476,4 +1493,34 @@ struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct arena tmp)
     // All other states mean that a close operation is already in progress so we don't need to act.
 
     return result_ok();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// TCP statistics                                                            //
+///////////////////////////////////////////////////////////////////////////////
+
+static sz tcp_stats_count_conns(void)
+{
+    sz n_conns = 0;
+
+    for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
+        struct tcp_conn *conn = &global_tcp_conn_table[i];
+
+        if (conn->is_used)
+            n_conns++;
+    }
+
+    return n_conns;
+}
+
+struct tcp_stats tcp_stats_get(void)
+{
+    struct tcp_stats stats;
+    stats.uptime = time_current_ms();
+    stats.n_connections = tcp_stats_count_conns();
+    stats.sbq_mem = global_tcp_stats_sbq_mem;
+    stats.recv_mem = global_tcp_stats_recv_mem;
+    stats.bytes_tx = global_tcp_stats_bytes_tx;
+    stats.bytes_rx = global_tcp_stats_bytes_rx;
+    return stats;
 }

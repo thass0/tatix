@@ -336,6 +336,31 @@ static struct result http_serve_file(struct ram_fs_node *root, struct str path, 
     return http_build_response(HTTP_STATUS_OK, content_type, byte_view_from_buf(file_node->data), response_buf);
 }
 
+static struct str stats_format = STR_STATIC(HTML_PAGE("Tatix TCP statistics", "<h1>Tatix TCP statistics</h1>"
+                                                                              "<ul>"
+                                                                              "<li>Uptime: %lu ms</li>"
+                                                                              "<li>Connection(s): %ld</li>"
+                                                                              "<li>SBQ mem: %ld byte(s)</li>"
+                                                                              "<li>Recv mem: %ld byte(s)</li>"
+                                                                              "<li>Total transmitted: %ld byte(s)</li>"
+                                                                              "<li>Total received: %ld byte(s)</li>"
+                                                                              "</ul>"));
+
+static struct result http_serve_stats(struct byte_buf *response_buf, struct arena tmp)
+{
+    assert(response_buf);
+
+    struct tcp_stats stats = tcp_stats_get();
+    struct str_buf sbuf = str_buf_from_arena(&tmp, 500);
+    struct result res = fmt(&sbuf, stats_format, stats.uptime.ms, stats.n_connections, stats.sbq_mem, stats.recv_mem,
+                            stats.bytes_tx, stats.bytes_rx);
+    if (res.is_error)
+        return res;
+
+    return http_build_response(HTTP_STATUS_OK, HTTP_CONTENT_TYPE_TEXT_HTML, byte_view_from_str(str_from_buf(sbuf)),
+                               response_buf);
+}
+
 static struct result http_handle_request(struct ram_fs_node *root, struct str request_data,
                                          struct byte_buf *response_buf, struct arena tmp)
 {
@@ -352,6 +377,9 @@ static struct result http_handle_request(struct ram_fs_node *root, struct str re
 
     print_dbg(PINFO, STR("Handling HTTP request: %s %s %s\n"), http_method_to_string(req.method), req.path,
               http_version_to_string(req.version));
+
+    if (str_is_equal(req.path, STR("/tatix-stats")))
+        return http_serve_stats(response_buf, tmp);
 
     return http_serve_file(root, req.path, response_buf);
 }

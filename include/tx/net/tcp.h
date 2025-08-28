@@ -7,6 +7,7 @@
 #include <tx/net/ip_addr.h>
 #include <tx/net/netorder.h>
 #include <tx/net/send_buf.h>
+#include <tx/time.h>
 
 struct result tcp_init(void);
 
@@ -68,5 +69,16 @@ struct result_sz tcp_conn_recv(struct tcp_conn *conn, struct byte_buf *buf, bool
 
 // Close the connection `*conn`. `conn` will be set to NULL since it's stale now.
 struct result tcp_conn_close(struct tcp_conn **conn, struct arena tmp);
+
+struct tcp_stats {
+    struct time_ms uptime;
+    sz n_connections; // Number of active connections.
+    sz sbq_mem; // Memory allocated for send buffer queues.
+    sz recv_mem; // Memory allocated for receive buffers.
+    sz bytes_tx; // Number of bytes ever transmitted.
+    sz bytes_rx; // Number of bytes ever received.
+};
+
+struct tcp_stats tcp_stats_get(void);
 
 #endif // __TX_NET_TCP_H__
