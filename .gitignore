@@ -5,6 +5,4 @@ build/
 !.clang-format
 !.gitignore
 compile_commands.json
-*.md
-*.html
 TODO
