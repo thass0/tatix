@@ -294,6 +294,8 @@ enum tcp_conn_state {
 
 #define TCP_CONN_DEFAULT_MSS 536 /* Based on RFC 9293 */
 #define TCP_CONN_TIME_WAIT_MS 100 /* This is low so we can re-use connections quickly. */
+#define TCP_CONN_RTO_MIN 200 /* Minimum RTO of 200ms */
+#define TCP_CONN_RTO_MAX 30000 /* Maximum RTO of 30s */
 #define TCP_CONN_RECV_BUF_SIZE 0x4000
 #define TCP_CONN_DEFAULT_RECV_WINDOW_SIZE (TCP_CONN_RECV_BUF_SIZE / 2)
 
@@ -515,7 +517,7 @@ static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 
 
     conn->srtt = 0;
     conn->rttvar = 0;
-    conn->rto = 1000; // Default of 1s.
+    conn->rto = TCP_CONN_RTO_MIN;
 
     return conn;
 }
@@ -558,7 +560,7 @@ static void tcp_conn_update_rtt(struct tcp_conn *conn, u32 rtt_sample)
     }
 
     conn->rto = conn->srtt + MAX(50, 4 * conn->rttvar); // Minimum granularity of 50ms.
-    conn->rto = MIN(60 * 1000, MAX(1000, conn->rto)); // Minimum RTO is 1s, maximum 60s.
+    conn->rto = MIN(TCP_CONN_RTO_MAX, MAX(TCP_CONN_RTO_MIN, conn->rto));
 }
 
 static void tcp_conn_update_send_state(struct tcp_conn *conn, struct tcp_header *hdr, struct tsopt tsopt)
@@ -808,7 +810,7 @@ static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct aren
 
         // We can remove the buffer from the retransmission queue if the cummulative ACK numbers we received
         // are greater than the last ACK number required by the buffer. Alternatively, we give up after a few retries.
-        if (seq_geq(conn->send_unack, sbq->required_ack) || sbq->n_transmissions > 5) {
+        if (seq_geq(conn->send_unack, sbq->required_ack) || sbq->n_transmissions > 8) {
             print_dbg(PVERBOSE, STR("Freeing sbq 0x%lx seq_num=%ld\n"), &sbq, seq_num_relative(conn, sbq->seq_num));
             struct dlist *next = head->next;
             dlist_remove(head);
