@@ -535,6 +535,11 @@ static inline bool seq_gt(u32 a, u32 b)
     return (i64)a - (i64)b > 0;
 }
 
+static inline bool seq_geq(u32 a, u32 b)
+{
+    return (i64)a - (i64)b >= 0;
+}
+
 static inline u32 abs_diff(u32 a, u32 b)
 {
     return (a > b) ? (a - b) : (b - a);
@@ -803,8 +808,8 @@ static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct aren
 
         // We can remove the buffer from the retransmission queue if the cummulative ACK numbers we received
         // are greater than the last ACK number required by the buffer. Alternatively, we give up after a few retries.
-        if (seq_gt(conn->send_unack, sbq->required_ack) || sbq->n_transmissions > 5) {
-            print_dbg(PDBG, STR("Freeing sbq 0x%lx seq_num=%ld\n"), &sbq, seq_num_relative(conn, sbq->seq_num));
+        if (seq_geq(conn->send_unack, sbq->required_ack) || sbq->n_transmissions > 5) {
+            print_dbg(PVERBOSE, STR("Freeing sbq 0x%lx seq_num=%ld\n"), &sbq, seq_num_relative(conn, sbq->seq_num));
             struct dlist *next = head->next;
             dlist_remove(head);
             head = next;
@@ -814,18 +819,22 @@ static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct aren
 
         struct time_ms now = time_current_ms();
         if (now.ms >= sbq->last_try.ms + sbq->retry_after.ms) {
-            print_dbg(PDBG, STR("Retransmitting datagram seq_num=%ld n_transmissions=%ld\n"),
-                      seq_num_relative(conn, sbq->seq_num), sbq->n_transmissions);
+            print_dbg(
+                PVERBOSE,
+                STR("(%s) Retransmitting datagram seq_num=%ld required_ack=%u n_transmissions=%ld now=%lu last_try=%lu retry_after=%lu\n"),
+                tcp_conn_format(conn, &tmp), seq_num_relative(conn, sbq->seq_num),
+                seq_num_relative(conn, sbq->required_ack), sbq->n_transmissions, now.ms, sbq->last_try.ms,
+                sbq->retry_after.ms);
             struct result res =
                 tcp_send_segment_noqueue(conn, sbq->flags, sbq->seq_num, sbq->checksum, sbq->len, sbq->sb, tmp);
             if (res.is_error)
                 return res;
             sbq->n_transmissions++;
             sbq->retry_after = time_ms_new(sbq->retry_after.ms * 2);
-            sbq->last_try = time_current_ms();
+            sbq->last_try = now;
         }
 
-        head = head->next;
+        return result_ok();
     }
 
     return result_ok();
@@ -1116,13 +1125,16 @@ static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct
         return result_ok();
     }
 
+    // The connection is half open in the FIN_WAIT_2 state. The state of the connection must be updated
+    // so remaining data is retransmitted correctly.
+    tcp_conn_update_send_state(conn, hdr, tsopt);
+    tcp_conn_update_recv_state(conn, hdr, tsopt, payload, tmp);
+
     if (!(hdr->flags & TCP_HDR_FLAG_FIN))
         return result_ok();
 
     conn->state = TCP_CONN_STATE_TIME_WAIT;
     conn->time_wait_start = time_current_ms();
-    tcp_conn_update_send_state(conn, hdr, tsopt);
-    tcp_conn_update_recv_state(conn, hdr, tsopt, payload, tmp);
 
     print_dbg(
         PDBG,
