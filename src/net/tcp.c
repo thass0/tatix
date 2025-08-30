@@ -356,6 +356,16 @@ static void tcp_free_conn(struct tcp_conn *conn)
     assert(conn);
 
     recv_buf_free(&conn->recv_buf, &global_tcp_recv_buf_alloc);
+
+    struct dlist *head = conn->send_queue.next;
+    while (head != &conn->send_queue) {
+        struct send_buf_queue *sbq = __container_of(head, struct send_buf_queue, link);
+        struct dlist *next = head->next;
+        dlist_remove(head);
+        tcp_free_sbq_and_sb(sbq);
+        head = next;
+    }
+
     dlist_remove(&conn->accept_queue);
 
     // Since we are reusing these, we want to make sure we don't accidentally reuse old data. Thus we set each
