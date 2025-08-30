@@ -792,8 +792,8 @@ static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct aren
         struct send_buf_queue *sbq = __container_of(head, struct send_buf_queue, link);
 
         // We can remove the buffer from the retransmission queue if the cummulative ACK numbers we received
-        // are greater than the last ACK number required by the buffer.
-        if (seq_gt(conn->send_unack, sbq->required_ack)) {
+        // are greater than the last ACK number required by the buffer. Alternatively, we give up after a few retries.
+        if (seq_gt(conn->send_unack, sbq->required_ack) || sbq->n_transmissions > 5) {
             print_dbg(PDBG, STR("Freeing sbq 0x%lx seq_num=%ld\n"), &sbq, seq_num_relative(conn, sbq->seq_num));
             struct dlist *next = head->next;
             dlist_remove(head);
