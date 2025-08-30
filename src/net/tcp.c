@@ -812,6 +812,7 @@ static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct aren
                 return res;
             sbq->n_transmissions++;
             sbq->retry_after = time_ms_new(sbq->retry_after.ms * 2);
+            sbq->last_try = time_current_ms();
         }
 
         head = head->next;
