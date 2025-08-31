@@ -94,18 +94,21 @@ void ipv4_addr_selftest(void)
     ipv4_test_addr_parse(arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64))));
 }
 
-void print_hello_txt(struct ram_fs *rfs)
+void print_hello_txt(struct ram_fs *rfs, struct arena tmp)
 {
     assert(rfs);
 
     struct result_ram_fs_node node_res = ram_fs_open(rfs->root, STR("/hello.txt"));
     assert(!node_res.is_error);
     struct ram_fs_node *node = result_ram_fs_node_checked(node_res);
-    struct byte_buf bbuf = byte_buf_from_array(option_byte_array_checked(kvalloc_alloc(500, alignof(void *))));
+    struct byte_buf bbuf = byte_buf_from_array(byte_array_from_arena(500, &tmp));
     struct result_sz read_res = ram_fs_read(node, &bbuf, 0);
     assert(!read_res.is_error);
 
     print_str(str_from_byte_buf(bbuf));
+
+    struct str_buf sbuf = str_buf_from_arena(&tmp, 128);
+    print_fmt(sbuf, STR("Commit: %s\n"), STR(GIT_COMMIT));
 }
 
 static void handle_timer_interrupt(struct trap_frame *cpu_state __unused, void *private_data __unused)
@@ -295,7 +298,7 @@ __noreturn void kernel_init(void)
     assert(!rtcfg_res.is_error);
     struct runtime_config *rtcfg = result_runtime_config_checked(rtcfg_res);
 
-    print_hello_txt(rfs);
+    print_hello_txt(rfs, arn);
 
     ipv4_addr_selftest();
     init_net(rtcfg, arn);
