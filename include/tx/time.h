@@ -5,6 +5,8 @@
 
 #include <tx/base.h>
 
+#define TIME_MS_MAX 0xffffffffffffffff
+
 struct time_ms {
     u64 ms;
 };

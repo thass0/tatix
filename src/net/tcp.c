@@ -279,23 +279,28 @@ static void tcp_free_sbq_and_sb(struct send_buf_queue *sbq)
 ///////////////////////////////////////////////////////////////////////////////
 
 enum tcp_conn_state {
+    // Expect user to close the connection after getting handle with `listen`:
     TCP_CONN_STATE_LISTEN, // Waiting for a client to send a SYN for the connection.
-    TCP_CONN_STATE_SYN_RCVD,
+
+    // Expect user to close the connection after getting handling with `accept`:
     TCP_CONN_STATE_ESTABLISHED,
     TCP_CONN_STATE_CLOSE_WAIT,
+    TCP_CONN_STATE_RESET, // Special state that's not included in the normal TCP state transitions.
+
+    // Internal states, user has no access to connections in these states.
+    TCP_CONN_STATE_SYN_RCVD,
     TCP_CONN_STATE_LAST_ACK,
     TCP_CONN_STATE_FIN_WAIT_1,
     TCP_CONN_STATE_FIN_WAIT_2,
     TCP_CONN_STATE_CLOSING,
     TCP_CONN_STATE_TIME_WAIT,
-
-    TCP_CONN_STATE_RESET // Special state that's not included in the normal TCP state transitions.
 };
 
 #define TCP_CONN_DEFAULT_MSS 536 /* Based on RFC 9293 */
-#define TCP_CONN_TIME_WAIT_MS 100 /* This is low so we can re-use connections quickly. */
+#define TCP_CONN_TIME_WAIT 1000 /* This is low so we can reuse connections quickly. */
 #define TCP_CONN_RTO_MIN 200 /* Minimum RTO of 200ms */
 #define TCP_CONN_RTO_MAX 30000 /* Maximum RTO of 30s */
+#define TCP_CONN_INTERNAL_TIMEOUT 30000 /* Connections in interal states time out after 30s */
 #define TCP_CONN_RECV_BUF_SIZE 0x4000
 #define TCP_CONN_DEFAULT_RECV_WINDOW_SIZE (TCP_CONN_RECV_BUF_SIZE / 2)
 
@@ -330,10 +335,6 @@ struct tcp_conn {
     sz recv_window_size_real; // RCV.WND
     struct recv_buf recv_buf;
 
-    // Set when the connection is put in the TIME_WAIT state. The connection is deleted when `TCP_CONN_TIME_WAIT_MS`
-    // has passed (see `tcp_purge_old_conn` and calls sites of this function).
-    struct time_ms time_wait_start;
-
     // Time stamp option state
     bool use_time_stamps;
     u32 ts_recent; // Most recent timestamp received.
@@ -343,6 +344,9 @@ struct tcp_conn {
     u32 srtt; // Smooted RTT (in ms).
     u32 rttvar; // RTT variance (in ms).
     u32 rto; // Retranmission timeout (in ms).
+
+    // Time of when the internal timeout expires.
+    struct time_ms internal_timeout;
 };
 
 static struct pool global_tcp_recv_buf_alloc;
@@ -376,15 +380,42 @@ static void tcp_free_conn(struct tcp_conn *conn)
     conn->is_used = false;
 }
 
+static inline bool tcp_conn_needs_user_close(struct tcp_conn *conn)
+{
+    // NOTE: Once a connection enters the ESTABLISHED state, it becomes the user's responsibility to
+    // close it. From the ESTABLISHED state, a connection can be moved to the CLOSE_WAIT state or the
+    // RESET state without any user action (e.g., if a FIN is received). Thus, in any of these three
+    // states, we need the user to call `close` on the connection to free it.
+    // This excludes listen connnections, which must always be closed manually by the user.
+    return conn->state == TCP_CONN_STATE_ESTABLISHED || conn->state == TCP_CONN_STATE_CLOSE_WAIT ||
+           conn->state == TCP_CONN_STATE_RESET;
+}
+
+static inline bool tcp_conn_is_internal(struct tcp_conn *conn)
+{
+    return conn->state == TCP_CONN_STATE_SYN_RCVD || conn->state == TCP_CONN_STATE_LAST_ACK ||
+           conn->state == TCP_CONN_STATE_FIN_WAIT_1 || conn->state == TCP_CONN_STATE_FIN_WAIT_2 ||
+           conn->state == TCP_CONN_STATE_CLOSING || conn->state == TCP_CONN_STATE_TIME_WAIT;
+}
+
+static inline void tcp_conn_set_internal_timeout(struct tcp_conn *conn)
+{
+    assert(tcp_conn_is_internal(conn));
+
+    if (conn->state == TCP_CONN_STATE_TIME_WAIT)
+        conn->internal_timeout.ms = time_current_ms().ms + TCP_CONN_TIME_WAIT;
+    else
+        conn->internal_timeout.ms = time_current_ms().ms + TCP_CONN_INTERNAL_TIMEOUT;
+}
+
 static inline void tcp_purge_old_conn(void)
 {
     for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
         struct tcp_conn *conn = &global_tcp_conn_table[i];
 
-        if (conn->is_used && conn->state == TCP_CONN_STATE_TIME_WAIT) {
-            if (time_current_ms().ms >= conn->time_wait_start.ms) {
+        if (conn->is_used && tcp_conn_is_internal(conn)) {
+            if (time_current_ms().ms >= conn->internal_timeout.ms)
                 tcp_free_conn(conn);
-            }
         }
     }
 }
@@ -509,8 +540,6 @@ static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 
 
     dlist_init_empty(&conn->send_queue);
 
-    conn->time_wait_start = time_ms_new(0);
-
     conn->use_time_stamps = false;
     conn->ts_recent = 0;
     conn->last_ack_sent = 0;
@@ -518,6 +547,9 @@ static struct tcp_conn *tcp_conn_alloc_and_init(struct ipv4_addr host_addr, u16 
     conn->srtt = 0;
     conn->rttvar = 0;
     conn->rto = TCP_CONN_RTO_MIN;
+
+    // This way, the timer can't expire by default because the actual time will never reach `TIME_MS_MAX`.
+    conn->internal_timeout = time_ms_new(TIME_MS_MAX);
 
     return conn;
 }
@@ -629,16 +661,6 @@ static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *h
     }
 
     return payload.len;
-}
-
-static inline bool tcp_conn_needs_user_close(struct tcp_conn *conn)
-{
-    // NOTE: Once a connection enters the ESTABLISHED state, it becomes the user's responsibility to
-    // close it. From the ESTABLISHED state, a connection can be moved to the CLOSE_WAIT state or the
-    // RESET state without any user action (e.g., if a FIN is received). Thus, in any of these three
-    // states, we need the user to call `close` on the connection to free it.
-    return conn->state == TCP_CONN_STATE_ESTABLISHED || conn->state == TCP_CONN_STATE_CLOSE_WAIT ||
-           conn->state == TCP_CONN_STATE_RESET;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -973,6 +995,8 @@ static struct result tcp_handle_receive_listen(struct tcp_conn *listen_conn, str
     conn->send_window_scale = listen_conn->send_window_scale;
     conn->use_window_scale = listen_conn->use_window_scale;
 
+    tcp_conn_set_internal_timeout(conn);
+
     if (tsopt.have_ts) {
         conn->use_time_stamps = true;
         conn->ts_recent = tsopt.tsval;
@@ -1103,7 +1127,8 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
 
     if ((hdr->flags & TCP_HDR_FLAG_FIN) && (hdr->flags & TCP_HDR_FLAG_ACK)) {
         conn->state = TCP_CONN_STATE_TIME_WAIT;
-        conn->time_wait_start = time_current_ms();
+
+        tcp_conn_set_internal_timeout(conn);
         tcp_conn_update_send_state(conn, hdr, tsopt);
         tcp_conn_update_recv_state(conn, hdr, tsopt, payload, tmp);
 
@@ -1115,6 +1140,8 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
         return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_FIN) {
         conn->state = TCP_CONN_STATE_CLOSING;
+
+        tcp_conn_set_internal_timeout(conn);
         tcp_conn_update_send_state(conn, hdr, tsopt);
         tcp_conn_update_recv_state(conn, hdr, tsopt, payload, tmp);
 
@@ -1126,6 +1153,8 @@ static struct result tcp_handle_receive_fin_wait_1(struct tcp_conn *conn, struct
         return tcp_send_segment_empty(conn, TCP_HDR_FLAG_ACK, tmp);
     } else if (hdr->flags & TCP_HDR_FLAG_ACK) {
         conn->state = TCP_CONN_STATE_FIN_WAIT_2;
+
+        tcp_conn_set_internal_timeout(conn);
         tcp_conn_update_send_state(conn, hdr, tsopt);
         tcp_conn_update_recv_state(conn, hdr, tsopt, payload, tmp);
 
@@ -1166,7 +1195,7 @@ static struct result tcp_handle_receive_fin_wait_2(struct tcp_conn *conn, struct
         return result_ok();
 
     conn->state = TCP_CONN_STATE_TIME_WAIT;
-    conn->time_wait_start = time_current_ms();
+    tcp_conn_set_internal_timeout(conn);
 
     print_dbg(
         PDBG,
@@ -1196,7 +1225,8 @@ static void tcp_handle_receive_closing(struct tcp_conn *conn, struct tcp_header 
         return;
 
     conn->state = TCP_CONN_STATE_TIME_WAIT;
-    conn->time_wait_start = time_current_ms();
+
+    tcp_conn_set_internal_timeout(conn);
     tcp_conn_update_send_state(conn, hdr, tsopt);
 
     print_dbg(
@@ -1530,6 +1560,8 @@ struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct arena tmp)
     if (conn->state == TCP_CONN_STATE_ESTABLISHED) {
         conn->state = TCP_CONN_STATE_FIN_WAIT_1;
 
+        tcp_conn_set_internal_timeout(conn);
+
         // The user can't access the connection any more at this point. But it isn't deallocated until all ACKs have
         // completed and the TIME_WAIT period has passed. The connections in the TIME_WAIT state are purged periodically
         // when looking up or allocating connections.
@@ -1540,6 +1572,8 @@ struct result tcp_conn_close(struct tcp_conn **conn_ptr, struct arena tmp)
 
     if (conn->state == TCP_CONN_STATE_CLOSE_WAIT) {
         conn->state = TCP_CONN_STATE_LAST_ACK;
+
+        tcp_conn_set_internal_timeout(conn);
 
         // The user has now lost access to this connection. We are only waiting to receive an ACK from the peer for
         // this FIN and then the connection will be deleted.
