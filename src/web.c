@@ -39,6 +39,7 @@ enum http_content_type {
     HTTP_CONTENT_TYPE_TEXT_CSS,
     HTTP_CONTENT_TYPE_IMAGE_PNG,
     HTTP_CONTENT_TYPE_IMAGE_JPEG,
+    HTTP_CONTENT_TYPE_APPLICATION_JSON,
 };
 
 struct http_request {
@@ -147,6 +148,8 @@ static struct str http_content_type_to_string(enum http_content_type content_typ
         return STR("image/png");
     case HTTP_CONTENT_TYPE_IMAGE_JPEG:
         return STR("image/jpeg");
+    case HTTP_CONTENT_TYPE_APPLICATION_JSON:
+        return STR("application/json");
     default:
         crash("Invalid content type");
     }
@@ -336,15 +339,15 @@ static struct result http_serve_file(struct ram_fs_node *root, struct str path, 
     return http_build_response(HTTP_STATUS_OK, content_type, byte_view_from_buf(file_node->data), response_buf);
 }
 
-static struct str stats_format = STR_STATIC(HTML_PAGE("Tatix TCP statistics", "<h1>Tatix TCP statistics</h1>"
-                                                                              "<ul>"
-                                                                              "<li>Uptime: %lu ms</li>"
-                                                                              "<li>Connection(s): %ld</li>"
-                                                                              "<li>SBQ mem: %ld byte(s)</li>"
-                                                                              "<li>Recv mem: %ld byte(s)</li>"
-                                                                              "<li>Total transmitted: %ld byte(s)</li>"
-                                                                              "<li>Total received: %ld byte(s)</li>"
-                                                                              "</ul>"));
+static struct str stats_format = STR_STATIC("{"
+                                            "\"uptime-ms\": %lu,"
+                                            "\"connections\": %ld,"
+                                            "\"sbq-mem-bytes\": %ld,"
+                                            "\"recv-mem-bytes\": %ld,"
+                                            "\"tx-bytes\": %ld,"
+                                            "\"rx-bytes\": %ld,"
+                                            "\"commit\": \"" GIT_COMMIT "\""
+                                            "}\n");
 
 static struct result http_serve_stats(struct byte_buf *response_buf, struct arena tmp)
 {
@@ -357,8 +360,8 @@ static struct result http_serve_stats(struct byte_buf *response_buf, struct aren
     if (res.is_error)
         return res;
 
-    return http_build_response(HTTP_STATUS_OK, HTTP_CONTENT_TYPE_TEXT_HTML, byte_view_from_str(str_from_buf(sbuf)),
-                               response_buf);
+    return http_build_response(HTTP_STATUS_OK, HTTP_CONTENT_TYPE_APPLICATION_JSON,
+                               byte_view_from_str(str_from_buf(sbuf)), response_buf);
 }
 
 static struct result http_handle_request(struct ram_fs_node *root, struct str request_data,
