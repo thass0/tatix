@@ -813,14 +813,33 @@ static struct result tcp_send_segment_noqueue(struct tcp_conn *conn, u8 flags, u
 
 static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct arena tmp)
 {
+    assert(conn);
+    assert(conn->state != TCP_CONN_STATE_RESET);
+
     struct dlist *head = conn->send_queue.next;
 
     while (head != &conn->send_queue) {
         struct send_buf_queue *sbq = __container_of(head, struct send_buf_queue, link);
 
+        if (sbq->n_transmissions > 8) {
+            if (tcp_conn_needs_user_close(conn)) {
+                conn->state = TCP_CONN_STATE_RESET;
+                print_dbg(PDBG, STR("Exceeded maximum number of retransmissions (%s). Sending a reset.\n"),
+                          tcp_conn_format(conn, &tmp));
+                tcp_send_segment_noqueue(conn, TCP_HDR_FLAG_RST, sbq->seq_num, sbq->checksum, sbq->len, sbq->sb, tmp);
+            } else {
+                // The connection is in a state where it's not accessible by the user. We can thus delete it.
+                print_dbg(PDBG, STR("Exceeded maximum number of retransmissions (%s). Deleted connection.\n"),
+                          tcp_conn_format(conn, &tmp));
+                tcp_free_conn(conn);
+            }
+
+            return result_ok();
+        }
+
         // We can remove the buffer from the retransmission queue if the cummulative ACK numbers we received
         // are greater than the last ACK number required by the buffer. Alternatively, we give up after a few retries.
-        if (seq_geq(conn->send_unack, sbq->required_ack) || sbq->n_transmissions > 8) {
+        if (seq_geq(conn->send_unack, sbq->required_ack)) {
             print_dbg(PVERBOSE, STR("Freeing sbq 0x%lx seq_num=%ld\n"), &sbq, seq_num_relative(conn, sbq->seq_num));
             struct dlist *next = head->next;
             dlist_remove(head);
@@ -859,8 +878,9 @@ struct result tcp_poll_retransmit(struct arena tmp)
     struct result res = result_ok();
 
     for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
-        if (global_tcp_conn_table[i].is_used) {
-            res = tcp_poll_retransmit_conn(&global_tcp_conn_table[i], tmp);
+        struct tcp_conn *conn = &global_tcp_conn_table[i];
+        if (conn->is_used && conn->state != TCP_CONN_STATE_RESET) {
+            res = tcp_poll_retransmit_conn(conn, tmp);
             if (res.is_error)
                 return res;
         }
