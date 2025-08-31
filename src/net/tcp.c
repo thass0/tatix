@@ -631,6 +631,16 @@ static sz tcp_conn_update_recv_state(struct tcp_conn *conn, struct tcp_header *h
     return payload.len;
 }
 
+static inline bool tcp_conn_needs_user_close(struct tcp_conn *conn)
+{
+    // NOTE: Once a connection enters the ESTABLISHED state, it becomes the user's responsibility to
+    // close it. From the ESTABLISHED state, a connection can be moved to the CLOSE_WAIT state or the
+    // RESET state without any user action (e.g., if a FIN is received). Thus, in any of these three
+    // states, we need the user to call `close` on the connection to free it.
+    return conn->state == TCP_CONN_STATE_ESTABLISHED || conn->state == TCP_CONN_STATE_CLOSE_WAIT ||
+           conn->state == TCP_CONN_STATE_RESET;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // TCP initialization                                                        //
 ///////////////////////////////////////////////////////////////////////////////
@@ -1393,13 +1403,14 @@ struct tcp_conn *tcp_conn_accept(struct tcp_conn *listen_conn)
     assert(listen_conn);
 
     struct tcp_conn *conn = __container_of(listen_conn->accept_queue.next, struct tcp_conn, accept_queue);
+    assert(conn);
 
     if (conn == listen_conn)
         return NULL;
 
     // Depending on the timing, the user may call accept when a SYN has been received but before the handshake was
     // completed. In that case the connection is in the SYN_RCVD state, but it's not ready to receive data.
-    if (conn->state != TCP_CONN_STATE_ESTABLISHED)
+    if (!tcp_conn_needs_user_close(conn))
         return NULL;
 
     dlist_remove(&conn->accept_queue);
