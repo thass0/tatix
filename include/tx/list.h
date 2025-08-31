@@ -52,4 +52,10 @@ static inline bool dlist_is_empty(struct dlist *head)
     return head == head->next;
 }
 
+#define DLIST_FOR_EACH(_list, _iter, _type, _member)                                \
+    for (_type *_iter = __container_of((_list)->next, _type, _member),              \
+               *_iter##_next = __container_of(_iter->_member.next, _type, _member); \
+         &_iter->_member != (_list);                                                \
+         _iter = _iter##_next, _iter##_next = __container_of(_iter##_next->_member.next, _type, _member))
+
 #endif // __TX_LIST_H__

@@ -363,13 +363,9 @@ static void tcp_free_conn(struct tcp_conn *conn)
 
     recv_buf_free(&conn->recv_buf, &global_tcp_recv_buf_alloc);
 
-    struct dlist *head = conn->send_queue.next;
-    while (head != &conn->send_queue) {
-        struct send_buf_queue *sbq = __container_of(head, struct send_buf_queue, link);
-        struct dlist *next = head->next;
-        dlist_remove(head);
+    DLIST_FOR_EACH(&conn->send_queue, sbq, struct send_buf_queue, link) {
+        dlist_remove(&sbq->link);
         tcp_free_sbq_and_sb(sbq);
-        head = next;
     }
 
     dlist_remove(&conn->accept_queue);
@@ -838,11 +834,7 @@ static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct aren
     assert(conn);
     assert(conn->state != TCP_CONN_STATE_RESET);
 
-    struct dlist *head = conn->send_queue.next;
-
-    while (head != &conn->send_queue) {
-        struct send_buf_queue *sbq = __container_of(head, struct send_buf_queue, link);
-
+    DLIST_FOR_EACH(&conn->send_queue, sbq, struct send_buf_queue, link) {
         if (sbq->n_transmissions > 8) {
             if (tcp_conn_needs_user_close(conn)) {
                 conn->state = TCP_CONN_STATE_RESET;
@@ -863,9 +855,7 @@ static struct result tcp_poll_retransmit_conn(struct tcp_conn *conn, struct aren
         // are greater than the last ACK number required by the buffer. Alternatively, we give up after a few retries.
         if (seq_geq(conn->send_unack, sbq->required_ack)) {
             print_dbg(PVERBOSE, STR("Freeing sbq 0x%lx seq_num=%ld\n"), &sbq, seq_num_relative(conn, sbq->seq_num));
-            struct dlist *next = head->next;
-            dlist_remove(head);
-            head = next;
+            dlist_remove(&sbq->link);
             tcp_free_sbq_and_sb(sbq);
             continue;
         }

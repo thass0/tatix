@@ -352,13 +352,7 @@ struct result pci_probe(void)
         }
     }
 
-    struct dlist *orig = &device_list;
-    struct dlist *dev_iter = orig->next;
-    struct pci_device *dev = NULL;
-
-    while (dev_iter != orig) {
-        dev = __container_of(dev_iter, struct pci_device, device_list);
-
+    DLIST_FOR_EACH(&device_list, dev, struct pci_device, device_list) {
         print_dbg(PDBG, STR("Looking up drivers for device %hhx:%hhx.%hhx [%hx:%hx]\n"), dev->bus, dev->device,
                   dev->func, dev->vendor_id, dev->device_id);
 
@@ -383,8 +377,6 @@ struct result pci_probe(void)
         } else {
             print_dbg(PDBG, STR(" ... no single driver found (either zero or more than one)\n"));
         }
-
-        dev_iter = dev_iter->next;
     }
 
     print_dbg(PDBG, STR("Successfully probed all PCI devices\n"));

@@ -29,21 +29,14 @@ void sched_init(void)
 // first task in the sleep list is the first to become ready.
 static void sched_add_sleeping(struct sched_task *new_task)
 {
-    struct dlist *list = global_sleep_list.next;
-    struct sched_task *task = NULL;
-
-    while (list != &global_sleep_list) {
-        task = __container_of(list, struct sched_task, sleep_list);
-
+    DLIST_FOR_EACH(&global_sleep_list, task, struct sched_task, sleep_list) {
         if (task->wake_time.ms > new_task->wake_time.ms) {
             dlist_insert(task->sleep_list.prev, &new_task->sleep_list);
             return;
         }
-
-        list = list->next;
     }
 
-    dlist_insert(list->prev, &new_task->sleep_list);
+    dlist_insert(global_sleep_list.prev, &new_task->sleep_list);
 }
 
 // Remove a task from the sleep list.
