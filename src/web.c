@@ -412,8 +412,10 @@ static struct result web_respond_close(struct tcp_conn *conn, struct byte_view r
     while (!peer_closed_conn) {
         struct byte_view transmit = byte_view_skip(response, n_transmitted);
         struct result_sz res = tcp_conn_send(conn, transmit, &peer_closed_conn, tmp);
-        if (res.is_error)
+        if (res.is_error) {
+            tcp_conn_close(&conn, tmp);
             return result_error(res.code);
+        }
 
         n_transmitted += result_sz_checked(res);
         if (n_transmitted >= response.len)
