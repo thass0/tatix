@@ -1360,6 +1360,12 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
     u16 host_port = u16_from_net_u16(tcp_hdr->dest_port);
     u16 peer_port = u16_from_net_u16(tcp_hdr->src_port);
 
+    // We can't respond to a zero peer IP address (no kind of loopback is supported by this system). Accepting a peer
+    // IP address of all zeros would also break the method of connection creation/lookup, which assumes that only
+    // listen connections have zeros in the peer IP address and port number fields.
+    if (ipv4_addr_is_equal(peer_addr, ipv4_addr_new(0, 0, 0, 0)))
+        return result_ok();
+
     struct tcp_conn *conn = tcp_lookup_conn(host_addr, peer_addr, host_port, peer_port);
 
     if (!conn) {
