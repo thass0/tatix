@@ -448,28 +448,36 @@ static bool port_wildcard_compare(u16 a, u16 b)
 }
 
 static struct tcp_conn *tcp_lookup_conn(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
-                                        u16 peer_port, bool use_peer_wildcards)
+                                        u16 peer_port)
 {
     tcp_purge_old_conn();
+
+    struct tcp_conn *exact_match = NULL;
+    struct tcp_conn *wildcard_match = NULL;
+
+    // NOTE: Scanning the whole array of connections is correct because there can be at most one exact match. New
+    // connections are created in the `*_receive_listen` handler which is called if a SYN for a listen connection
+    // arrives. But, listen connections have wildcard peer IP addresses and port numbers, they don't match any IP
+    // address and port number combination exactly. Thus, no new connection will be created if the IP addresses and
+    // port numbers match an existing connection exactly.
 
     for (sz i = 0; i < TCP_CONN_MAX_NUM; i++) {
         struct tcp_conn *conn = &global_tcp_conn_table[i];
         if (!conn->is_used)
             continue;
 
-        if (use_peer_wildcards) {
-            if (ipv4_addr_is_equal(host_addr, conn->host_addr) &&
-                ipv4_addr_wildcard_compare(peer_addr, conn->peer_addr) && host_port == conn->host_port &&
+        if (ipv4_addr_is_equal(host_addr, conn->host_addr) && host_port == conn->host_port) {
+            if (ipv4_addr_is_equal(peer_addr, conn->peer_addr) && peer_port == conn->peer_port)
+                exact_match = conn;
+            if (ipv4_addr_wildcard_compare(peer_addr, conn->peer_addr) &&
                 port_wildcard_compare(peer_port, conn->peer_port))
-                return conn;
-        } else {
-            if (ipv4_addr_is_equal(host_addr, conn->host_addr) && ipv4_addr_is_equal(peer_addr, conn->peer_addr) &&
-                host_port == conn->host_port && peer_port == conn->peer_port)
-                return conn;
+                wildcard_match = conn;
         }
     }
 
-    return NULL;
+    // Prefer the exact match. If there is no exact match, return the wildcard match. If there is no wildcard match,
+    // NULL is returned.
+    return exact_match ? exact_match : wildcard_match;
 }
 
 static struct str tcp_conn_format_raw(struct ipv4_addr host_addr, struct ipv4_addr peer_addr, u16 host_port,
@@ -1352,12 +1360,7 @@ struct result tcp_handle_packet(struct tcp_ip_pseudo_header pseudo_hdr, struct b
     u16 host_port = u16_from_net_u16(tcp_hdr->dest_port);
     u16 peer_port = u16_from_net_u16(tcp_hdr->src_port);
 
-    // TODO: It's somewhat wasteful to run the `tcp_lookup_conn` function twice.
-    struct tcp_conn *conn = tcp_lookup_conn(host_addr, peer_addr, host_port, peer_port, false);
-
-    // Try again if we weren't able to find a connection but this time consider wildcard matches.
-    if (!conn)
-        conn = tcp_lookup_conn(host_addr, peer_addr, host_port, peer_port, true);
+    struct tcp_conn *conn = tcp_lookup_conn(host_addr, peer_addr, host_port, peer_port);
 
     if (!conn) {
         print_dbg(PDBG, STR("Could not find a connection for TCP segment from peer (%s). Sending a reset.\n"),
@@ -1420,7 +1423,7 @@ struct tcp_conn *tcp_conn_listen(struct ipv4_addr addr, u16 port, struct arena t
 {
     assert(global_tcp_is_initialized);
 
-    struct tcp_conn *conn = tcp_lookup_conn(addr, ipv4_addr_new(0, 0, 0, 0), port, 0, true);
+    struct tcp_conn *conn = tcp_lookup_conn(addr, ipv4_addr_new(0, 0, 0, 0), port, 0);
 
     if (conn && conn->state == TCP_CONN_STATE_LISTEN)
         return conn;
