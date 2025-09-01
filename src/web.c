@@ -252,6 +252,10 @@ static struct result http_build_header(enum http_status status, enum http_conten
     if (res.is_error)
         return res;
 
+    res = str_buf_append(&buf, STR("Server: Tatix\r\n"));
+    if (res.is_error)
+        return res;
+
     res = str_buf_append(&buf, STR("Cache-Control: max-age=3600\r\n"));
     if (res.is_error)
         return res;
