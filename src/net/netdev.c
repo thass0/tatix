@@ -222,10 +222,7 @@ static void netdev_intr_receive_ethernet(struct netdev *netdev, struct byte_view
         !mac_addr_is_equal(ether_hdr->dest, MAC_ADDR_BROADCAST))
         return;
 
-    // TODO: Check if we need to strip anything from the end. We can find this out once we receive frames bigger
-    // than 64 bytes (because frames smaller than 64 bytes are padded so we don't know where the data ends).
-    struct byte_view payload = byte_view_new(frame.dat + sizeof(struct ethernet_frame_header),
-                                             frame.len - sizeof(struct ethernet_frame_header));
+    struct byte_view payload = byte_view_skip(frame, sizeof(struct ethernet_frame_header));
 
     struct option_netdev_proto_t proto_opt = netdev_proto_from_ethernet_type(u16_from_net_u16(ether_hdr->ether_type));
     if (proto_opt.is_none)
