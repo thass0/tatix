@@ -82,19 +82,96 @@ __section(".entry.text") __noreturn void _start(void)
 // Kernel initialization                                                     //
 ///////////////////////////////////////////////////////////////////////////////
 
-void ram_fs_selftest(void)
+static void mem_init(void)
 {
-    struct byte_array test_arn_mem = option_byte_array_checked(kvalloc_alloc(5 * BIT(20), alignof(void *)));
-    struct arena test_arn = arena_new(test_arn_mem);
-    ram_fs_run_tests(test_arn);
+    // Set up fixed memory regions for paging init.
+    assert(KERN_DYN_PADDR > KERN_BASE_PADDR && KERN_DYN_PADDR - KERN_BASE_PADDR == KERN_DYN_VADDR - KERN_BASE_VADDR);
+    sz code_len = KERN_DYN_PADDR - KERN_BASE_PADDR;
+    struct addr_mapping code_addrs;
+    code_addrs.vbase = KERN_BASE_VADDR;
+    code_addrs.pbase = KERN_BASE_PADDR;
+    code_addrs.len = code_len;
+    struct addr_mapping dyn_addrs;
+    dyn_addrs.vbase = KERN_DYN_VADDR;
+    dyn_addrs.pbase = KERN_DYN_PADDR;
+    dyn_addrs.len = KERN_DYN_LEN;
+
+    // First, initialize paging.
+    struct byte_array dyn = paging_init(code_addrs, dyn_addrs);
+
+    // Then initialize the kernel virtual memory allocator.
+    struct result res = kvalloc_init(dyn);
+    assert(!res.is_error);
+
+    print_dbg(PINFO, STR("Initialized paging and virtual memory allocator\n"));
 }
 
-void ipv4_addr_selftest(void)
+static void ram_fs_selftest(void)
+{
+    struct byte_array tmp_ba = option_byte_array_checked(kvalloc_alloc(5 * BIT(20), alignof(void *)));
+    struct arena tmp = arena_new(tmp_ba);
+    ram_fs_run_tests(tmp);
+    kvalloc_free(tmp_ba);
+}
+
+static struct ram_fs *ram_fs_init(void)
+{
+    ram_fs_selftest();
+
+    struct alloc rfs_alloc;
+    rfs_alloc.a_ptr = NULL;
+    rfs_alloc.alloc = kvalloc_alloc_wrapper;
+    rfs_alloc.free = kvalloc_free_wrapper;
+
+    struct ram_fs *rfs = ram_fs_new(rfs_alloc);
+    assert(rfs);
+
+    print_dbg(PINFO, STR("Initialized RAM file system\n"));
+
+    return rfs;
+}
+
+static inline void ipv4_addr_selftest(void)
 {
     ipv4_test_addr_parse(arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64))));
 }
 
-void print_hello_txt(struct ram_fs *rfs, struct arena tmp)
+static void net_init(struct runtime_config *cfg, struct arena arn)
+{
+    ipv4_addr_selftest();
+
+    struct ipv4_addr host_ip = option_ipv4_addr_checked(cfg->host_ip);
+    struct ipv4_addr default_gateway_ip = option_ipv4_addr_checked(cfg->default_gateway_ip);
+    struct ipv4_addr local_ip = option_ipv4_addr_checked(cfg->local_ip);
+    struct ipv4_addr local_ip_mask = option_ipv4_addr_checked(cfg->local_ip_mask);
+
+    // This is the default route for all IP addresses that are outside of the local network (see below).
+    struct ipv4_route_entry default_route;
+    default_route.dest = ipv4_addr_new(0, 0, 0, 0);
+    default_route.mask = ipv4_addr_new(0, 0, 0, 0);
+    default_route.gateway = default_gateway_ip;
+    default_route.interface = host_ip;
+    ipv4_route_add(default_route);
+
+    // This is a route to all local IP addresses. Other hosts on the virtual network with this host and the VM host
+    // can be reached this way.
+    struct ipv4_route_entry local_route;
+    local_route.dest = local_ip;
+    local_route.mask = local_ip_mask;
+    local_route.gateway = host_ip;
+    local_route.interface = host_ip;
+    ipv4_route_add(local_route);
+
+    // Initialize the `netdev` subsystem.
+    netdev_set_default_ip_addr(host_ip);
+    assert(!netdev_init_input_queue().is_error);
+
+    print_dbg(PINFO, STR("Initialized IP networking: host=%s default_gateway=%s local=%s/%ld\n"),
+              ipv4_addr_format(host_ip, &arn), ipv4_addr_format(default_gateway_ip, &arn),
+              ipv4_addr_format(local_ip, &arn), ipv4_mask_prefix_length(local_ip_mask));
+}
+
+static void print_hello_message(struct ram_fs *rfs, struct arena tmp)
 {
     assert(rfs);
 
@@ -116,83 +193,102 @@ static void handle_timer_interrupt(struct trap_frame *cpu_state __unused, void *
     return;
 }
 
-static void init_memory(void)
+// Defined below:
+static void main(struct ram_fs *rfs, struct runtime_config *rtcfg);
+
+__noreturn void kernel_init(void)
 {
-    // Set up fixed memory regions for paging init.
-    assert(KERN_DYN_PADDR > KERN_BASE_PADDR && KERN_DYN_PADDR - KERN_BASE_PADDR == KERN_DYN_VADDR - KERN_BASE_VADDR);
-    sz code_len = KERN_DYN_PADDR - KERN_BASE_PADDR;
-    struct addr_mapping code_addrs;
-    code_addrs.vbase = KERN_BASE_VADDR;
-    code_addrs.pbase = KERN_BASE_PADDR;
-    code_addrs.len = code_len;
-    struct addr_mapping dyn_addrs;
-    dyn_addrs.vbase = KERN_DYN_VADDR;
-    dyn_addrs.pbase = KERN_DYN_PADDR;
-    dyn_addrs.len = KERN_DYN_LEN;
+    assert(!isr_register_handler(0x20, handle_timer_interrupt, NULL).is_error);
 
-    // First, initialize paging.
-    struct byte_array dyn = paging_init(code_addrs, dyn_addrs);
+    gdt_init();
 
-    // Then initialize the kernel virtual memory allocator.
-    struct result res = kvalloc_init(dyn);
-    assert(!res.is_error);
+    assert(!com_init(COM1_PORT).is_error);
+
+    interrupt_init();
+
+    time_init();
+
+    mem_init();
+
+    struct byte_array tmp_ba = option_byte_array_checked(kvalloc_alloc(0x2000, 64));
+    struct arena tmp = arena_new(tmp_ba);
+
+    sched_init();
+
+    struct ram_fs *rfs = ram_fs_init();
+    assert(rfs);
+
+    struct byte_view rootfs_archive = byte_view_new(_rootfs_archive_start, _rootfs_archive_end - _rootfs_archive_start);
+    assert(!archive_extract(rootfs_archive, rfs).is_error);
+
+    struct result_runtime_config rtcfg_res = rtcfg_read_config(rfs, STR("/config.txt"), tmp);
+    assert(!rtcfg_res.is_error);
+    struct runtime_config *rtcfg = result_runtime_config_checked(rtcfg_res);
+    assert(rtcfg);
+
+    net_init(rtcfg, tmp);
+
+    assert(!pci_probe().is_error);
+
+    assert(!tcp_init().is_error);
+
+    print_hello_message(rfs, tmp);
+
+    kvalloc_free(tmp_ba);
+
+    main(rfs, rtcfg);
+
+    hlt();
 }
 
-static struct ram_fs *init_ram_fs(void)
-{
-    ram_fs_selftest();
+///////////////////////////////////////////////////////////////////////////////
+// Main loop with tasks                                                      //
+///////////////////////////////////////////////////////////////////////////////
 
-    // Initialize the RAM file system.
-    struct alloc rfs_alloc;
-    rfs_alloc.a_ptr = NULL;
-    rfs_alloc.alloc = kvalloc_alloc_wrapper;
-    rfs_alloc.free = kvalloc_free_wrapper;
-    return ram_fs_new(rfs_alloc);
+static void task_net_ping(void *ctx_ptr __unused)
+{
+    struct result res = result_ok();
+    struct byte_array tmp_ba = option_byte_array_checked(kvalloc_alloc(0x2000, 64));
+    struct arena tmp = arena_new(tmp_ba);
+    struct byte_array sb_ba = option_byte_array_checked(kvalloc_alloc(0x4000, 64));
+    struct send_buf sb = send_buf_new(arena_new(sb_ba));
+
+    for (i32 i = 0; i < 5; i++) {
+        res = icmpv4_send_echo(ipv4_addr_new(8, 8, 8, 8), 0xcafe, 0xcafe, sb, tmp);
+        if (!res.is_error || res.code != EAGAIN)
+            break;
+        sleep_ms(time_ms_new(2000));
+    }
+    if (res.is_error)
+        print_dbg(PINFO, STR("Ping failed\n"));
+    else
+        print_dbg(PINFO, STR("Ping succeeded\n"));
+
+    kvalloc_free(sb_ba);
+    kvalloc_free(tmp_ba);
 }
 
-void init_net(struct runtime_config *cfg, struct arena arn)
+static void task_tcp_poll_retransmit(void *ctx_ptr __unused)
 {
-    struct ipv4_addr host_ip = option_ipv4_addr_checked(cfg->host_ip);
-    struct ipv4_addr default_gateway_ip = option_ipv4_addr_checked(cfg->default_gateway_ip);
-    struct ipv4_addr local_ip = option_ipv4_addr_checked(cfg->local_ip);
-    struct ipv4_addr local_ip_mask = option_ipv4_addr_checked(cfg->local_ip_mask);
+    struct arena tmp = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
 
-    // This is the default route for all IP addresses that are outside of the local network (see
-    // below).
-    struct ipv4_route_entry default_route;
-    default_route.dest = ipv4_addr_new(0, 0, 0, 0);
-    default_route.mask = ipv4_addr_new(0, 0, 0, 0);
-    default_route.gateway = default_gateway_ip;
-    default_route.interface = host_ip;
-    ipv4_route_add(default_route);
-
-    // This is a route to all local IP addresses. Other hosts on the virtual network with this host
-    // and the VM host can be reached this way.
-    struct ipv4_route_entry local_route;
-    local_route.dest = local_ip;
-    local_route.mask = local_ip_mask;
-    local_route.gateway = host_ip;
-    local_route.interface = host_ip;
-    ipv4_route_add(local_route);
-
-    // Initialize the `netdev` subsystem.
-    netdev_set_default_ip_addr(host_ip);
-    assert(!netdev_init_input_queue().is_error);
-
-    print_dbg(PINFO, STR("Initialized networking: host=%s default_gateway=%s local=%s/%ld\n"),
-              ipv4_addr_format(host_ip, &arn), ipv4_addr_format(default_gateway_ip, &arn),
-              ipv4_addr_format(local_ip, &arn), ipv4_mask_prefix_length(local_ip_mask));
+    while (true) {
+        struct result res = tcp_poll_retransmit(tmp);
+        if (res.is_error)
+            print_dbg(PDBG, STR("Error in TCP retransmission: %hu\n"), res.code);
+        sleep_ms(time_ms_new(10));
+    }
 }
 
-struct task_net_receive_ctx {
-    struct arena tmp_arn;
+struct task_ctx_net_receive {
+    struct arena tmp;
     struct send_buf sb;
 };
 
-void task_net_receive(void *ctx_ptr)
+static void task_net_receive(void *ctx_ptr)
 {
     assert(ctx_ptr);
-    struct task_net_receive_ctx *ctx = ctx_ptr;
+    struct task_ctx_net_receive *ctx = ctx_ptr;
 
     struct result res = result_ok();
     struct input_packet *in_packet = NULL;
@@ -209,10 +305,10 @@ void task_net_receive(void *ctx_ptr)
 
             switch (in_packet->proto) {
             case NETDEV_PROTO_ARP:
-                res = arp_handle_packet(in_packet, ctx->sb, ctx->tmp_arn);
+                res = arp_handle_packet(in_packet, ctx->sb, ctx->tmp);
                 break;
             case NETDEV_PROTO_IPV4:
-                res = ipv4_handle_packet(in_packet, ctx->sb, ctx->tmp_arn);
+                res = ipv4_handle_packet(in_packet, ctx->sb, ctx->tmp);
                 break;
             default:
                 print_dbg(PINFO, STR("Received packet with unknown protocol 0x%hx. Dropping ...\n"), in_packet->proto);
@@ -229,107 +325,48 @@ void task_net_receive(void *ctx_ptr)
                 netdev_release_input(in_packet);
             }
         }
+
         sleep_ms(time_ms_new(10));
     }
 }
 
-void task_tcp_poll_retransmit(void *ctx_ptr __unused)
-{
-    struct arena tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
-    while (true) {
-        struct result res = tcp_poll_retransmit(tmp_arn);
-        if (res.is_error)
-            print_dbg(PDBG, STR("Error: %hu\n"), res.code);
-        sleep_ms(time_ms_new(10));
-    }
-}
-
-void task_net_ping(void *ctx_ptr __unused)
-{
-    struct result res = result_ok();
-    struct arena tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
-    struct send_buf sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64))));
-
-    for (i32 i = 0; i < 5; i++) {
-        res = icmpv4_send_echo(ipv4_addr_new(8, 8, 8, 8), 0xcafe, 0xcafe, sb, tmp_arn);
-        if (!res.is_error || res.code != EAGAIN)
-            break;
-        sleep_ms(time_ms_new(2000));
-    }
-
-    assert(!res.is_error);
-}
-
-struct web_listen_ctx {
+struct task_ctx_web_listen {
     struct ipv4_addr addr;
     u16 port;
     struct ram_fs_node *root;
 };
 
-void task_web_listen(void *ctx_ptr)
+static void task_web_listen(void *ctx_ptr)
 {
     assert(ctx_ptr);
-    struct web_listen_ctx *ctx = ctx_ptr;
+    struct task_ctx_web_listen *ctx = ctx_ptr;
     web_listen(ctx->addr, ctx->port, ctx->root);
 }
 
-__noreturn void kernel_init(void)
+static void main(struct ram_fs *rfs, struct runtime_config *rtcfg)
 {
-    isr_register_handler(0x20, handle_timer_interrupt, NULL);
-    gdt_init();
-    com_init(COM1_PORT);
-    interrupt_init();
-    time_init();
-
-    init_memory();
-    struct arena arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
-
-    sched_init();
-
-    struct ram_fs *rfs = init_ram_fs();
     assert(rfs);
+    assert(rtcfg);
 
-    // Extract rootfs archive into the RAM fs.
-    struct byte_view rootfs_archive = byte_view_new(_rootfs_archive_start, _rootfs_archive_end - _rootfs_archive_start);
-    struct result res = archive_extract(rootfs_archive, rfs);
-    assert(!res.is_error);
+    sched_create_task(task_net_ping, NULL);
 
-    struct result_runtime_config rtcfg_res = rtcfg_read_config(rfs, STR("/config.txt"), arn);
-    assert(!rtcfg_res.is_error);
-    struct runtime_config *rtcfg = result_runtime_config_checked(rtcfg_res);
+    sched_create_task(task_tcp_poll_retransmit, NULL);
 
-    print_hello_txt(rfs, arn);
-
-    ipv4_addr_selftest();
-    init_net(rtcfg, arn);
-
-    // Probe all PCI devies, including the network device.
-    res = pci_probe();
-    assert(!res.is_error);
-
-    assert(!tcp_init().is_error);
-
-    struct task_net_receive_ctx recv_ctx;
-    recv_ctx.tmp_arn = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
+    struct task_ctx_net_receive recv_ctx;
+    recv_ctx.tmp = arena_new(option_byte_array_checked(kvalloc_alloc(0x2000, 64)));
     recv_ctx.sb = send_buf_new(arena_new(option_byte_array_checked(kvalloc_alloc(0x4000, 64))));
+    sched_create_task(task_net_receive, &recv_ctx);
 
     struct result_ram_fs_node web_res = ram_fs_open(rfs->root, STR("/web/"));
     assert(!web_res.is_error);
     struct ram_fs_node *web_dir = result_ram_fs_node_checked(web_res);
     assert(web_dir->type == RAM_FS_TYPE_DIR);
-
-    struct web_listen_ctx web_listen_ctx;
-    web_listen_ctx.addr = option_ipv4_addr_checked(rtcfg->host_ip);
-    web_listen_ctx.port = 80;
-    web_listen_ctx.root = web_dir;
-
-    sched_create_task(task_net_ping, NULL);
-    sched_create_task(task_tcp_poll_retransmit, NULL);
-    sched_create_task(task_net_receive, &recv_ctx);
-    sched_create_task(task_web_listen, &web_listen_ctx);
+    struct task_ctx_web_listen web_ctx;
+    web_ctx.addr = option_ipv4_addr_checked(rtcfg->host_ip);
+    web_ctx.port = 80;
+    web_ctx.root = web_dir;
+    sched_create_task(task_web_listen, &web_ctx);
 
     while (true)
         sleep_ms(time_ms_new(1000));
-
-    hlt();
 }
