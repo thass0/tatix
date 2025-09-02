@@ -24,6 +24,20 @@ static inline void pic_send_eoi(u8 irq)
     outb(PIC1_CMD_PORT, PIC_EOI_CMD);
 }
 
+static inline void pic_enable_irq(u8 irq)
+{
+    if (irq >= 8)
+        outb(PIC2_DAT_PORT, inb(PIC2_DAT_PORT) & ~BIT(irq - 8));
+    else
+        outb(PIC1_DAT_PORT, inb(PIC1_DAT_PORT) & ~BIT(irq));
+}
+
+static inline void pic_disable_all_irqs(void)
+{
+    outb(PIC1_DAT_PORT, 0xff);
+    outb(PIC2_DAT_PORT, 0xff);
+}
+
 static inline void pic_remap(u8 pic1_vec_base, u8 pic2_vec_base)
 {
     u8 mask1 = inb(PIC1_DAT_PORT);
@@ -41,14 +55,8 @@ static inline void pic_remap(u8 pic1_vec_base, u8 pic2_vec_base)
 
     outb(PIC1_DAT_PORT, mask1);
     outb(PIC2_DAT_PORT, mask2);
-}
 
-static inline void pic_enable_irq(u8 irq)
-{
-    if (irq >= 8)
-        outb(PIC2_DAT_PORT, inb(PIC2_DAT_PORT) & ~BIT(irq - 8));
-    else
-        outb(PIC1_DAT_PORT, inb(PIC1_DAT_PORT) & ~BIT(irq));
+    pic_enable_irq(PIC2_IRQ); // We need this for the cascade to work.
 }
 
 #endif // __TX_PORTS_H__

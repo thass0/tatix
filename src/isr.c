@@ -33,6 +33,10 @@ struct result isr_register_handler(u64 vector, interrupt_handler_func_t handler,
     handler_table[vector].handler = handler;
     handler_table[vector].private_data = private_data;
 
+    // Enable the IRQ line if it's an IRQ vector.
+    if (vector >= IRQ_VECTORS_BEG)
+        pic_enable_irq(VECTOR_TO_IRQ(vector));
+
     return result_ok();
 }
 

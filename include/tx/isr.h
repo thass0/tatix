@@ -81,6 +81,9 @@ void isr_stub_47(void);
 #define IRQ_VECTORS_END 48
 #define NUM_IRQ_VECTORS (IRQ_VECTORS_END - IRQ_VECTORS_BEG)
 
+#define VECTOR_TO_IRQ(v) ((v) - IRQ_VECTORS_BEG)
+#define IRQ_TO_VECTOR(i) ((i) + IRQ_VECTORS_BEG)
+
 typedef void (*interrupt_handler_func_t)(struct trap_frame *cpu_state, void *private_data);
 
 struct result isr_register_handler(u64 vector, interrupt_handler_func_t handler, void *private_data);

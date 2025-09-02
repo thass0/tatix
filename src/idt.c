@@ -98,6 +98,7 @@ void init_idt(void)
 void interrupt_init(void)
 {
     disable_interrupts();
+    pic_disable_all_irqs();
     pic_remap(IRQ_VECTORS_BEG, IRQ_VECTORS_BEG + 8);
     init_idt();
     enable_interrupts();

@@ -595,7 +595,7 @@ static struct result e1000_probe(struct pci_device *pci)
     // NOTE: We DON'T register the `dev` (struct e1000_device) structure with the ISR handler. Instead, we register
     // the `netdev` structure that's also registered with the `netdev` subsystem so that, e.g., we can later retrieve
     // information about the IP address that was assigned to the network device.
-    res = isr_register_handler(IRQ_VECTORS_BEG + pci->interrupt_line, e1000_handle_interrupt, netdev);
+    res = isr_register_handler(IRQ_TO_VECTOR(pci->interrupt_line), e1000_handle_interrupt, netdev);
     if (res.is_error)
         return res;
 

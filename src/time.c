@@ -1,5 +1,6 @@
 #include <tx/asm.h>
 #include <tx/assert.h>
+#include <tx/isr.h>
 #include <tx/print.h>
 #include <tx/time.h>
 
@@ -55,9 +56,16 @@ static u64 global_tsc_base;
 static u64 global_tsc_freq_hz;
 static bool global_time_initialized;
 
+static void handle_timer_interrupt(struct trap_frame *cpu_state __unused, void *private_data __unused)
+{
+    return;
+}
+
 void time_init(void)
 {
     assert(!global_time_initialized);
+
+    assert(!isr_register_handler(IRQ_TO_VECTOR(0), handle_timer_interrupt, NULL).is_error);
 
     // This technique of calibrating the TSC is from Unikraft (like the PIT code above). The idea is that we can use
     // the PIT to wait for a known amount of time and count how many ticks were counted in the TSC in this interval.

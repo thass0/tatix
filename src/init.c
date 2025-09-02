@@ -188,18 +188,11 @@ static void print_hello_message(struct ram_fs *rfs, struct arena tmp)
     print_fmt(sbuf, STR("Commit: %s\n"), STR(GIT_COMMIT));
 }
 
-static void handle_timer_interrupt(struct trap_frame *cpu_state __unused, void *private_data __unused)
-{
-    return;
-}
-
 // Defined below:
 static void main(struct ram_fs *rfs, struct runtime_config *rtcfg);
 
 __noreturn void kernel_init(void)
 {
-    assert(!isr_register_handler(0x20, handle_timer_interrupt, NULL).is_error);
-
     gdt_init();
 
     assert(!com_init(COM1_PORT).is_error);
