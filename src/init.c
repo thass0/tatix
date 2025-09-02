@@ -84,7 +84,6 @@ __section(".entry.text") __noreturn void _start(void)
 
 static void mem_init(void)
 {
-    // Set up fixed memory regions for paging init.
     assert(KERN_DYN_PADDR > KERN_BASE_PADDR && KERN_DYN_PADDR - KERN_BASE_PADDR == KERN_DYN_VADDR - KERN_BASE_VADDR);
     sz code_len = KERN_DYN_PADDR - KERN_BASE_PADDR;
     struct addr_mapping code_addrs;
@@ -96,10 +95,8 @@ static void mem_init(void)
     dyn_addrs.pbase = KERN_DYN_PADDR;
     dyn_addrs.len = KERN_DYN_LEN;
 
-    // First, initialize paging.
     struct byte_array dyn = paging_init(code_addrs, dyn_addrs);
 
-    // Then initialize the kernel virtual memory allocator.
     struct result res = kvalloc_init(dyn);
     assert(!res.is_error);
 
