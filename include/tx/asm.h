@@ -3,12 +3,17 @@
 
 #include <tx/base.h>
 
-#define hlt()                        \
+#define halt_execution()             \
     do {                             \
         while (true)                 \
             __asm__ volatile("hlt"); \
         __builtin_unreachable();     \
     } while (0)
+
+static inline void hlt(void)
+{
+    __asm__ volatile("hlt");
+}
 
 static inline void cpuid(u32 leaf /* eax */, u32 subleaf /* ecx */, u32 *eax, u32 *ebx, u32 *ecx, u32 *edx)
 {

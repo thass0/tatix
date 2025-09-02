@@ -11,7 +11,7 @@
 #define __crash(msg, file, line)                                \
     do {                                                        \
         print_str(STR(file ":" STRINGIFY(line) ": " msg "\n")); \
-        hlt();                                                  \
+        halt_execution();                                       \
     } while (0)
 
 #define assert(x) __assert((x), #x, __FILE__, __LINE__)

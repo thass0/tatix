@@ -238,7 +238,7 @@ __noreturn void kernel_init(void)
 
     main(rfs, rtcfg);
 
-    hlt();
+    halt_execution();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

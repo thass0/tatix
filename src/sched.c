@@ -1,3 +1,4 @@
+#include <tx/asm.h>
 #include <tx/kvalloc.h>
 #include <tx/sched.h>
 
@@ -63,8 +64,13 @@ static struct sched_task *sched_poll_sleeping(void)
 static struct sched_task *sched_get_ready(void)
 {
     struct sched_task *ready = sched_poll_sleeping();
-    while (!ready)
+    while (!ready) {
+        // We hald the CPU to safe power. The timer interrupt will fire eventually, resuming exeuction at the
+        // instruction after the `hlt`. This gives us a chance to check if any tasks can be woken up.
+        hlt();
         ready = sched_poll_sleeping();
+    }
+
     return ready;
 }
 
