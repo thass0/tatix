@@ -6,15 +6,13 @@
 
 .PHONY = clean boot
 
-ifneq ($(DEBUG),)
-    DEBUG_FLAGS := -ggdb
-else
+ifeq ($(DEBUG),)
 	DEBUG := 0
 endif
 
 ifneq ($(GDB),)
 	QEMU_KVM_FLAGS :=
-    QEMU_DEBUG_FLAGS := -s -S
+	QEMU_DEBUG_FLAGS := -s -S
 else
 	QEMU_KVM_FLAGS := -enable-kvm
 endif
@@ -22,7 +20,7 @@ endif
 ifneq ($(RELEASE),)
 	PERF_FLAGS := -O2
 else
-	PERF_FLAGS :=
+	PERF_FLAGS := -ggdb
 endif
 
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "Commit unknown")
@@ -36,7 +34,7 @@ SRC_DIR := src
 
 CC := gcc
 CPPFLAGS := -MMD -Iinclude/
-CFLAGS := $(DEBUG_FLAGS) $(PERF_FLAGS) -fno-pic -fno-pie  -mgeneral-regs-only -std=gnu99 -ffreestanding -mcmodel=large -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -Wuninitialized -Wmaybe-uninitialized -pedantic
+CFLAGS := $(PERF_FLAGS) -fno-pic -fno-pie  -mgeneral-regs-only -std=gnu99 -ffreestanding -mcmodel=large -mno-red-zone -fno-builtin -nostdinc -Wall -Wextra -Wuninitialized -Wmaybe-uninitialized -pedantic
 
 SRCS := $(shell find $(SRC_DIR) -type f -name "*.c" -o -type f -name "*.s")
 OBJS := $(patsubst $(SRC_DIR)/%, $(BUILD_DIR)/%.o, $(SRCS))
