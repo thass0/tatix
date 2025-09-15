@@ -147,11 +147,12 @@ static void recv_buf_free(struct recv_buf *buf, struct pool *alloc)
     assert(buf);
     assert(alloc);
 
-    if (buf->data.dat)
+    if (buf->data.dat) {
         pool_free(alloc, buf->data.dat);
-    buf->data = byte_array_new(NULL, 0);
+        global_tcp_stats_recv_mem -= alloc->size;
+    }
 
-    global_tcp_stats_recv_mem -= alloc->size;
+    buf->data = byte_array_new(NULL, 0);
 }
 
 static struct result recv_buf_push_byte(struct recv_buf *buf, byte b)
