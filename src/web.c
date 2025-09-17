@@ -329,6 +329,13 @@ static struct result http_serve_file(struct ram_fs_node *root, struct str path, 
         path = STR("/index.html");
     }
 
+    // This check is required because the RAM fs only accepts absolute paths.
+    if (path.dat[0] != '/') {
+        print_dbg(PINFO, STR("Path \"%s\" doesn't start with a '/' character\n"), path);
+        return http_build_response(HTTP_STATUS_NOT_FOUND, HTTP_CONTENT_TYPE_TEXT_HTML,
+                                   byte_view_from_str(not_found_body), response_buf);
+    }
+
     struct result_ram_fs_node file_result = ram_fs_open(root, path);
     if (file_result.is_error) {
         print_dbg(PINFO, STR("Failed to find file %s\n"), path);
