@@ -338,14 +338,14 @@ static struct result http_serve_file(struct ram_fs_node *root, struct str path, 
 
     struct result_ram_fs_node file_result = ram_fs_open(root, path);
     if (file_result.is_error) {
-        print_dbg(PINFO, STR("Failed to find file %s\n"), path);
+        print_dbg(PINFO, STR("Failed to find file \"%s\"\n"), path);
         return http_build_response(HTTP_STATUS_NOT_FOUND, HTTP_CONTENT_TYPE_TEXT_HTML,
                                    byte_view_from_str(not_found_body), response_buf);
     }
 
     struct ram_fs_node *file_node = result_ram_fs_node_checked(file_result);
     if (file_node->type != RAM_FS_TYPE_FILE) {
-        print_dbg(PINFO, STR("Cannot serve request for %s; it's not a file (type=%d)\n"), path, file_node->type);
+        print_dbg(PINFO, STR("Cannot serve request for \"%s\"; it's not a file (type=%d)\n"), path, file_node->type);
         return http_build_response(HTTP_STATUS_FORBIDDEN, HTTP_CONTENT_TYPE_TEXT_HTML,
                                    byte_view_from_str(forbidden_body), response_buf);
     }
@@ -353,7 +353,7 @@ static struct result http_serve_file(struct ram_fs_node *root, struct str path, 
     struct str extension = http_get_file_extension(path);
     enum http_content_type content_type = http_get_content_type_from_extension(extension);
 
-    print_dbg(PINFO, STR("Serving file %s\n"), path);
+    print_dbg(PINFO, STR("Serving file \"%s\"\n"), path);
 
     return http_build_response(HTTP_STATUS_OK, content_type, byte_view_from_buf(file_node->data), response_buf);
 }
